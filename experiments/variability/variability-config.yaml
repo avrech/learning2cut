@@ -5,22 +5,22 @@ sweep:
     values: [True, False]
   graph_idx:
     search: grid_range
-    range: 10
+    range: 5
   scip_seed:
     search: grid
-    values: [223, 100, 521, 46, 52] #, 14, 176, 80, 174, 198]
+    values: [223, 100, 521] #, 46, 52] #, 14, 176, 80, 174, 198]
   max_per_node:
     search: grid
-    values: [10, 50, 100]
+    values: [10, 50] #, 100]
   max_per_round:
     search: grid
-    values: [0.1, 0.5, 1]
+    values: [0.1, 0.5]
 #  max_per_round_relative_to:
 #    search: grid
 #    values: [num_vars] #, 'num_violations'] #, num_fractions
-  criterion:
-    search: grid
-    values: [most_infeasible_var, most_violated_cycle]
+#  criterion:
+#    search: grid
+#    values: [most_infeasible_var, most_violated_cycle]
   max_per_root:
     search: grid
     values: [100, 1000]
@@ -46,5 +46,5 @@ constants:
 #  max_per_node: 100
 #  max_per_round: 0.5
   max_per_round_relative_to: num_vars
-#  criterion: most_violated_cycle
+#  criterion: most_infeasible_var
 #  max_per_root: 100

@@ -91,7 +91,7 @@ def experiment(config):
     if not config['use_cycle_cuts']:
         # run this configuration only once with all hparams get their first choice
         for k, v in sweep_config['sweep'].items():
-            if k != 'use_cycle_cuts' and k != 'graph_id' and config[k] != v['values'][0]:
+            if k != 'use_cycle_cuts' and k != 'graph_idx' and k != 'scip_seed' and config[k] != v['values'][0]:
                 print('!!!!!!!!!!!!!!!!!!!!! SKIPPING DUPLICATED not use_cycle_cuts !!!!!!!!!!!!!!!!!!!!!!1')
                 return
 
