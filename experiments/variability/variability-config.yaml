@@ -1,0 +1,50 @@
+# Specifiy here the hparams to sweep on
+sweep:
+  use_cycle_cuts:
+    search: grid
+    values: [True, False]
+  graph_idx:
+    search: grid_range
+    range: 10
+  scip_seed:
+    search: grid
+    values: [223, 100, 521, 46, 52] #, 14, 176, 80, 174, 198]
+  max_per_node:
+    search: grid
+    values: [10, 50, 100]
+  max_per_round:
+    search: grid
+    values: [0.1, 0.5, 1]
+#  max_per_round_relative_to:
+#    search: grid
+#    values: [num_vars] #, 'num_violations'] #, num_fractions
+  criterion:
+    search: grid
+    values: [most_infeasible_var, most_violated_cycle]
+  max_per_root:
+    search: grid
+    values: [100, 1000]
+  forcecut:
+    search: grid
+    values: [True, False]
+  local:
+    search: grid
+    values: [True, False]
+  removable:
+    search: grid
+    values: [True, False]
+
+
+# Specify here other parameters to override defaults
+constants:
+  barabasi_albert_m: 10
+  weights: uniform01  # uniform01 | normal | ones
+  graph_type: barabasi-albert
+  time_limit_sec: 1200
+  dataset_generation_seed: 100
+  graph_size: 50
+#  max_per_node: 100
+#  max_per_round: 0.5
+  max_per_round_relative_to: num_vars
+#  criterion: most_violated_cycle
+#  max_per_root: 100

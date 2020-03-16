@@ -252,7 +252,6 @@ if __name__ == "__main__":
                       freq=1)
     model.optimize()
     print("Solved using user's cutting-planes callback. Objective {}".format(model.getObjVal()))
-    # model.printStatistics()
     cycle_cuts_applied = -1
     # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
     try:
@@ -267,6 +266,5 @@ if __name__ == "__main__":
                     print(cycle_cuts_applied)
     except:
         print('Failed to retrieve cycle_cuts_applied')
-    # ci_cut.printStatistics()
-    # ci_cut.save_mp4()
+
     print('finish')

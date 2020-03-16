@@ -80,3 +80,19 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
 
     return model, x, y
+
+
+def get_separator_cuts_applied(model, separator_name):
+    cycle_cuts_applied = -1
+    # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
+    try:
+        tmpfile = 'tmp_stats.txt'
+        model.writeStatistics(filename=tmpfile)
+        with open(tmpfile, 'r') as f:
+            for line in f.readlines():
+                if separator_name in line:
+                    cycle_cuts_applied = int(line.split()[-2])
+                    cycle_cuts_added = int(line.split()[-3])
+    except:
+        print('Failed to retrieve cycle_cuts_applied')
+    return cycle_cuts_added, cycle_cuts_applied
