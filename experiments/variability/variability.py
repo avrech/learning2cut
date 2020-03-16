@@ -48,7 +48,7 @@ with open(sweep_args.config_file) as f:
 tune_config = dict()
 for hp, config in sweep_config['sweep'].items():
     tune_config[hp] = {'grid': tune.grid_search(config.get('values')),
-                       'grid_range': tune.grid_search(np.arange(config.get('range'))),
+                       'grid_range': tune.grid_search(np.arange(config.get('range', 1))),
                        'choice': tune.choice(config.get('values')),
                        'randint': tune.randint(config.get('min'), config.get('max')),
                        'uniform': tune.sample_from(lambda spec: np.random.uniform(config.get('min'), config.get('max')))
