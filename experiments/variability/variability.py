@@ -62,6 +62,7 @@ dataset_generation_seed = sweep_config['constants']["dataset_generation_seed"]
 DATA_ROOT_DIR = os.path.join(sweep_args.data_dir, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(n, m, weights, dataset_generation_seed))
 if not os.path.isdir(DATA_ROOT_DIR):
     os.makedirs(DATA_ROOT_DIR)
+DATA_ROOT_DIR = os.path.abspath(DATA_ROOT_DIR)
 
 for graph_idx in tqdm(range(sweep_config['sweep']['graph_idx']['range'])):
     filepath = os.path.join(DATA_ROOT_DIR, "graph_idx_{}.pkl".format(graph_idx))
