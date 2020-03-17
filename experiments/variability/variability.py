@@ -104,9 +104,12 @@ def experiment(config):
     scip_seed = config['scip_seed']
     model, x, y = maxcut_mccormic_model(G)
     sepa = MccormicCycleSeparator(G=G, x=x, y=y, hparams=config)
-    model.includeSepa(sepa, 'McCormicCycles',
-                      "Generate cycle inequalities for the MaxCut McCormic formulation",
-                      priority=1000000, freq=1)
+
+    if config['use_cycle_cuts']:
+        print('@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@')
+        model.includeSepa(sepa, 'McCycles',
+                          "Generate cycle inequalities for the MaxCut McCormic formulation",
+                          priority=1000000, freq=1)
 
     # set up randomization
     model.setBoolParam('randomization/permutevars', True)
@@ -118,7 +121,7 @@ def experiment(config):
 
     cycles_sepa_time = sepa.time_spent / model.getSolvingTime() if config['use_cycle_cuts'] else 0
     if config['use_cycle_cuts']:
-        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(model, 'McCormicCycles')
+        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(model, 'McCycles')
     else:
         cycle_cuts, cycle_cuts_applied = 0, 0
 

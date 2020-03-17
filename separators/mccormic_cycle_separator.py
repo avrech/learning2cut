@@ -3,7 +3,7 @@ from time import time
 import networkx as nx
 from pyscipopt import SCIP_RESULT
 import numpy as np
-from utils.scip_models import maxcut_mccormic_model
+from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
 from utils.functions import dijkstra
 import operator
 
@@ -254,17 +254,7 @@ if __name__ == "__main__":
     print("Solved using user's cutting-planes callback. Objective {}".format(model.getObjVal()))
     cycle_cuts_applied = -1
     # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
-    try:
-        tmpfile = 'tmp_stats.txt'
-        model.writeStatistics(filename=tmpfile)
-        with open(tmpfile, 'r') as f:
-            for line in f.readlines():
-                if 'Mccormic' in line:
-                    cycle_cuts_applied = line.split()[-2]
-                    print('line cached:')
-                    print(line)
-                    print(cycle_cuts_applied)
-    except:
-        print('Failed to retrieve cycle_cuts_applied')
-
+    cuts, cuts_applied = get_separator_cuts_applied(model, 'MccormicCycles')
+    print(cuts, cuts_applied)
+    model.printStatistics()
     print('finish')
