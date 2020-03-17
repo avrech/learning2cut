@@ -11,8 +11,8 @@ import pandas as pd
 import operator
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--rootdir', type=str, default='.', help='path to experiment results root dir')
-parser.add_argument('--dstdir', type=str, default='tables_' + NOW, help='path to results root')
+parser.add_argument('--rootdir', type=str, default='variability/results/tmp', help='path to experiment results root dir')
+parser.add_argument('--dstdir', type=str, default='variability/tables_' + NOW, help='path to results root')
 parser.add_argument('--pattern', type=str, default='experiment_results.pkl', help='pattern of pickle files')
 
 args = parser.parse_args()
@@ -35,16 +35,16 @@ datasets = {}  # metadata for grouping results
 # results[dataset][config][stat_key][graph_idx][seed]
 
 for s in tqdm(summary, desc='Parsing files'):
-    dataset = s['filepath'][:-4].split('/')[-2]  # the name of the dataset
+    dataset = s['config']['data_abspath'][:-4].split('/')[-1]  # the name of the dataset
     if dataset not in datasets.keys():
         print('Adding dataset ', dataset)
         datasets[dataset] = {}
-        datasets[dataset]['config_keys'] = [k for k in s['config'].keys() if k != 'scip_seed' and k != 'graph_idx']
+        datasets[dataset]['config_keys'] = [k for k in s['config'].keys() if k != 'scip_seed' and k != 'graph_idx' and k != 'sweep_config' and k != 'data_abspath']
         # store these two to ensure that all the experiments completed successfully.
-        datasets[dataset]['scip_seeds'] = s['sweep_config']['sweep']['scip_seed']['values']
-        datasets[dataset]['graph_idx_range'] = list(range(s['sweep_config']['sweep']['graph_idx']['range']))
-        datasets[dataset]['missing_experiments'] = {}
-        datasets[dataset]['sweep_config'] = s['sweep_config']
+        datasets[dataset]['scip_seeds'] = s['config']['sweep_config']['sweep']['scip_seed']['values']
+        datasets[dataset]['graph_idx_range'] = list(range(s['config']['sweep_config']['sweep']['graph_idx']['range']))
+        datasets[dataset]['missing_experiments'] = []
+        datasets[dataset]['sweep_config'] = s['config']['sweep_config']
         datasets[dataset]['configs'] = {}
 
         results[dataset] = {}
@@ -55,11 +55,11 @@ for s in tqdm(summary, desc='Parsing files'):
         datasets[dataset]['configs'][config] = s['config']
         if s['config']['use_cycle_cuts']:
             results[dataset][config] = {stat_key: {graph_idx: {}
-                                                   for graph_idx in range(s['sweep_config']['sweep']['graph_idx']['range'])}
+                                                   for graph_idx in range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
                                         for stat_key in s['stats'].keys()}
         else:
             baseline[dataset][config] = {stat_key: {graph_idx: {}
-                                                    for graph_idx in range(s['sweep_config']['sweep']['graph_idx']['range'])}
+                                                    for graph_idx in range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
                                          for stat_key in s['stats'].keys()}
 
     # select the appropriate dictionary
@@ -73,6 +73,7 @@ for s in tqdm(summary, desc='Parsing files'):
 
 
 # process the results
+# if any experiment is missing, generate its configuration and append to missing_experiments
 # results[dataset][config][stat_key][graph_idx][seed]
 for dataset in datasets.keys():
     bsl = baseline[dataset]
@@ -81,16 +82,20 @@ for dataset in datasets.keys():
     # and also std of stds across all graphs
     for dictionary in [bsl, res]:
         for config, stats in dictionary.items():
-            datasets[dataset]['missing_experiments'][config] = {}
+            missing_graph_and_seed = []
             for stat_key, graph_dict in stats.items():
                 all_values = []
                 all_stds = []
                 for graph_idx in datasets[dataset]['graph_idx_range']:
                     values = []
-                    datasets[dataset]['missing_experiments'][config][graph_idx] = []
                     for scip_seed in datasets[dataset]['scip_seeds']:
                         if scip_seed not in graph_dict[graph_idx].keys():
-                            datasets[dataset]['missing_experiments'][config][graph_idx].append(scip_seed)
+                            if (graph_idx, scip_seed) not in missing_graph_and_seed:
+                                experiment_config = datasets[dataset]['configs'][config].copy()
+                                experiment_config['graph_idx'] = graph_idx
+                                experiment_config['scip_seed'] = scip_seed
+                                datasets[dataset]['missing_experiments'].append(experiment_config)
+                                missing_graph_and_seed.append((graph_idx, scip_seed))
                             continue
                         values.append(graph_dict[graph_idx][scip_seed])
                         all_values.append(graph_dict[graph_idx][scip_seed])
@@ -209,8 +214,17 @@ for dataset in datasets.keys():
 
     df = pd.DataFrame(data=d)
     df.to_csv(os.path.join(args.dstdir, dataset + '_results.csv'), float_format='%.3f')
-    latex_str = df.to_latex(float_format='%.3f')
-    print(latex_str)
-
+    print('Experiment summary saved to {}'.format(
+        os.path.join(args.dstdir, dataset + '_results.csv')))
+    # latex_str = df.to_latex(float_format='%.3f')
+    # print(latex_str)
+    if len(datasets[dataset]['missing_experiments']) > 0:
+        missing_experiments_file = os.path.join(args.dstdir, dataset + '_missing_experiments.pkl')
+        with open(missing_experiments_file, 'wb') as f:
+            pickle.dump(datasets[dataset]['missing_experiments'], f)
+        print('WARNING: missing experiments saved to {}'.format(os.path.join(args.dstdir, dataset + '_missing_experiments.pkl')))
+        print('To complete experiments, run the following command:')
+        print('complete_experiments.py --config_file {} --log-dir {}'.format(os.path.abspath(missing_experiments_file),
+                                                                             os.path.abspath(args.root_dir)))
 print('finish')
 
