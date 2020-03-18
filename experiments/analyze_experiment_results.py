@@ -12,8 +12,11 @@ import operator
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
 parser.add_argument('--rootdir', type=str, default='variability/results/tmp', help='path to experiment results root dir')
-parser.add_argument('--dstdir', type=str, default='variability/tables_' + NOW, help='path to results root')
+parser.add_argument('--dstdir', type=str, default='variability/analysis/' + NOW, help='path to store tables, tensorboard etc.')
 parser.add_argument('--pattern', type=str, default='experiment_results.pkl', help='pattern of pickle files')
+parser.add_argument('--tensorboard', action='store_true', help='generate tensorboard folder in <dstdir>/tb')
+parser.add_argument('--generate-experts', action='store_true', help='save experts configs to <dstdir>/experts')
+
 
 args = parser.parse_args()
 
@@ -24,6 +27,9 @@ summary = []
 for path in tqdm(Path(args.rootdir).rglob(args.pattern), desc='Loading files'):
     with open(path, 'rb') as f:
         res = pickle.load(f)
+        # set some defaults if necessary
+        if 'forcecut' not in res['config'].keys():
+            res['config']['forcecut'] = False
         summary.append(res)
 
 results = {}  # stats of cycle inequalities
@@ -241,16 +247,16 @@ for dataset in datasets.keys():
         d[k].append('-')
 
     df = pd.DataFrame(data=d, index=list(range(len(speedup_avg))) + ['avg'])
-    df.to_csv(os.path.join(args.dstdir, dataset + '_results.csv'), float_format='%.3f')
+    df.to_csv(os.path.join(args.dstdir, 'tables', dataset + '_results.csv'), float_format='%.3f')
     print('Experiment summary saved to {}'.format(
-        os.path.join(args.dstdir, dataset + '_results.csv')))
+        os.path.join(args.dstdir, 'tables', dataset + '_results.csv')))
     # latex_str = df.to_latex(float_format='%.3f')
     # print(latex_str)
     if len(datasets[dataset]['missing_experiments']) > 0:
-        missing_experiments_file = os.path.join(args.dstdir, dataset + '_missing_experiments.pkl')
+        missing_experiments_file = os.path.join(args.dstdir, 'missing_experiments', dataset + '_missing_experiments.pkl')
         with open(missing_experiments_file, 'wb') as f:
             pickle.dump(datasets[dataset]['missing_experiments'], f)
-        print('WARNING: missing experiments saved to {}'.format(os.path.join(args.dstdir, dataset + '_missing_experiments.pkl')))
+        print('WARNING: missing experiments saved to {}'.format(missing_experiments_file))
         print('To complete experiments, run the following command inside experiments/ folder:')
         print('python complete_experiment.py --experiment {} --config-file {} --log-dir {}'.format(
             datasets[dataset]['experiment'],
