@@ -219,13 +219,13 @@ for dataset in datasets.keys():
     # 5. write the summary into pandas DataFrame
     d = {#'Wins': wins_rate_str,
          'Speedup avg': speedup_avg + [np.mean(speedup_avg) if '-' not in speedup_avg else '-'],
-         'Baseline time': bsl_avg_time + [np.mean(bsl_avg_time)],
-         'Baseline time-std': bsl_std_time + [np.mean(bsl_std_time)],
+         'Baseline time': bsl_avg_time + [np.mean(bsl_avg_time) if '-' not in bsl_avg_time else '-'],
+         'Baseline time-std': bsl_std_time + [np.mean(bsl_std_time) if '-' not in bsl_std_time else '-'],
          'Best time': best_avg_time + [np.mean(best_avg_time)],
          'Best time-std': best_std_time + [np.mean(best_std_time)],
          # 'Wins rate': wins_rate,
-         'Baseline gap': bsl_avg_gap + [np.mean(bsl_avg_gap)],
-         'Baseline gap-std': bsl_std_gap + [np.mean(bsl_std_gap)],
+         'Baseline gap': bsl_avg_gap + [np.mean(bsl_avg_gap) if '-' not in bsl_avg_gap else '-'],
+         'Baseline gap-std': bsl_std_gap + [np.mean(bsl_std_gap) if '-' not in bsl_std_gap else '-'],
          'Best gap': best_avg_gap + [np.mean(best_avg_gap)],
          'Best gap-std': best_std_gap + [np.mean(best_std_gap)],
          }
