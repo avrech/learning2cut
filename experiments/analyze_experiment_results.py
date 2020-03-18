@@ -176,11 +176,16 @@ for dataset in datasets.keys():
             best_std_gap.append('-')
             best_std_time.append('-')
             best_config.append(None)
-        bsl_avg_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('mean', '-'))
-        bsl_avg_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('mean', '-'))
-        bsl_std_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('std', '-'))
-        bsl_std_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('std', '-'))
-
+        if len(bsl) > 0:
+            bsl_avg_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('mean', '-'))
+            bsl_avg_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('mean', '-'))
+            bsl_std_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('std', '-'))
+            bsl_std_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('std', '-'))
+        else:
+            bsl_avg_gap.append('-')
+            bsl_avg_time.append('-')
+            bsl_std_gap.append('-')
+            bsl_std_time.append('-')
     # compute the average gap and solving time for scip baseline:
     time_limit = datasets[dataset]['sweep_config']['constants']['time_limit_sec']
     # best_avg_gap = np.array(best_avg_gap)
