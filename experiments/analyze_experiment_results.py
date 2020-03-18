@@ -246,14 +246,20 @@ for dataset in datasets.keys():
     for k, v in best_hparams.items():
         d[k].append('-')
 
+    tables_dir = os.path.join(args.dstdir, 'tables')
+    if not os.path.exists(tables_dir):
+        os.makedirs(tables_dir)
+    csv_file = os.path.join(tables_dir, dataset + '_results.csv')
     df = pd.DataFrame(data=d, index=list(range(len(speedup_avg))) + ['avg'])
-    df.to_csv(os.path.join(args.dstdir, 'tables', dataset + '_results.csv'), float_format='%.3f')
-    print('Experiment summary saved to {}'.format(
-        os.path.join(args.dstdir, 'tables', dataset + '_results.csv')))
+    df.to_csv(csv_file, float_format='%.3f')
+    print('Experiment summary saved to {}'.format(csv_file))
     # latex_str = df.to_latex(float_format='%.3f')
     # print(latex_str)
+    missing_experiments_dir = os.path.join(args.dstdir, 'missing_experiments')
+    if not os.path.exists(missing_experiments_dir):
+        os.makedirs(missing_experiments_dir)
     if len(datasets[dataset]['missing_experiments']) > 0:
-        missing_experiments_file = os.path.join(args.dstdir, 'missing_experiments', dataset + '_missing_experiments.pkl')
+        missing_experiments_file = os.path.join(missing_experiments_dir, dataset + '_missing_experiments.pkl')
         with open(missing_experiments_file, 'wb') as f:
             pickle.dump(datasets[dataset]['missing_experiments'], f)
         print('WARNING: missing experiments saved to {}'.format(missing_experiments_file))
