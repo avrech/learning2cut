@@ -15,7 +15,7 @@ NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', 
 parser = ArgumentParser()
 parser.add_argument('--experiment', type=str, default='variability',
                     help='experiment dir')
-parser.add_argument('--log-dir', type=str, default='variability/results/tmp/' + NOW,
+parser.add_argument('--log-dir', type=str, default='variability/results/ba50/' + NOW,
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='variability/data',
                     help='path to generate/read data')
