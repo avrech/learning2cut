@@ -13,82 +13,18 @@ utils/analyze_experiment_results.py can generate tensorboard hparams,
 and a csv file summarizing the statistics in a table (useful for latex).
 
 """
-# from tqdm import tqdm
-# import networkx as nx
 from ray import tune
-# from ray.tune import track
-# from argparse import ArgumentParser
-# import numpy as np
-# import yaml
-# from datetime import datetime
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
 from separators.mccormic_cycle_separator import MccormicCycleSeparator
 import pickle
 import os
-from torch.utils.tensorboard import SummaryWriter
-
-# NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
-# sweep_parser = ArgumentParser()
-# sweep_parser.add_argument('--config-file', type=str, default='config.yaml',
-#                           help='path to hyper-parameters config yaml file')
-# sweep_parser.add_argument('--log-dir', type=str, default='./results/tmp/' + NOW,
-#                           help='path to results root')
-# sweep_parser.add_argument('--data-dir', type=str, default='./data',
-#                           help='path to generate/read data')
-# sweep_parser.add_argument('--tensorboard', action='store_true',
-#                           help='log to tensorboard')
-# sweep_args = sweep_parser.parse_args()
-#
-# # load sweep configuration
-# with open(sweep_args.config_file) as f:
-#     sweep_config = yaml.load(f, Loader=yaml.FullLoader)
-#
-# # generate tune config for the sweep hparams
-# tune_config = dict()
-# for hp, config in sweep_config['sweep'].items():
-#     tune_config[hp] = {'grid': tune.grid_search(config.get('values')),
-#                        'grid_range': tune.grid_search(list(range(config.get('range', 2)))),
-#                        'choice': tune.choice(config.get('values')),
-#                        'randint': tune.randint(config.get('min'), config.get('max')),
-#                        'uniform': tune.sample_from(lambda spec: np.random.uniform(config.get('min'), config.get('max')))
-#                        }.get(config['search'])
-#
-# # add the sweep_config as parameter for global management
-# tune_config['sweep_config'] = tune.grid_search([sweep_config])
-#
-# # dataset generation
-# n = sweep_config['constants']["graph_size"]
-# m = sweep_config['constants']["barabasi_albert_m"]
-# weights = sweep_config['constants']["weights"]
-# dataset_generation_seed = sweep_config['constants']["dataset_generation_seed"]
-#
-# data_abspath = os.path.join(sweep_args.data_dir, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(n, m, weights, dataset_generation_seed))
-# if not os.path.isdir(data_abspath):
-#     os.makedirs(data_abspath)
-# data_abspath = os.path.abspath(data_abspath)
-#
-# for graph_idx in tqdm(range(sweep_config['sweep']['graph_idx']['range'])):
-#     filepath = os.path.join(data_abspath, "graph_idx_{}.pkl".format(graph_idx))
-#     if not os.path.exists(filepath):
-#         # generate the graph and save in a pickle file
-#         # set randomization for reproducing dataset
-#         barabasi_albert_seed = (1 + 223 * graph_idx) * dataset_generation_seed
-#         np.random.seed(barabasi_albert_seed)
-#         G = nx.barabasi_albert_graph(n, m, seed=barabasi_albert_seed)
-#         if weights == 'ones':
-#             w = 1
-#         elif weights == 'uniform01':
-#             w = {e: np.random.uniform() for e in G.edges}
-#         elif weights == 'normal':
-#             w = {e: np.random.normal() for e in G.edges}
-#         nx.set_edge_attributes(G, w, name='weight')
-#         with open(filepath, 'wb') as f:
-#             pickle.dump(G, f)
-#
-# tune_config['data_abspath'] = tune.grid_search([data_abspath])
 
 
 def experiment(config):
+    # load config if experiment launched from complete_experiment.py
+    if 'complete_experiment' in config.keys():
+        config = config['complete_experiment']
+
     # set the current sweep trial parameters
     sweep_config = config['sweep_config']
     for k, v in sweep_config['constants'].items():
@@ -149,27 +85,8 @@ def experiment(config):
     experiment_results = {}
     experiment_results['stats'] = stats
     experiment_results['config'] = config
-    # experiment_results['filepath'] = filepath
-    # experiment_results['sweep_config'] = sweep_config
-    experiment_results['description'] = 'Variability'
+    experiment_results['experiment'] = 'variability'
     with open(experiment_results_filepath, 'wb') as f:
         pickle.dump(experiment_results, f)
         print('Saved experiment results to: ' + experiment_results_filepath)
 
-    # if sweep_args.tensorboard:
-    #     writer = SummaryWriter(log_dir)
-    #     writer.add_hparams(hparam_dict=config, metric_dict=stats)
-    #     writer.close()
-
-
-# # initialize global tracker for all experiments
-# track.init()
-#
-# # run sweep
-# analysis = tune.run(experiment,
-#                     config=tune_config,
-#                     resources_per_trial={'cpu': 1, 'gpu': 0},
-#                     local_dir=sweep_args.log_dir,
-#                     trial_name_creator=None,
-#                     max_failures=1  # TODO learn how to recover from checkpoints
-#                     )

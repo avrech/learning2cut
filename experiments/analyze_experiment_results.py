@@ -35,7 +35,7 @@ datasets = {}  # metadata for grouping results
 # results[dataset][config][stat_key][graph_idx][seed]
 
 for s in tqdm(summary, desc='Parsing files'):
-    dataset = s['config']['data_abspath'][:-4].split('/')[-1]  # the name of the dataset
+    dataset = s['config']['data_abspath'].split('/')[-1]  # the name of the dataset
     if dataset not in datasets.keys():
         print('Adding dataset ', dataset)
         datasets[dataset] = {}
@@ -46,6 +46,8 @@ for s in tqdm(summary, desc='Parsing files'):
         datasets[dataset]['missing_experiments'] = []
         datasets[dataset]['sweep_config'] = s['config']['sweep_config']
         datasets[dataset]['configs'] = {}
+        datasets[dataset]['experiment'] = s['experiment']
+
 
         results[dataset] = {}
         baseline[dataset] = {}
@@ -136,34 +138,48 @@ for dataset in datasets.keys():
     best_config = []
     best_avg_time = []
     best_avg_gap = []
+    best_std_time = []
+    best_std_gap = []
     bsl_avg_time = []
     bsl_avg_gap = []
+    bsl_std_time = []
+    bsl_std_gap = []
 
     # results[dataset][config][stat_key][graph_idx][seed]
     for graph_idx in datasets[dataset]['graph_idx_range']:
         configs = []
         avg_time = []
+        std_time = []
         avg_gap = []
+        std_gap = []
         for config, stats in res.items():
             if stats['gap'][graph_idx].get('mean', None) is not None:
                 configs.append(config)
                 avg_gap.append(stats['gap'][graph_idx]['mean'])
+                std_gap.append(stats['gap'][graph_idx]['std'])
                 avg_time.append(stats['solving_time'][graph_idx]['mean'])
+                std_time.append(stats['solving_time'][graph_idx]['std'])
 
         # sort tuples of (gap, time, hp_config_idx) according to gap, and then according to time.
-        gap_and_time = list(zip(avg_gap, avg_time, configs))
+        gap_and_time = list(zip(avg_gap, avg_time, std_gap, std_time, configs))
         if len(gap_and_time) > 0:
             gap_and_time.sort(key=operator.itemgetter(0, 1))
             best = gap_and_time[0]
             best_avg_gap.append(best[0])
             best_avg_time.append(best[1])
-            best_config.append(best[2])
+            best_std_gap.append(best[2])
+            best_std_time.append(best[3])
+            best_config.append(best[4])
         else:
             best_avg_gap.append('-')
             best_avg_time.append('-')
+            best_std_gap.append('-')
+            best_std_time.append('-')
             best_config.append(None)
         bsl_avg_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('mean', '-'))
         bsl_avg_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('mean', '-'))
+        bsl_std_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('std', '-'))
+        bsl_std_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('std', '-'))
 
     # compute the average gap and solving time for scip baseline:
     time_limit = datasets[dataset]['sweep_config']['constants']['time_limit_sec']
@@ -197,12 +213,16 @@ for dataset in datasets.keys():
 
     # 5. write the summary into pandas DataFrame
     d = {#'Wins': wins_rate_str,
-         'Speedup avg': speedup_avg,
-         'Baseline time': bsl_avg_time,
-         'Best time': best_avg_time,
+         'Speedup avg': speedup_avg + [np.mean(speedup_avg)],
+         'Baseline time': bsl_avg_time + [np.mean(bsl_avg_time)],
+         'Baseline time-std': bsl_std_time + [np.mean(bsl_std_time)],
+         'Best time': best_avg_time + [np.mean(best_avg_time)],
+         'Best time-std': best_std_time + [np.mean(best_std_time)],
          # 'Wins rate': wins_rate,
-         'Baseline gap': bsl_avg_gap,
-         'Best gap': best_avg_gap,
+         'Baseline gap': bsl_avg_gap + [np.mean(bsl_avg_gap)],
+         'Baseline gap-std': bsl_std_gap + [np.mean(bsl_std_gap)],
+         'Best gap': best_avg_gap + [np.mean(best_avg_gap)],
+         'Best gap-std': best_std_gap + [np.mean(best_std_gap)],
          }
     for k in datasets[dataset]['configs'][best_config[0]].keys():
         d[k] = []
@@ -211,8 +231,11 @@ for dataset in datasets.keys():
         best_hparams = datasets[dataset]['configs'][bc]
         for k, v in best_hparams.items():
             d[k].append(v)
+    # append empty row for the avg row
+    for k, v in best_hparams.items():
+        d[k].append('-')
 
-    df = pd.DataFrame(data=d)
+    df = pd.DataFrame(data=d, index=list(range(len(speedup_avg))) + ['avg'])
     df.to_csv(os.path.join(args.dstdir, dataset + '_results.csv'), float_format='%.3f')
     print('Experiment summary saved to {}'.format(
         os.path.join(args.dstdir, dataset + '_results.csv')))
@@ -223,8 +246,10 @@ for dataset in datasets.keys():
         with open(missing_experiments_file, 'wb') as f:
             pickle.dump(datasets[dataset]['missing_experiments'], f)
         print('WARNING: missing experiments saved to {}'.format(os.path.join(args.dstdir, dataset + '_missing_experiments.pkl')))
-        print('To complete experiments, run the following command:')
-        print('complete_experiments.py --config_file {} --log-dir {}'.format(os.path.abspath(missing_experiments_file),
-                                                                             os.path.abspath(args.root_dir)))
+        print('To complete experiments, run the following command inside experiments/ folder:')
+        print('python complete_experiment.py --experiment {} --config-file {} --log-dir {}'.format(
+            datasets[dataset]['experiment'],
+            os.path.abspath(missing_experiments_file),
+            os.path.abspath(args.rootdir)))
 print('finish')
 
