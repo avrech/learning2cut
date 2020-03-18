@@ -7,9 +7,9 @@ Each graph is solved using different scip_seed,
 and SCIP statistics are collected.
 
 All results are written to experiment_results.pkl file
-and should be post-processed using experiments/analyze_experiment_results.py
+and should be post-processed using experiments/analyze_experiment.py
 
-utils/analyze_experiment_results.py can generate tensorboard hparams,
+utils/analyze_experiment.py can generate tensorboard hparams,
 and a csv file summarizing the statistics in a table (useful for latex).
 
 """

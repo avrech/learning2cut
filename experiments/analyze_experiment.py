@@ -182,6 +182,7 @@ for dataset in datasets.keys():
             best_std_gap.append('-')
             best_std_time.append('-')
             best_config.append(None)
+    # TODO process baseline and find missing experiments
         if len(bsl) > 0:
             bsl_avg_gap.append(list(bsl.values())[0]['gap'][graph_idx].get('mean', '-'))
             bsl_avg_time.append(list(bsl.values())[0]['solving_time'][graph_idx].get('mean', '-'))
