@@ -51,6 +51,15 @@ def experiment(config):
         model.includeSepa(sepa, 'McCycles',
                           "Generate cycle inequalities for the MaxCut McCormic formulation",
                           priority=1000000, freq=1)
+    #set scip params:
+    model.setRealParam('separating/objparalfac', config['objparalfac'])
+    model.setRealParam('separating/dircutoffdistfac', config['dircutoffdistfac'])
+    model.setRealParam('separating/efficacyfac', config['efficacyfac'])
+    model.setRealParam('separating/intsupportfac', config['intsupportfac'])
+    model.setIntParam('separating/maxrounds', config['maxrounds'])
+    model.setIntParam('separating/maxroundsroot', config['maxroundsroot'])
+    model.setIntParam('separating/maxcuts', config['maxcuts'])
+    model.setIntParam('separating/maxcutsroot', config['maxcutsroot'])
 
     # set up randomization
     model.setBoolParam('randomization/permutevars', True)

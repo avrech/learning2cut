@@ -9,30 +9,51 @@ sweep:
   scip_seed:
     search: grid
     values: [223, 100, 521, 46, 52, 14, 176, 80, 174, 198]
-  max_per_node:
-    search: grid
-    values: [10, 50, 100]
-  max_per_round:
-    search: grid
-    values: [0.1, 0.5]
+#  max_per_node:
+#    search: grid
+#    values: [10, 50, 100]
+#  max_per_round:
+#    search: grid
+#    values: [0.1, 0.5]
 #  max_per_round_relative_to:
 #    search: grid
 #    values: [num_vars] #, 'num_violations'] #, num_fractions
-  criterion:
+#  criterion:
+#    search: grid
+#    values: [most_infeasible_var, most_violated_cycle]
+#  max_per_root:
+#    search: grid
+#    values: [100, 1000]
+  forcecut:
     search: grid
-    values: [most_infeasible_var, most_violated_cycle]
-  max_per_root:
+    values: [True, False]
+  objparalfac:
     search: grid
-    values: [100, 1000]
-#  forcecut:
+    values: [0.1, 0.2]
+  dircutoffdistfac:
+    search: grid
+    values: [0.5, 0.6]
+  efficacyfac:
+    search: grid
+    values: [1, 0.8, 1.2]
+  intsupportfac:
+    search: grid
+    values: [0.1, 0.2]
+#  maxrounds:
 #    search: grid
-#    values: [True, False]
-#  local:
+#    values: [-1, 2, 5]
+#  maxroundsroot:
 #    search: grid
-#    values: [True, False]
-#  removable:
+#    values: [-1, 10]
+#  maxcuts:
 #    search: grid
-#    values: [True, False]
+#    values: [100, 50, 10]
+#  maxcutsroot:
+#    search: grid
+#    values: [2000, 100]
+
+
+
 
 
 # Specify here other parameters to override defaults
@@ -43,8 +64,16 @@ constants:
   time_limit_sec: 600
   dataset_generation_seed: 100
   graph_size: 50
-#  max_per_node: 100
-#  max_per_round: 0.5
+  max_per_node: 1000
+  max_per_round: 1
   max_per_round_relative_to: num_vars
-#  criterion: most_infeasible_var
-#  max_per_root: 100
+  criterion: most_infeasible_var
+  max_per_root: 2000
+#  objparalfac: 0.1
+#  dircutoffdistfac: 0.5
+#  efficacyfac: 1
+#  intsupportfac: 0.1
+  maxrounds: -1
+  maxroundsroot: -1
+  maxcuts: 100
+  maxcutsroot: 2000
