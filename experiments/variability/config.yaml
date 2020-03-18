@@ -26,31 +26,31 @@ sweep:
 #    values: [100, 1000]
   forcecut:
     search: grid
-    values: [True, False]
-  objparalfac:
-    search: grid
-    values: [0.1, 0.2]
-  dircutoffdistfac:
-    search: grid
-    values: [0.5, 0.6]
-  efficacyfac:
-    search: grid
-    values: [1, 0.8, 1.2]
-  intsupportfac:
-    search: grid
-    values: [0.1, 0.2]
-#  maxrounds:
+    values: [True] #, False]
+#  objparalfac:
 #    search: grid
-#    values: [-1, 2, 5]
-#  maxroundsroot:
+#    values: [0.1, 0.2]
+#  dircutoffdistfac:
 #    search: grid
-#    values: [-1, 10]
-#  maxcuts:
+#    values: [0.5, 0.6]
+#  efficacyfac:
 #    search: grid
-#    values: [100, 50, 10]
-#  maxcutsroot:
+#    values: [1, 0.8, 1.2]
+#  intsupportfac:
 #    search: grid
-#    values: [2000, 100]
+#    values: [0.1, 0.2]
+  maxrounds:
+    search: grid
+    values: [-1, 2, 5]
+  maxroundsroot:
+    search: grid
+    values: [-1, 10]
+  maxcuts:
+    search: grid
+    values: [100, 50, 10]
+  maxcutsroot:
+    search: grid
+    values: [2000, 100]
 
 
 
@@ -69,11 +69,11 @@ constants:
   max_per_round_relative_to: num_vars
   criterion: most_infeasible_var
   max_per_root: 2000
-#  objparalfac: 0.1
-#  dircutoffdistfac: 0.5
-#  efficacyfac: 1
-#  intsupportfac: 0.1
-  maxrounds: -1
-  maxroundsroot: -1
-  maxcuts: 100
-  maxcutsroot: 2000
+  objparalfac: 0.1
+  dircutoffdistfac: 0.5
+  efficacyfac: 1
+  intsupportfac: 0.1
+#  maxrounds: -1
+#  maxroundsroot: -1
+#  maxcuts: 100
+#  maxcutsroot: 2000
