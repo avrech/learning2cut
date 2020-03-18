@@ -218,7 +218,7 @@ for dataset in datasets.keys():
 
     # 5. write the summary into pandas DataFrame
     d = {#'Wins': wins_rate_str,
-         'Speedup avg': speedup_avg + [np.mean(speedup_avg)],
+         'Speedup avg': speedup_avg + [np.mean(speedup_avg) if '-' not in speedup_avg else '-'],
          'Baseline time': bsl_avg_time + [np.mean(bsl_avg_time)],
          'Baseline time-std': bsl_std_time + [np.mean(bsl_std_time)],
          'Best time': best_avg_time + [np.mean(best_avg_time)],
