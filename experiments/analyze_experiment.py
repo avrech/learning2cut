@@ -91,13 +91,16 @@ for dataset in datasets.keys():
     # TODO: for all configs, compute mean and std across all seeds within graphs,
     # and also std of stds across all graphs
     for dictionary in [bsl, res]:
-        for config, stats in dictionary.items():
+        for config, stats in tqdm(dictionary.items(), desc='Analyzing'):
             if args.tensorboard:
                 hparams = datasets[dataset]['configs'][config].copy()
                 hparams.pop('data_abspath', None)
                 hparams.pop('sweep_config', None)
                 hparams.pop('scip_seed', None)
-                metrics = {k: [] for k in stats.keys()}
+                metrics = {}
+                for k in stats.keys():
+                    metrics[k+'_mean'] = []
+                    metrics[k+'_std'] = []
                 plot_avg = False
                 for graph_idx in datasets[dataset]['graph_idx_range']:
                     hparams['graph_idx'] = graph_idx
