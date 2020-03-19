@@ -86,10 +86,35 @@ for s in tqdm(summary, desc='Parsing files'):
 for dataset in datasets.keys():
     bsl = baseline[dataset]
     res = results[dataset]
+    tensorboard_dir = os.path.join(args.dstdir, 'tensorboard', dataset)
+    writer = SummaryWriter(log_dir=tensorboard_dir)
     # TODO: for all configs, compute mean and std across all seeds within graphs,
     # and also std of stds across all graphs
     for dictionary in [bsl, res]:
         for config, stats in dictionary.items():
+            if args.tensorboard:
+                hparams = datasets[dataset]['configs'][config].copy()
+                hparams.pop('data_abspath', None)
+                hparams.pop('sweep_config', None)
+                hparams.pop('scip_seed', None)
+                metrics = {k: [] for k in stats.keys()}
+                plot_avg = False
+                for graph_idx in datasets[dataset]['graph_idx_range']:
+                    hparams['graph_idx'] = graph_idx
+                    plot = False
+                    for stat_key, graph_dict in stats.items():
+                        values = list(graph_dict[graph_idx].values())
+                        if len(values) > 0:
+                            metrics[stat_key+'_mean'].append(np.mean(values))
+                            metrics[stat_key+'_std'].append(np.std(values))
+                            plot = True
+                            plot_avg = True
+                    if plot:
+                        writer.add_hparams(hparam_dict=hparams, metric_dict={k: v[-1] for k, v in metrics.items()})
+                if plot_avg:
+                    hparams['graph_idx'] = 'avg'
+                    writer.add_hparams(hparam_dict=hparams, metric_dict={k: np.mean(v) for k, v in metrics.items()})
+
             missing_graph_and_seed = []
             for stat_key, graph_dict in stats.items():
                 all_values = []
@@ -264,10 +289,12 @@ for dataset in datasets.keys():
         with open(missing_experiments_file, 'wb') as f:
             pickle.dump(datasets[dataset]['missing_experiments'], f)
         print('WARNING: missing experiments saved to {}'.format(missing_experiments_file))
+        print('Statistics might not be accurate.')
         print('To complete experiments, run the following command inside experiments/ folder:')
         print('python complete_experiment.py --experiment {} --config-file {} --log-dir {}'.format(
             datasets[dataset]['experiment'],
             os.path.abspath(missing_experiments_file),
             os.path.abspath(args.rootdir)))
+    writer.close()
 print('finish')
 
