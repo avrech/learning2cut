@@ -74,7 +74,7 @@ class MccormicCycleSeparator(Sepa):
             self.stats['cycle_ncuts'].append(cycle_cuts)
             self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied)
             self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
-            self.stats['cycles_sepa_time'].append(self.cycles_sepa_time)
+            self.stats['cycles_sepa_time'].append(self.time_spent)
             self.stats['solving_time'].append(self.model.getSolvingTime())
             self.stats['processed_nodes'].append(self.model.getNNodes())
             self.stats['gap'].append(self.model.getGap())
