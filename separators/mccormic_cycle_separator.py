@@ -79,7 +79,7 @@ class MccormicCycleSeparator(Sepa):
             self.stats['processed_nodes'].append(self.model.getNNodes())
             self.stats['gap'].append(self.model.getGap())
             self.stats['lp_rounds'].append(self.model.getNLPs())
-            self.stats['lp_iterations'].append(self.model.getNIterations())
+            self.stats['lp_iterations'].append(self.model.getNLPIterations())
             self.stats['dualbound'].append(self.model.getDualbound())
 
     def separate(self):
@@ -278,9 +278,9 @@ if __name__ == "__main__":
     G = nx.barabasi_albert_graph(n, m, seed=seed)
     nx.set_edge_attributes(G, {e: np.random.normal() for e in G.edges}, name='weight')
     model, x, y = maxcut_mccormic_model(G, use_cuts=False)
-    model.setRealParam('limits/time', 1000 * 1)
+    # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
-    hparams = {'max_per_node': 200, 'max_per_round': 1, 'method': 'sepa'}
+    hparams = {'max_per_node': 200, 'max_per_round': 1}
     ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
     model.includeSepa(ci_cut, "MccormicCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
