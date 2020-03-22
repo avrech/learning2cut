@@ -48,12 +48,11 @@ def experiment(config):
 
     scip_seed = config['scip_seed']
     model, x, y = maxcut_mccormic_model(G)
-    sepa = MccormicCycleSeparator(G=G, x=x, y=y, hparams=config)
+    sepa = MccormicCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
 
-    if config['max_per_root'] > 0:
-        model.includeSepa(sepa, 'MLCycles',
-                          "Generate cycle inequalities for the MaxCut McCormic formulation",
-                          priority=1000000, freq=1)
+    model.includeSepa(sepa, 'MLCycles',
+                      "Generate cycle inequalities for the MaxCut McCormic formulation",
+                      priority=1000000, freq=1)
     #set scip params:
     model.setRealParam('separating/objparalfac', config['objparalfac'])
     model.setRealParam('separating/dircutoffdistfac', config['dircutoffdistfac'])
@@ -79,22 +78,24 @@ def experiment(config):
     model.optimize()
 
     # collect statistics TODO collect stats every round in sepa
-    cycles_sepa_time = sepa.time_spent / model.getSolvingTime() if config['max_per_root'] > 0 else 0
-    if config['max_per_root'] > 0:
-        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(model, 'MLCycles')
-    else:
-        cycle_cuts, cycle_cuts_applied = 0, 0
-
-    # Statistics
-    stats = {}
-    stats['cycle_cuts'] = cycle_cuts
-    stats['cycle_cuts_applied'] = cycle_cuts_applied
-    stats['total_cuts_applied'] = model.getNCutsApplied()
-    stats['cycles_sepa_time'] = cycles_sepa_time
-    stats['solving_time'] = model.getSolvingTime()
-    stats['processed_nodes'] = model.getNNodes()
-    stats['gap'] = model.getGap()
-    stats['LP_rounds'] = model.getNLPs()
+    sepa.update_stats()
+    stats = sepa.stats
+    # cycles_sepa_time = sepa.time_spent / model.getSolvingTime()
+    # if config['max_per_root'] > 0:
+    #     cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(model, 'MLCycles')
+    # else:
+    #     cycle_cuts, cycle_cuts_applied = 0, 0
+    #
+    # # Statistics
+    # stats = {}
+    # stats['cycle_cuts'] = cycle_cuts
+    # stats['cycle_cuts_applied'] = cycle_cuts_applied
+    # stats['total_cuts_applied'] = model.getNCutsApplied()
+    # stats['cycles_sepa_time'] = cycles_sepa_time
+    # stats['solving_time'] = model.getSolvingTime()
+    # stats['processed_nodes'] = model.getNNodes()
+    # stats['gap'] = model.getGap()
+    # stats['LP_rounds'] = model.getNLPs()
 
     # set log-dir for tensorboard logging of the specific trial
     log_dir = tune.track.trial_dir()

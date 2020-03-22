@@ -9,12 +9,16 @@ import operator
 
 
 class MccormicCycleSeparator(Sepa):
-    def __init__(self, G, x, y,
+    def __init__(self, G, x, y, name='MLCycles',
                  hparams={}
                  ):
         """
-        Add violated cycle inequalities to the separation storage if any.
+        Add violated cycle inequalities to the separation storage.
         """
+        self.G = G
+        self.x = x
+        self.y = y
+        self.name = name
         self.hparams = hparams
         self.local = hparams.get('local', True)
         self.removable = hparams.get('removable', True)
@@ -27,25 +31,97 @@ class MccormicCycleSeparator(Sepa):
         self.max_per_round_relative_to = hparams.get('max_per_round_relative_to', 'num_vars')
 
         self.chordless_only = hparams.get('chordless_only', False)
-        self._num_added_cycles_at_cur_node = 0
+
+        self._dijkstra_edge_list = None
+
+        # statistics
+        self.ncuts = 0
+        self.time_spent = 0
+        self.stats = {
+            'cycle_ncuts': [],
+            'cycle_ncuts_applied': [],
+            'total_ncuts_applied': [],
+            'cycles_sepa_time': [],
+            'solving_time': [],
+            'processed_nodes': [],
+            'gap': [],
+            'lp_rounds': [],
+            'lp_iterations': [],
+            'dualbound': []
+        }
+        self._round_cnt = 0
+        self._sepa_cnt = 0
+        self._separation_efficiency = 0
+        self._ncuts_at_cur_node = 0
         self._cur_node = 0  # invalid. root node index is 1
 
-        self.G = G
-        self._dijkstra_edge_list = None
-        self.x = x
-        self.y = y
-        self.num_added_cycles = 0
-        self._sepa_cnt = 0
-        self.dijkstra_efficiency = 0
-        self.time_spent = 0
-        self.ncuts = 0
-
     def sepaexeclp(self):
+        self.update_stats()
         t0 = time()
         result = self.separate()
-        timing = time() - t0
-        self.time_spent += timing
+        t_left = time() - t0
+        self.time_spent += t_left
+        self._round_cnt += 1
         return result
+
+    def update_stats(self):
+        # collect statistics at the beginning of each round, starting from the second round.
+        # the statistics are collected before taking any action, and refer to the last round.
+        # NOTE: the last update must be done after the solver terminates optimization,
+        # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
+        if self._round_cnt > 0:
+            cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
+            self.stats['cycle_ncuts'].append(cycle_cuts)
+            self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied)
+            self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
+            self.stats['cycles_sepa_time'].append(self.cycles_sepa_time)
+            self.stats['solving_time'].append(self.model.getSolvingTime())
+            self.stats['processed_nodes'].append(self.model.getNNodes())
+            self.stats['gap'].append(self.model.getGap())
+            self.stats['lp_rounds'].append(self.model.getNLPs())
+            self.stats['lp_iterations'].append(self.model.getNIterations())
+            self.stats['dualbound'].append(self.model.getDualbound())
+
+    def separate(self):
+        # if exceeded limit of cuts per node ,then exit and branch or whatever else.
+        cur_node = self.model.getCurrentNode().getNumber()
+        if cur_node != self._cur_node:
+            self._cur_node = cur_node
+            self._ncuts_at_cur_node = 0
+        max_cycles = self.max_per_root if cur_node == 1 else self.max_per_node
+        if self._ncuts_at_cur_node >= max_cycles:
+            print('Reached max_per_node cycles. DIDNOTRUN occured! node {}'.format(cur_node))
+            return {"result": SCIP_RESULT.DIDNOTRUN}
+
+        x = np.zeros(self.G.number_of_nodes())
+        for i in range(self.G.number_of_nodes()):
+            x[i] = self.model.getSolVal(None, self.x[i])
+        # search for fractional nodes
+        feasible = all(np.logical_or(x == 0, x == 1))
+        # if solution is feasible, then return immediately DIDNOTRUN
+        if feasible:  # or model.getDualbound() == 6.0:
+            return {"result": SCIP_RESULT.DIDNOTRUN}
+
+        # otherwise, enforce the violated inequalities:
+        self.update_dijkstra_edge_list()
+        violated_cycles = self.find_violated_cycles(x)
+        cut_found = False
+        for cycle in violated_cycles:
+            if self._ncuts_at_cur_node < max_cycles:
+                result = self.add_cut(cycle)
+                if result['result'] == SCIP_RESULT.CUTOFF:
+                    print('CUTOFF')
+                    return result
+                self.ncuts += 1
+                self._ncuts_at_cur_node += 1
+                cut_found = True
+
+        if cut_found:
+            self._sepa_cnt += 1
+            return {"result": SCIP_RESULT.SEPARATED}
+        else:
+            print("Cut not found!")
+            return {"result": SCIP_RESULT.DIDNOTFIND}
 
     def update_dijkstra_edge_list(self):
         """
@@ -84,7 +160,7 @@ class MccormicCycleSeparator(Sepa):
             num_cycles_to_add = int(np.ceil(self.max_per_round * num_fractions))
         elif self.max_per_round_relative_to == 'num_violations':
             num_cycles_to_add = -1
-        num_cycles_to_add = np.min([num_cycles_to_add, self.max_per_node-self._num_added_cycles_at_cur_node])
+        num_cycles_to_add = np.min([num_cycles_to_add, self.max_per_node - self._ncuts_at_cur_node])
 
         if self.criterion == 'most_infeasible_var':
             early_exit = True
@@ -112,7 +188,7 @@ class MccormicCycleSeparator(Sepa):
                     already_added.add((tuple(F), tuple(C_minus_F)))
             if early_exit and len(violated_cycles) == num_cycles_to_add:
                 # record the fraction of useful dijkstra runs
-                self.dijkstra_efficiency = num_cycles_to_add / (runs + 1)
+                self._separation_efficiency = num_cycles_to_add / (runs + 1)
                 return violated_cycles
 
         # define how many cycles to add
@@ -121,7 +197,7 @@ class MccormicCycleSeparator(Sepa):
             num_cycles_to_add = int(np.ceil(self.max_per_round * num_violations))
 
         # record the fraction of useful dijkstra runs
-        self.dijkstra_efficiency = num_cycles_to_add / len(most_infeasible_nodes)
+        self._separation_efficiency = num_cycles_to_add / len(most_infeasible_nodes)
 
         # sort the violated cycles, most violated first (lower cost):
         most_violated_cycles = np.argsort(costs)
@@ -144,7 +220,7 @@ class MccormicCycleSeparator(Sepa):
         cycle_edges, F, C_minus_F = violated_cycle
 
         cutrhs = len(F) - 1
-        cut = model.createEmptyRowSepa(self, "cycle%d" % self.num_added_cycles, lhs=None, rhs=cutrhs,
+        cut = model.createEmptyRowSepa(self, "cycle%d" % self.ncuts, lhs=None, rhs=cutrhs,
                                        local=self.local,
                                        removable=self.removable)
         model.cacheRowExtensions(cut)
@@ -193,47 +269,6 @@ class MccormicCycleSeparator(Sepa):
         cycle = nx.subgraph(self.G, cycle_nodes)
         return nx.is_chordal(cycle)
 
-    def separate(self):
-        x = np.zeros(self.G.number_of_nodes())
-        for i in range(self.G.number_of_nodes()):
-            x[i] = self.model.getSolVal(None, self.x[i])
-        # search for fractional nodes
-        feasible = all(np.logical_or(x == 0, x == 1))
-
-        # if solution is feasible, then return immediately DIDNOTRUN
-        if feasible:  # or model.getDualbound() == 6.0:
-            return {"result": SCIP_RESULT.DIDNOTRUN}
-
-        # if exceeded limit of cuts per node ,then exit and branch or whatever else.
-        cur_node = self.model.getCurrentNode().getNumber()
-        if cur_node != self._cur_node:
-            self._cur_node = cur_node
-            self._num_added_cycles_at_cur_node = 0
-        max_cycles = self.max_per_root if cur_node == 1 else self.max_per_node
-        if self._num_added_cycles_at_cur_node >= max_cycles:
-            print('Reached max_per_node cycles. DIDNOTRUN occured! node {}'.format(cur_node))
-            return {"result": SCIP_RESULT.DIDNOTRUN}
-
-        # otherwise, enforce the violated inequalities:
-        self.update_dijkstra_edge_list()
-        violated_cycles = self.find_violated_cycles(x)
-        cut_found = False
-        for cycle in violated_cycles:
-            if self._num_added_cycles_at_cur_node < max_cycles:
-                result = self.add_cut(cycle)
-                if result['result'] == SCIP_RESULT.CUTOFF:
-                    print('CUTOFF')
-                    return result
-                self.num_added_cycles += 1
-                self._num_added_cycles_at_cur_node += 1
-                cut_found = True
-
-        if cut_found:
-            self._sepa_cnt += 1
-            return {"result": SCIP_RESULT.SEPARATED}
-        else:
-            print("Cut not found!")
-            return {"result": SCIP_RESULT.DIDNOTFIND}
 
 
 if __name__ == "__main__":
