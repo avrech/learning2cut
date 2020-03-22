@@ -164,7 +164,8 @@ class MccormicCycleSeparator(Sepa):
 
         if self.criterion == 'most_infeasible_var':
             early_exit = True
-        elif self.criterion == 'most_violated_cycle':
+        else:
+            # self.criterion == 'most_violated_cycle' or self.criterion == 'random':
             early_exit = False
 
         for runs, i in enumerate(most_infeasible_nodes):
@@ -198,10 +199,15 @@ class MccormicCycleSeparator(Sepa):
 
         # record the fraction of useful dijkstra runs
         self._separation_efficiency = num_cycles_to_add / len(most_infeasible_nodes)
-
-        # sort the violated cycles, most violated first (lower cost):
-        most_violated_cycles = np.argsort(costs)
-        return np.array(violated_cycles)[most_violated_cycles[:num_cycles_to_add]]
+        if self.criterion == 'most_violated_cycle':
+            # sort the violated cycles, most violated first (lower cost):
+            most_violated_cycles = np.argsort(costs)
+            return np.array(violated_cycles)[most_violated_cycles[:num_cycles_to_add]]
+        else:
+            # choose random cycles
+            random_cycles = np.array(violated_cycles)
+            np.random.shuffle(random_cycles)
+            return random_cycles[:num_cycles_to_add]
 
     def add_cut(self, violated_cycle):
         result = SCIP_RESULT.DIDNOTRUN
@@ -280,7 +286,7 @@ if __name__ == "__main__":
     model, x, y = maxcut_mccormic_model(G, use_cuts=False)
     # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
-    hparams = {'max_per_node': 200, 'max_per_round': 1}
+    hparams = {'max_per_node': 200, 'max_per_round': 1, 'criterion': 'random'}
     ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
     model.includeSepa(ci_cut, "MccormicCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,

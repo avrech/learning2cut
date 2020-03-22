@@ -17,7 +17,7 @@ sweep:
     values: [0.1, 0.5, 1]
   criterion:
     search: grid
-    values: [most_violated_cycle] #random, 
+    values: [random]
 #  max_per_node:
 #    search: grid
 #    values: [10, 50, 100]
