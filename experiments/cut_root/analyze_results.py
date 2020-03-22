@@ -14,6 +14,7 @@ parser.add_argument('--rootdir', type=str, default='results/', help='path to exp
 parser.add_argument('--dstdir', type=str, default='analysis/' + NOW, help='path to store tables, tensorboard etc.')
 parser.add_argument('--pattern', type=str, default='experiment_results.pkl', help='pattern of pickle files')
 parser.add_argument('--tensorboard', action='store_true', help='generate tensorboard folder in <dstdir>/tb')
+parser.add_argument('--tb-k-best', type=int, help='generate tensorboard for the k best configs (and baseline)')
 parser.add_argument('--generate-experts', action='store_true', help='save experts configs to <dstdir>/experts')
 
 
@@ -176,6 +177,7 @@ for dataset in datasets.keys():
 
     # list of k-best performance for each graph_idx
     best_config = []
+    k_best_configs = []
     best_dualbound_int_avg = []
     best_dualbound_int_std = []
     baseline_dualbound_int_avg = []
@@ -202,11 +204,14 @@ for dataset in datasets.keys():
             best_dualbound_int_avg.append(best[0])
             best_dualbound_int_std.append(best[1])
             best_config.append(best[2])
+            k_best_configs.append([cfg[2] for cfg in avg_std_config[:args.tb_k_best]])
         else:
             best_dualbound_int_avg.append('-')
             best_dualbound_int_std.append('-')
             best_config.append(None)
-    # TODO process baseline and find missing experiments
+            k_best_configs.append(None)
+
+        # TODO process baseline and find missing experiments
         if len(bsl) > 0:
             baseline_dualbound_int_avg.append(list(bsl.values())[0]['dualbound_integral'][graph_idx].get('avg', '-'))
             baseline_dualbound_int_std.append(list(bsl.values())[0]['dualbound_integral'][graph_idx].get('std', '-'))
@@ -278,36 +283,68 @@ for dataset in datasets.keys():
             os.path.abspath(args.rootdir)))
 
     # Generate tensorboard for the K-best configs
-    tensorboard_dir = os.path.join(args.dstdir, 'tensorboard', dataset)
-    writer = SummaryWriter(log_dir=tensorboard_dir)
-    for dictionary in [bsl, res]:
-        for config, stats in tqdm(dictionary.items(), desc='Analyzing'):
-            # TODO: move it to the end.
-            if args.tensorboard:
+    if args.tensorboard:
+        tensorboard_dir = os.path.join(args.dstdir, 'tensorboard', dataset)
+        writer = SummaryWriter(log_dir=tensorboard_dir)
+        # Generate hparams tab for the k-best-on-average configs, and in addition for the baseline.
+        # The hparams specify for each graph and seed some more stats.
+        for graph_idx, kbcfgs in enumerate(k_best_configs):
+            for config in kbcfgs:
+                stats = res[config]
                 hparams = datasets[dataset]['configs'][config].copy()
                 hparams.pop('data_abspath', None)
                 hparams.pop('sweep_config', None)
-                hparams.pop('scip_seed', None)
+                hparams['graph_idx'] = graph_idx
+                metric_lists = {k: [] for k in stats.keys()}
+                # plot hparams for each seed
+                for scip_seed in stats['dualbound'][graph_idx].keys():
+                    hparams['scip_seed'] = scip_seed
+                    metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
+                    metrics['dualbound_integral'] = stats['dualbound_integral'][graph_idx][scip_seed]
+                    metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
+                    for k, v in metrics.items():
+                        metric_lists[k].append(v)
+                    for k in metric_lists.keys():
+                        metrics[k+'_std'] = 0
+                    writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
+                # plot hparams for each graph averaged across seeds
+                hparams['scip_seed'] = 'avg'
                 metrics = {}
-                for k in stats.keys():
-                    metrics[k+'_mean'] = []
-                    metrics[k+'_std'] = []
-                plot_avg = False
-                for graph_idx in datasets[dataset]['graph_idx_range']:
-                    hparams['graph_idx'] = graph_idx
-                    plot = False
-                    for stat_key, graph_dict in stats.items():
-                        values = list(graph_dict[graph_idx].values())
-                        if len(values) > 0:
-                            metrics[stat_key+'_mean'].append(np.mean(values))
-                            metrics[stat_key+'_std'].append(np.std(values))
-                            plot = True
-                            plot_avg = True
-                    if plot:
-                        writer.add_hparams(hparam_dict=hparams, metric_dict={k: v[-1] for k, v in metrics.items()})
-                if plot_avg:
-                    hparams['graph_idx'] = 'avg'
-                    writer.add_hparams(hparam_dict=hparams, metric_dict={k: np.mean(v) for k, v in metrics.items()})
-    writer.close()
+                for k, v_list in metric_lists.items():
+                    metrics[k] = np.mean(v_list)
+                    metrics[k+'_std'] = np.std(v_list)
+                writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
+
+        for graph_idx in datasets[dataset]['graph_idx_range']:
+            for config, stats in bsl.items():
+                hparams = datasets[dataset]['configs'][config].copy()
+                hparams.pop('data_abspath', None)
+                hparams.pop('sweep_config', None)
+                hparams['graph_idx'] = graph_idx
+                metric_lists = {k: [] for k in stats.keys()}
+                # plot hparams for each seed
+                for scip_seed in stats['dualbound'][graph_idx].keys():
+                    hparams['scip_seed'] = scip_seed
+                    metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
+                    metrics['dualbound_integral'] = stats['dualbound_integral'][graph_idx][scip_seed]
+                    metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
+                    for k, v in metrics.items():
+                        metric_lists[k].append(v)
+                    for k in metric_lists.keys():
+                        metrics[k+'_std'] = 0
+                    writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
+                # plot hparams for each graph averaged across seeds
+                hparams['scip_seed'] = 'avg'
+                metrics = {}
+                for k, v_list in metric_lists.items():
+                    metrics[k] = np.mean(v_list)
+                    metrics[k+'_std'] = np.std(v_list)
+                writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
+
+        writer.close()
+        print('Tensorboard events written to ' + tensorboard_dir)
+        print('To open tensorboard tab on web browser run in terminal')
+        print('tensorboard --logdir ' + os.path.abspath(tensorboard_dir))
+
 print('finish')
 
