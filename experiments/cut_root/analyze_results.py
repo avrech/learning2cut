@@ -10,8 +10,8 @@ import pandas as pd
 import operator
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--rootdir', type=str, default='cut_root/results/tmp', help='path to experiment results root dir')
-parser.add_argument('--dstdir', type=str, default='cut_root/analysis/' + NOW, help='path to store tables, tensorboard etc.')
+parser.add_argument('--rootdir', type=str, default='results/', help='path to experiment results root dir')
+parser.add_argument('--dstdir', type=str, default='analysis/' + NOW, help='path to store tables, tensorboard etc.')
 parser.add_argument('--pattern', type=str, default='experiment_results.pkl', help='pattern of pickle files')
 parser.add_argument('--tensorboard', action='store_true', help='generate tensorboard folder in <dstdir>/tb')
 parser.add_argument('--generate-experts', action='store_true', help='save experts configs to <dstdir>/experts')
