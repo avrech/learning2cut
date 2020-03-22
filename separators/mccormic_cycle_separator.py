@@ -69,18 +69,18 @@ class MccormicCycleSeparator(Sepa):
         # the statistics are collected before taking any action, and refer to the last round.
         # NOTE: the last update must be done after the solver terminates optimization,
         # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
-        if self._round_cnt > 0:
-            cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
-            self.stats['cycle_ncuts'].append(cycle_cuts)
-            self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied)
-            self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
-            self.stats['cycles_sepa_time'].append(self.time_spent)
-            self.stats['solving_time'].append(self.model.getSolvingTime())
-            self.stats['processed_nodes'].append(self.model.getNNodes())
-            self.stats['gap'].append(self.model.getGap())
-            self.stats['lp_rounds'].append(self.model.getNLPs())
-            self.stats['lp_iterations'].append(self.model.getNLPIterations())
-            self.stats['dualbound'].append(self.model.getDualbound())
+        # if self._round_cnt > 0:
+        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
+        self.stats['cycle_ncuts'].append(cycle_cuts)
+        self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied)
+        self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
+        self.stats['cycles_sepa_time'].append(self.time_spent)
+        self.stats['solving_time'].append(self.model.getSolvingTime())
+        self.stats['processed_nodes'].append(self.model.getNNodes())
+        self.stats['gap'].append(self.model.getGap())
+        self.stats['lp_rounds'].append(self.model.getNLPs())
+        self.stats['lp_iterations'].append(self.model.getNLPIterations())
+        self.stats['dualbound'].append(self.model.getDualbound())
 
     def separate(self):
         # if exceeded limit of cuts per node ,then exit and branch or whatever else.
