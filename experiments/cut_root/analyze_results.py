@@ -300,7 +300,9 @@ for dataset in datasets.keys():
                 for scip_seed in stats['dualbound'][graph_idx].keys():
                     hparams['scip_seed'] = scip_seed
                     metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
-                    metrics['dualbound_integral'] = stats['dualbound_integral'][graph_idx][scip_seed]
+                    dualbound = np.array(stats['dualbound'][graph_idx][scip_seed])
+                    lp_iterations = np.array(stats['lp_iterations'][graph_idx][scip_seed])
+                    metrics['dualbound_integral'] = np.sum(dualbound * lp_iterations)
                     metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
@@ -327,7 +329,9 @@ for dataset in datasets.keys():
                 for scip_seed in stats['dualbound'][graph_idx].keys():
                     hparams['scip_seed'] = scip_seed
                     metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
-                    metrics['dualbound_integral'] = stats['dualbound_integral'][graph_idx][scip_seed]
+                    dualbound = np.array(stats['dualbound'][graph_idx][scip_seed])
+                    lp_iterations = np.array(stats['lp_iterations'][graph_idx][scip_seed])
+                    metrics['dualbound_integral'] = np.sum(dualbound * lp_iterations)
                     metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
