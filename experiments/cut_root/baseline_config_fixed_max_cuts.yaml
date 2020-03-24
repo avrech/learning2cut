@@ -11,7 +11,7 @@ sweep:
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERES
   max_per_root:
     search: grid
-    values: [0, 2000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
+    values: [0, 2000000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
   max_per_round:
     search: grid
     values: [0.2]
