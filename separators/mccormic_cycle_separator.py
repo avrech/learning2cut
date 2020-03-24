@@ -27,8 +27,9 @@ class MccormicCycleSeparator(Sepa):
         self.max_per_node = hparams.get('max_per_node', 5)
         self.max_per_round = hparams.get('max_per_round', 0.1)
         self.max_per_root = hparams.get('max_per_root', 100)
-        self.criterion = hparams.get('criterion', 'most_infeasible_var')
+        self.criterion = hparams.get('criterion', 'most_violated_cycle')
         self.max_per_round_relative_to = hparams.get('max_per_round_relative_to', 'num_vars')
+        self.cuts_budget = hparams.get('cuts_budget', 2000)
 
         self.chordless_only = hparams.get('chordless_only', False)
 
@@ -54,8 +55,14 @@ class MccormicCycleSeparator(Sepa):
         self._separation_efficiency = 0
         self._ncuts_at_cur_node = 0
         self._cur_node = 0  # invalid. root node index is 1
+        self.finished = False
 
     def sepaexeclp(self):
+        if self.model.getNCutsApplied() >= self.cuts_budget:
+            # terminate
+            self.finish_experiment()
+            return {"result": SCIP_RESULT.DIDNOTRUN}
+
         self.update_stats()
         t0 = time()
         result = self.separate()
@@ -63,6 +70,12 @@ class MccormicCycleSeparator(Sepa):
         self.time_spent += t_left
         self._round_cnt += 1
         return result
+
+    def finish_experiment(self):
+        if not self.finished:
+            # record stats the last time
+            self.update_stats()
+            self.finished = True
 
     def update_stats(self):
         # collect statistics at the beginning of each round, starting from the second round.
@@ -153,6 +166,7 @@ class MccormicCycleSeparator(Sepa):
         violated_cycles = []
         costs = []
         already_added = set()
+        max_cycles = self.max_per_root if self.model.getCurrentNode().getNumber() == 1 else self.max_per_node
         if self.max_per_round_relative_to == 'num_vars':
             num_cycles_to_add = int(np.ceil(self.max_per_round * self.G.number_of_nodes()))
         elif self.max_per_round_relative_to == 'num_fractions':
@@ -160,7 +174,9 @@ class MccormicCycleSeparator(Sepa):
             num_cycles_to_add = int(np.ceil(self.max_per_round * num_fractions))
         elif self.max_per_round_relative_to == 'num_violations':
             num_cycles_to_add = -1
-        num_cycles_to_add = np.min([num_cycles_to_add, self.max_per_node - self._ncuts_at_cur_node])
+        num_cycles_to_add = np.min([num_cycles_to_add,
+                                    max_cycles - self._ncuts_at_cur_node,
+                                    self.cuts_budget - self.model.getNCutsApplied()])
 
         if self.criterion == 'most_infeasible_var':
             early_exit = True
@@ -278,24 +294,43 @@ class MccormicCycleSeparator(Sepa):
 
 
 if __name__ == "__main__":
-    n = 20
+    import sys
+    if '--mixed-debug' in sys.argv:
+        import ptvsd
+
+        port = 3000
+        # ptvsd.enable_attach(secret='my_secret', address =('127.0.0.1', port))
+        ptvsd.enable_attach(address=('127.0.0.1', port))
+        ptvsd.wait_for_attach()
+    n = 50
     m = 10
     seed = 223
     G = nx.barabasi_albert_graph(n, m, seed=seed)
     nx.set_edge_attributes(G, {e: np.random.normal() for e in G.edges}, name='weight')
-    model, x, y = maxcut_mccormic_model(G, use_cuts=False)
+    model, x, y = maxcut_mccormic_model(G)
     # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
-    hparams = {'max_per_node': 200, 'max_per_round': 1, 'criterion': 'random'}
+    hparams = {'max_per_root': 200000, 'max_per_round': 1, 'criterion': 'random', 'forcecut': True}
     ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
-    model.includeSepa(ci_cut, "MccormicCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
+    model.includeSepa(ci_cut, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
                       freq=1)
+    # model.setRealParam('separating/objparalfac', 0.1)
+    # model.setRealParam('separating/dircutoffdistfac', 0.5)
+    # model.setRealParam('separating/efficacyfac', 1)
+    # model.setRealParam('separating/intsupportfac', 0.1)
+    # model.setIntParam('separating/maxrounds', -1)
+    # model.setIntParam('separating/maxroundsroot', 10)
+    model.setIntParam('separating/maxcuts', 20)
+    model.setIntParam('separating/maxcutsroot', 10)
+    model.setLongintParam('limits/nodes', 1)
     model.optimize()
     print("Solved using user's cutting-planes callback. Objective {}".format(model.getObjVal()))
     cycle_cuts_applied = -1
     # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
-    cuts, cuts_applied = get_separator_cuts_applied(model, 'MccormicCycles')
-    print(cuts, cuts_applied)
-    model.printStatistics()
+    cuts, cuts_applied = get_separator_cuts_applied(model, 'MLCycles')
+    # model.printStatistics()
+    print('cycles added: ', cuts, ', cycles applied: ', cuts_applied)
+    # print(ci_cut.stats)
+    print('total cuts applied: ', model.getNCutsApplied())
     print('finish')

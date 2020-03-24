@@ -58,7 +58,7 @@ for s in tqdm(summary, desc='Parsing files'):
     config = tuple([s['config'][k] for k in datasets[dataset]['config_keys']])
     if config not in datasets[dataset]['configs'].keys():
         datasets[dataset]['configs'][config] = s['config']
-        if s['config']['max_per_root'] > 0:
+        if s['config']['policy'] == 'expert':
             results[dataset][config] = {stat_key: {graph_idx: {}
                                                    for graph_idx in range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
                                         for stat_key in s['stats'].keys()}
@@ -70,7 +70,7 @@ for s in tqdm(summary, desc='Parsing files'):
     # select the appropriate dictionary
     graph_idx = s['config']['graph_idx']
     scip_seed = s['config']['scip_seed']
-    dictionary = results if s['config']['max_per_root'] > 0 else baseline
+    dictionary = results if s['config']['policy'] == 'expert' else baseline
 
     # insert stats into dictionary:
     for stat_key, value in s['stats'].items():
@@ -374,10 +374,10 @@ for dataset in datasets.keys():
                 writer.close()
 
         # add plots of metrics vs time for the baseline
-        for config, stats in bsl.items():
+        for bsl_idx, (config, stats) in enumerate(bsl.items()):
             for graph_idx in stats['dualbound'].keys():
                 for scip_seed, db in stats['dualbound'][graph_idx].items():
-                    writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'scalars', 'baseline',
+                    writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'scalars', 'baseline{}'.format(bsl_idx),
                                                                 'graph_idx{}'.format(graph_idx),
                                                                 'scip_seed{}'.format(scip_seed)))
 

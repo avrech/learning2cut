@@ -78,7 +78,7 @@ def experiment(config):
     model.optimize()
 
     # collect statistics TODO collect stats every round in sepa
-    sepa.update_stats()
+    sepa.finish_experiment()
     stats = sepa.stats
     # cycles_sepa_time = sepa.time_spent / model.getSolvingTime()
     # if config['max_per_root'] > 0:
