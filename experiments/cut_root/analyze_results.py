@@ -123,55 +123,6 @@ for dataset in datasets.keys():
                 stats['dualbound_integral']['avg'] = np.mean(all_values)
                 stats['dualbound_integral']['std'] = np.std(all_stds)
 
-
-
-            # for stat_key, graph_dict in stats.items():
-            #     all_values = []
-            #     all_stds = []
-            #     for graph_idx in datasets[dataset]['graph_idx_range']:
-            #         values = []
-            #         for scip_seed in datasets[dataset]['scip_seeds']:
-            #             if scip_seed not in graph_dict[graph_idx].keys():
-            #                 if (graph_idx, scip_seed) not in missing_graph_and_seed:
-            #                     experiment_config = datasets[dataset]['configs'][config].copy()
-            #                     experiment_config['graph_idx'] = graph_idx
-            #                     experiment_config['scip_seed'] = scip_seed
-            #                     datasets[dataset]['missing_experiments'].append(experiment_config)
-            #                     missing_graph_and_seed.append((graph_idx, scip_seed))
-            #                 continue
-            #             # TODO - consider to stop here, and analyze after.
-            #             values.append(graph_dict[graph_idx][scip_seed])
-            #             all_values.append(graph_dict[graph_idx][scip_seed])
-            #         if len(values) > 0:
-            #             graph_dict[graph_idx]['mean'] = np.mean(values)
-            #             graph_dict[graph_idx]['std'] = np.std(values)
-            #             all_stds.append(np.std(values))
-            #     # compute the mean and std of stds across all graphs.
-            #     if len(all_stds) > 0:
-            #         graph_dict['mean'] = np.mean(all_values)
-            #         graph_dict['std'] = np.std(all_stds)
-
-    # gap = res['gap']
-    # solving_time = res['solving_time']
-    #
-    # # compute mean solving time and std across seeds
-    # solving_time_avg = []
-    # solving_time_std = []
-    # for g in solving_time:
-    #     avg = []
-    #     std = []
-    #     for hp_config in g:
-    #         avg.append(np.mean(hp_config))
-    #         std.append(np.std(hp_config))
-    #     solving_time_avg.append(avg)
-    #     solving_time_std.append(std)
-    # gap_avg = []
-    # for g in gap:
-    #     avg = []
-    #     for hp_config in g:
-    #         avg.append(np.mean(hp_config))
-    #     gap_avg.append(avg)
-
     # 2. for each dataset and graph find the best hparams
     # according to gap/solving_time avg across all seeds
 
@@ -318,15 +269,18 @@ for dataset in datasets.keys():
                 writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
 
         # add hparams for the baseline
-        for graph_idx in datasets[dataset]['graph_idx_range']:
-            for config, stats in bsl.items():
+        for config, stats in bsl.items():
+            for graph_idx in datasets[dataset]['graph_idx_range']:
                 hparams = datasets[dataset]['configs'][config].copy()
                 hparams.pop('data_abspath', None)
                 hparams.pop('sweep_config', None)
                 hparams['graph_idx'] = graph_idx
                 metric_lists = {k: [] for k in stats.keys()}
                 # plot hparams for each seed
-                for scip_seed in stats['dualbound'][graph_idx].keys():
+                for scip_seed in datasets[dataset]['scip_seeds']:  #stats['dualbound'][graph_idx].keys():
+                    if scip_seed not in stats['dualbound'][graph_idx].keys():
+                        print('missing baseline!!!!')
+                        continue
                     hparams['scip_seed'] = scip_seed
                     metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
                     dualbound = np.array(stats['dualbound'][graph_idx][scip_seed])
