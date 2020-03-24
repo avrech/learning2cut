@@ -108,8 +108,11 @@ for dataset in datasets.keys():
                         continue
                     # compute integral:
                     dualbound = np.array(dualbounds[graph_idx][scip_seed])
-                    lp_iter = np.array(lp_iterations[graph_idx][scip_seed])
-                    integral = np.sum(dualbound * lp_iter)
+                    lp_iter_intervals = np.array(lp_iterations[graph_idx][scip_seed])
+                    # compute the lp iterations executed at each round to compute the dualbound_integral by Riemann sum
+                    lp_iter_intervals[1:] -= lp_iter_intervals[:-1]
+
+                    integral = np.sum(dualbound * lp_iter_intervals)
                     stats['dualbound_integral'][graph_idx][scip_seed] = integral
                     values.append(integral)
                     all_values.append(integral)
@@ -252,8 +255,10 @@ for dataset in datasets.keys():
                     hparams['scip_seed'] = scip_seed
                     metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
                     dualbound = np.array(stats['dualbound'][graph_idx][scip_seed])
-                    lp_iterations = np.array(stats['lp_iterations'][graph_idx][scip_seed])
-                    metrics['dualbound_integral'] = np.sum(dualbound * lp_iterations)
+                    lp_iter_intervals = np.array(stats['lp_iterations'][graph_idx][scip_seed])
+                    # compute the lp iterations executed at each round to compute the dualbound_integral by Riemann sum
+                    lp_iter_intervals[1:] -= lp_iter_intervals[:-1]
+                    metrics['dualbound_integral'] = np.sum(dualbound * lp_iter_intervals)
                     metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
@@ -278,14 +283,13 @@ for dataset in datasets.keys():
                 metric_lists = {k: [] for k in stats.keys()}
                 # plot hparams for each seed
                 for scip_seed in datasets[dataset]['scip_seeds']:  #stats['dualbound'][graph_idx].keys():
-                    if scip_seed not in stats['dualbound'][graph_idx].keys():
-                        print('missing baseline!!!!')
-                        continue
                     hparams['scip_seed'] = scip_seed
                     metrics = {k: v[graph_idx][scip_seed][-1] for k, v in stats.items() if k != 'dualbound_integral'}
                     dualbound = np.array(stats['dualbound'][graph_idx][scip_seed])
-                    lp_iterations = np.array(stats['lp_iterations'][graph_idx][scip_seed])
-                    metrics['dualbound_integral'] = np.sum(dualbound * lp_iterations)
+                    lp_iter_intervals = np.array(stats['lp_iterations'][graph_idx][scip_seed])
+                    # compute the lp iterations executed at each round to compute the dualbound_integral by Riemann sum
+                    lp_iter_intervals[1:] -= lp_iter_intervals[:-1]
+                    metrics['dualbound_integral'] = np.sum(dualbound * lp_iter_intervals)
                     metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
