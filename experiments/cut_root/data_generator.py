@@ -87,6 +87,7 @@ def annotate_data(datadir, time_limit=600):
     :param time_limit:
     :return:
     """
+    datadir = os.path.abspath(datadir)
     files = os.listdir(datadir)
     successful = False
     for filename in tqdm(files, desc='Solving graphs...'):
