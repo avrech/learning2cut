@@ -66,7 +66,7 @@ constants:
   graph_type: barabasi-albert
   time_limit_sec: 300
   dataset_generation_seed: 100
-  graph_size: 60
+  graph_size: 50
   policy: baseline
   cuts_budget: 2000
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
