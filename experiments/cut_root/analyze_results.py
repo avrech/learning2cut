@@ -76,7 +76,7 @@ for s in tqdm(summary, desc='Parsing files'):
         datasets[dataset] = {}
         datasets[dataset]['config_keys'] = [k for k in s['config'].keys() if k != 'scip_seed' and k != 'graph_idx' and k != 'sweep_config' and k != 'data_abspath']
         # store these two to ensure that all the experiments completed successfully.
-        datasets[dataset]['scip_seeds'] = s['config']['sweep_config']['sweep']['scip_seed']['values']
+        datasets[dataset]['scip_seeds'] = set(s['config']['sweep_config']['sweep']['scip_seed']['values'])
         datasets[dataset]['graph_idx_range'] = list(range(s['config']['sweep_config']['sweep']['graph_idx']['range']))
         datasets[dataset]['missing_experiments'] = []
         datasets[dataset]['sweep_config'] = s['config']['sweep_config']
@@ -91,6 +91,8 @@ for s in tqdm(summary, desc='Parsing files'):
                                                range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
         results[dataset] = {}
         baselines[dataset] = {}
+    # for a case some scip seed was missing when the dictionary was created
+    datasets[dataset]['scip_seeds'].update(s['config']['sweep_config']['sweep']['scip_seed']['values'])
 
     # create a hashable config identifier
     config = tuple([s['config'][k] for k in datasets[dataset]['config_keys']])
@@ -269,8 +271,8 @@ for dataset in datasets.keys():
     # collect the relevant baseline stats for the table
     baselines_table = {}
     for config, stats in bsl.items():
-        bsl_str = 'nocycles' if config['max_per_root'] == 0 else '{}{}'.format(config['max_per_round'],
-                                                                               config['criterion'])
+        bsl_str = 'nocycles' if datasets[dataset]['configs'][config]['max_per_root'] == 0 else '{}{}'.format(
+            datasets[dataset]['configs'][config]['max_per_round'], datasets[dataset]['configs'][config]['criterion'])
         baseline_dualbound_integral_avg = []
         baseline_dualbound_integral_std = []
         baseline_dualbound = []
