@@ -321,7 +321,7 @@ for dataset in datasets.keys():
     if not os.path.exists(tables_dir):
         os.makedirs(tables_dir)
     csv_file = os.path.join(tables_dir, dataset + '_results.csv')
-    df = pd.DataFrame(data=table_dict, index=list(range(len(integral_ratio))) + ['avg'])
+    df = pd.DataFrame(data=table_dict, index=list(range(len(best_dualbound_avg))) + ['avg'])
     df.to_csv(csv_file, float_format='%.3f')
     print('Experiment summary saved to {}'.format(csv_file))
     # latex_str = df.to_latex(float_format='%.3f')
