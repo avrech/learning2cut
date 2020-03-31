@@ -279,10 +279,9 @@ for dataset in datasets.keys():
         for graph_idx in datasets[dataset]['graph_idx_range']:
             baseline_dualbound_integral_avg.append(stats['dualbound_integral'][graph_idx].get('avg', '-'))
             baseline_dualbound_integral_std.append(stats['dualbound_integral'][graph_idx].get('std', '-'))
-            baseline_dualbound.append(np.mean(stats['dualbound'][graph_idx].values()))
+            baseline_dualbound.append(np.mean([db[-1] for db in stats['dualbound'][graph_idx].values()]))
         baseline_dualbound_integral_avg.append(np.mean(baseline_dualbound_integral_avg))  # avg across graphs
-        baseline_dualbound_integral_std.append(
-            np.mean(baseline_dualbound_integral_std))  # std of stds across graphs
+        baseline_dualbound_integral_std.append(np.mean(baseline_dualbound_integral_std))  # std of stds across graphs
         baseline_dualbound.append(np.mean(baseline_dualbound))  # avg across graphs
         baselines_table[config] = {bsl_str + ' integral avg': baseline_dualbound_integral_avg,
                                    bsl_str + ' integral std': baseline_dualbound_integral_std,
@@ -293,7 +292,7 @@ for dataset in datasets.keys():
     best_dualbound_avg = []
     for graph_idx in datasets[dataset]['graph_idx_range']:
         # append the average across seeds
-        best_dualbound_avg.append(np.mean(res[best_config[graph_idx]]['dualbound'][graph_idx].values()))
+        best_dualbound_avg.append(np.mean([db[-1] for db in res[best_config[graph_idx]]['dualbound'][graph_idx].values()]))
     best_dualbound_avg.append(np.mean(best_dualbound_avg))  # append the average across graphs
 
     # create a table dictionary: keys - columns name, values - columns values.
