@@ -189,9 +189,12 @@ for dataset in datasets.keys():
                     dualbound = dualbounds[graph_idx][scip_seed]
                     lp_iter = lp_iterations[graph_idx][scip_seed]
                     if lp_iter[-1] < support_end:
-                        # extend with constant line
                         lp_iter.append(support_end)
-                        dualbound.append(dualbound[-1])
+                        # dualbound.append(dualbound[-1])
+                        # extend all stats with their last value (constant extension)
+                        for k, s in stats.items():
+                            if k not in ['dualbound_integral', 'lp_iterations']:
+                                s[graph_idx][scip_seed].append(s[graph_idx][scip_seed][-1])
                     dualbound = np.array(dualbound)
                     # compute the lp iterations executed at each round to compute the dualbound_integral by Riemann sum
                     lp_iter_intervals = np.array(lp_iter)
@@ -321,7 +324,7 @@ for dataset in datasets.keys():
     if not os.path.exists(tables_dir):
         os.makedirs(tables_dir)
     csv_file = os.path.join(tables_dir, dataset + '_results.csv')
-    df = pd.DataFrame(data=table_dict, index=list(range(len(best_dualbound_avg))) + ['avg'])
+    df = pd.DataFrame(data=table_dict, index=datasets[dataset]['graph_idx_range'] + ['avg'])
     df.to_csv(csv_file, float_format='%.3f')
     print('Experiment summary saved to {}'.format(csv_file))
     # latex_str = df.to_latex(float_format='%.3f')
