@@ -378,7 +378,9 @@ for dataset in datasets.keys():
                     # if extended, take the actual lp_iterations done
                     if dualbound[-1] == dualbound[-2]:
                         metrics['lp_iterations'] = stats['lp_iterations'][graph_idx][scip_seed][-2]
-
+                    # override the gap according to the optimal value of the graph
+                    optimal_dualbound = datasets[dataset]['optimal_values'][graph_idx]
+                    metrics['gap'] = (metrics['dualbound'] - optimal_dualbound) / optimal_dualbound
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
                     for k in metric_lists.keys():
@@ -415,6 +417,9 @@ for dataset in datasets.keys():
                     # if extended, take the actual lp_iterations done
                     if dualbound[-1] == dualbound[-2]:
                         metrics['lp_iterations'] = stats['lp_iterations'][graph_idx][scip_seed][-2]
+                    # override the gap according to the optimal value of the graph
+                    optimal_dualbound = datasets[dataset]['optimal_values'][graph_idx]
+                    metrics['gap'] = (metrics['dualbound'] - optimal_dualbound) / optimal_dualbound
 
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
@@ -430,8 +435,10 @@ for dataset in datasets.keys():
                 writer.add_hparams(hparam_dict=hparams, metric_dict=metrics)
             writer.close()
 
-        # add plots of metrics vs time for the best config
+        ####################################################
+        # add plots for the best config
         # each graph plot separately.
+        ####################################################
         for graph_idx, config in enumerate(best_config):
             stats = res[config]
             hparams = datasets[dataset]['configs'][config]
@@ -469,18 +476,46 @@ for dataset in datasets.keys():
                         records = {k: v[graph_idx][scip_seed][lp_round] for k, v in stats.items() if
                                    k != 'dualbound_integral'}
                         # dualbound vs. lp iterations
-                        writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx, scip_seed),
+                        writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
                                           scalar_value=records['dualbound'],
                                           global_step=records['lp_iterations'],
                                           walltime=records['solving_time'])
+                        # dualbound vs. cycles applied
+                        if 'cycle_ncuts_applied' in records.keys():
+                            writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
+                                              scalar_value=records['dualbound'],
+                                              global_step=records['cycle_ncuts_applied'],
+                                              walltime=records['solving_time'])
+
                         # dualbound vs. total cuts applied
-                        writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx, scip_seed),
+                        writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx),
                                           scalar_value=records['dualbound'],
                                           global_step=records['total_ncuts_applied'],
                                           walltime=records['solving_time'])
 
                     writer.close()
 
+        # plot the optimal value as constant on the dualbound plots
+        for graph_idx in datasets[dataset]['graph_idx_range']:
+            writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'optimal-g{}'.format(graph_idx)))
+            v = datasets[dataset]['optimal_values'][graph_idx]
+            support_end = max(list(max_lp_iterations[graph_idx].values()))
+            # dualbound vs. lp iterations
+            writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
+                              scalar_value=v, global_step=0, walltime=0)
+            writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
+                              scalar_value=v, global_step=support_end, walltime=400)
+            # dualbound vs. cycles applied
+            writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
+                              scalar_value=v, global_step=0, walltime=0)
+            writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
+                              scalar_value=v, global_step=2000, walltime=400)
+            # dualbound vs. total cuts applied
+            writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx),
+                              scalar_value=v, global_step=0, walltime=0)
+            writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx),
+                              scalar_value=v, global_step=2000, walltime=400)
+            writer.close()
         print('Tensorboard events written to ' + tensorboard_dir)
         print('To open tensorboard tab on web browser, run in terminal the following command:')
         print('tensorboard --logdir ' + os.path.abspath(tensorboard_dir))
