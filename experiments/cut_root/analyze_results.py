@@ -356,11 +356,11 @@ for dataset in datasets.keys():
         tensorboard_dir = os.path.join(args.dstdir, 'tensorboard', dataset)
         # Generate hparams tab for the k-best-on-average configs, and in addition for the baseline.
         # The hparams specify for each graph and seed some more stats.
-        for graph_idx, kbcfgs in enumerate(k_best_configs):
-            for config in kbcfgs:
+        for graph_idx, config_list in enumerate(k_best_configs):
+            for place, config in enumerate(config_list):
                 stats = res[config]
                 hparams = datasets[dataset]['configs'][config].copy()
-                writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'experts', str_hparams(hparams)))
+                writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'expert{}'.format(place+1), str_hparams(hparams)))
                 hparams.pop('data_abspath', None)
                 hparams.pop('sweep_config', None)
                 hparams['graph_idx'] = graph_idx
@@ -439,30 +439,31 @@ for dataset in datasets.keys():
         # add plots for the best config
         # each graph plot separately.
         ####################################################
-        for graph_idx, config in enumerate(best_config):
-            stats = res[config]
-            hparams = datasets[dataset]['configs'][config]
-            for scip_seed, db in stats['dualbound'][graph_idx].items():
-                writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'experts', str_hparams(hparams),
-                                                            'g{}-seed{}'.format(graph_idx, scip_seed)))
-                for lp_round in range(len(db)):
-                    records = {k: v[graph_idx][scip_seed][lp_round] for k, v in stats.items() if k != 'dualbound_integral'}
-                    # dualbound vs. lp iterations
-                    writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx, scip_seed),
-                                      scalar_value=records['dualbound'],
-                                      global_step=records['lp_iterations'],
-                                      walltime=records['solving_time'])
-                    # dualbound vs. cycles applied
-                    writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx, scip_seed),
-                                      scalar_value=records['dualbound'],
-                                      global_step=records['cycle_ncuts_applied'],
-                                      walltime=records['solving_time'])
-                    # dualbound vs. total cuts applied
-                    writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx, scip_seed),
-                                      scalar_value=records['dualbound'],
-                                      global_step=records['total_ncuts_applied'],
-                                      walltime=records['solving_time'])
-                writer.close()
+        for graph_idx, config_list in enumerate(k_best_configs):
+            for place, config in enumerate(config_list):
+                stats = res[config]
+                hparams = datasets[dataset]['configs'][config]
+                for scip_seed, db in stats['dualbound'][graph_idx].items():
+                    writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'expert{}'.format(place+1), str_hparams(hparams),
+                                                                'g{}-seed{}'.format(graph_idx, scip_seed)))
+                    for lp_round in range(len(db)):
+                        records = {k: v[graph_idx][scip_seed][lp_round] for k, v in stats.items() if k != 'dualbound_integral'}
+                        # dualbound vs. lp iterations
+                        writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx, scip_seed),
+                                          scalar_value=records['dualbound'],
+                                          global_step=records['lp_iterations'],
+                                          walltime=records['solving_time'])
+                        # dualbound vs. cycles applied
+                        writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx, scip_seed),
+                                          scalar_value=records['dualbound'],
+                                          global_step=records['cycle_ncuts_applied'],
+                                          walltime=records['solving_time'])
+                        # dualbound vs. total cuts applied
+                        writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx, scip_seed),
+                                          scalar_value=records['dualbound'],
+                                          global_step=records['total_ncuts_applied'],
+                                          walltime=records['solving_time'])
+                    writer.close()
 
         # add plots of metrics vs time for the baseline
         for bsl_idx, (config, stats) in enumerate(bsl.items()):
