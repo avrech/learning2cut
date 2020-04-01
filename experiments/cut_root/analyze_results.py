@@ -375,6 +375,10 @@ for dataset in datasets.keys():
                     lp_iter_intervals[1:] -= lp_iter_intervals[:-1]
                     metrics['dualbound_integral'] = np.sum(dualbound * lp_iter_intervals)
                     metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
+                    # if extended, take the actual lp_iterations done
+                    if dualbound[-1] == dualbound[-2]:
+                        metrics['lp_iterations'] = stats['lp_iterations'][graph_idx][scip_seed][-2]
+
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
                     for k in metric_lists.keys():
@@ -408,6 +412,10 @@ for dataset in datasets.keys():
                     lp_iter_intervals[1:] -= lp_iter_intervals[:-1]
                     metrics['dualbound_integral'] = np.sum(dualbound * lp_iter_intervals)
                     metrics['cycles_sepa_time'] = metrics['cycles_sepa_time'] / metrics['solving_time']
+                    # if extended, take the actual lp_iterations done
+                    if dualbound[-1] == dualbound[-2]:
+                        metrics['lp_iterations'] = stats['lp_iterations'][graph_idx][scip_seed][-2]
+
                     for k, v in metrics.items():
                         metric_lists[k].append(v)
                     for k in metric_lists.keys():
