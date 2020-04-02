@@ -123,7 +123,7 @@ for s in tqdm(summary, desc='Parsing files'):
         s['config']['policy'] = 'default_cut_selection'
     elif s['config']['policy'] == 'baseline' and s['config']['max_per_root'] == 0:
         s['config']['policy'] = 'no_cycles'
-    else:
+    elif s['config']['policy'] == 'baseline' and s['config']['max_per_root'] > 0:
         s['config']['policy'] = 'force{}{}'.format(s['config']['max_per_round'], s['config']['criterion'])
 
     # create skeleton for storing stats collected from experiments with config
@@ -158,7 +158,7 @@ for dataset in datasets.keys():
     # store the best_dualbound and max_lp_iterations for each graph and seed
     ###########################################################################
     for dictionary in [bsl, res]:
-        for config, stats in tqdm(dictionary.items(), desc='Analyzing'):
+        for config, stats in tqdm(dictionary.items(), desc='Detecting missing experiments'):
             # compute the integral of dual_bound w.r.t lp_iterations
             # report missing seeds/graphs
             missing_graph_and_seed = []
@@ -187,7 +187,7 @@ for dataset in datasets.keys():
     # and also std of stds across all graphs
     ###############################################################################################
     for dictionary in [bsl, res]:
-        for config, stats in tqdm(dictionary.items(), desc='Analyzing'):
+        for config, stats in tqdm(dictionary.items(), desc='Computing dualbound integral'):
             dualbounds = stats['dualbound']
             lp_iterations = stats['lp_iterations']
             all_values = []  # all dualbound integrals to compute overall average
@@ -254,7 +254,7 @@ for dataset in datasets.keys():
     best_dualbound_integral_std = []
 
     # results[dataset][config][stat_key][graph_idx][seed]
-    for graph_idx in datasets[dataset]['graph_idx_range']:
+    for graph_idx in tqdm(datasets[dataset]['graph_idx_range'], desc='Finding experts'):
         # insert the metrics into a long list
         configs = []
         dualbound_int_avg = []
@@ -370,7 +370,7 @@ for dataset in datasets.keys():
         tensorboard_dir = os.path.join(args.dstdir, 'tensorboard', dataset)
         # Generate hparams tab for the k-best-on-average configs, and in addition for the baseline.
         # The hparams specify for each graph and seed some more stats.
-        for graph_idx, config_list in enumerate(k_best_configs):
+        for graph_idx, config_list in tqdm(enumerate(k_best_configs), desc='Generating tensorboard hparams'):
             for place, config in enumerate(config_list):
                 stats = res[config]
                 hparams = datasets[dataset]['configs'][config].copy()
@@ -453,7 +453,7 @@ for dataset in datasets.keys():
         # add plots for the best config
         # each graph plot separately.
         ####################################################
-        for graph_idx, config_list in enumerate(k_best_configs):
+        for graph_idx, config_list in tqdm(enumerate(k_best_configs), desc='Generating tensorboard scalars'):
             for place, config in enumerate(config_list):
                 stats = res[config]
                 hparams = datasets[dataset]['configs'][config]
