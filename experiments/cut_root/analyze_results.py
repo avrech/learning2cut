@@ -112,6 +112,20 @@ for s in tqdm(summary, desc='Parsing files'):
         else:
             datasets[dataset]['optimal_values'][graph_idx] = 0  # default
 
+    # set baselines policy string for plots legend:
+    if s['config']['maxcutsroot'] == 2000 and \
+            s['config']['maxcutsroot'] == 2000 and \
+            s['config']['intsupportfac'] == 0.1 and \
+            s['config']['efficacyfac'] == 1 and \
+            s['config']['dircutoffdistfac'] == 0.5 and \
+            s['config']['objparalfac'] == 0.1 and \
+            not s['config']['forcecut']:
+        s['config']['policy'] = 'default_cut_selection'
+    elif s['config']['policy'] == 'baseline' and s['config']['max_per_root'] == 0:
+        s['config']['policy'] = 'no_cycles'
+    else:
+        s['config']['policy'] = 'force{}{}'.format(s['config']['max_per_round'], s['config']['criterion'])
+
     # create skeleton for storing stats collected from experiments with config
     if config not in datasets[dataset]['configs'].keys():
         datasets[dataset]['configs'][config] = s['config']
@@ -519,7 +533,7 @@ for dataset in datasets.keys():
             writer.close()
         print('Tensorboard events written to ' + tensorboard_dir)
         print('To open tensorboard tab on web browser, run in terminal the following command:')
-        print('tensorboard --logdir ' + os.path.abspath(tensorboard_dir))
+        print('tensorboard --logdir ' + os.path.abspath(tensorboard_dir) + ' --port 6007')
 
 print('finish')
 
