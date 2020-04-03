@@ -11,7 +11,7 @@ sweep:
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERES
   max_per_root:
     search: grid
-    values: [0, 2000000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
+    values: [2000000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
   max_per_round:
     search: grid
     values: [0.2]
@@ -62,7 +62,7 @@ sweep:
 constants:
   # GENERAL EXPERIMENT PARAMETERS
   barabasi_albert_m: 10
-  weights: ones  # uniform01 | normal | ones
+  weights: normal  # uniform01 | normal | ones
   graph_type: barabasi-albert
   time_limit_sec: 300
   dataset_generation_seed: 100

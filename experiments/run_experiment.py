@@ -26,12 +26,13 @@ parser.add_argument('--tensorboard', action='store_true',
 args = parser.parse_args()
 
 # load sweep configuration
+config_file = os.path.basename(args.config_file)
 with open(os.path.join(args.experiment, args.config_file)) as f:
     sweep_config = yaml.load(f, Loader=yaml.FullLoader)
 
 # dataset generation
 data_generator = import_module('experiments.' + args.experiment + '.data_generator')
-data_abspath = data_generator.generate_data(sweep_config, args.data_dir)
+data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=False, time_limit=600)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
