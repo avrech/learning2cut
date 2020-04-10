@@ -47,7 +47,7 @@ def experiment(config):
         G = pickle.load(f)
 
     scip_seed = config['scip_seed']
-    model, x, y = maxcut_mccormic_model(G)
+    model, x, y = maxcut_mccormic_model(G, use_cuts=False)
     sepa = MccormicCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
 
     model.includeSepa(sepa, 'MLCycles',
@@ -73,7 +73,7 @@ def experiment(config):
 
     # set termination condition - exit after root node finishes
     model.setLongintParam('limits/nodes', 1)
-
+    model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever.
     # run optimizer
     model.optimize()
 
