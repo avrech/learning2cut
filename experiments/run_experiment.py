@@ -17,7 +17,7 @@ parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
 parser.add_argument('--config-file', type=str, default='config_fixed_max_cuts.yaml',
                     help='config file to generate configs for ray.tune.run')
-parser.add_argument('--log-dir', type=str, default='cut_root/results/fixed_maxcutsroot/' + NOW,
+parser.add_argument('--log-dir', type=str, default='cut_root/results/maxcutsapplied2000/' + NOW,
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
