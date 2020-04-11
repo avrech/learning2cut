@@ -14,10 +14,10 @@ sweep:
     values: [2000000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
   max_per_round:
     search: grid
-    values: [-1, 10]
+    values: [-1, 1, 10]
   criterion:
     search: grid
-    values: [random, most_violated_cycle]
+    values: [random, most_violated_cycle, most_effective]
 #  max_per_node:
 #    search: grid
 #    values: [10, 50, 100]

@@ -15,8 +15,8 @@ NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', 
 parser = ArgumentParser()
 parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
-parser.add_argument('--config-file', type=str, default='config_fixed_max_cuts.yaml',
-                    help='config file to generate configs for ray.tune.run')
+parser.add_argument('--config-file', type=str, default='cut_root/experts_config.yaml',
+                    help='relative path to config file to generate configs for ray.tune.run')
 parser.add_argument('--log-dir', type=str, default='cut_root/results/maxcutsapplied2000/' + NOW,
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='cut_root/data',
@@ -26,8 +26,7 @@ parser.add_argument('--tensorboard', action='store_true',
 args = parser.parse_args()
 
 # load sweep configuration
-config_file = os.path.basename(args.config_file)
-with open(os.path.join(args.experiment, args.config_file)) as f:
+with open(args.config_file) as f:
     sweep_config = yaml.load(f, Loader=yaml.FullLoader)
 
 # dataset generation

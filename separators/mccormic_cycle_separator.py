@@ -206,7 +206,7 @@ class MccormicCycleSeparator(Sepa):
             random_cycles = np.array(violated_cycles)
             np.random.shuffle(random_cycles)
             return random_cycles[:num_cycles_to_add]
-        elif self.criterion == 'strong_cutting':
+        elif self.criterion == 'most_effective':
             """ test all the violated cycles in probing mode, and sort them by their 
             dualbound improvement """
             assert not self.model.inRepropagation()
@@ -225,8 +225,8 @@ class MccormicCycleSeparator(Sepa):
                 # solve the LP
                 lperror, _ = self.model.solveProbingLP()
                 if not lperror:
-                    obj = self.model.getLPObjVal()
-                    new_dualbound.append(obj)
+                    dualbound = -self.model.getLPObjVal()  # for some reason it returns as negative.
+                    new_dualbound.append(dualbound)
                 else:
                     print('LPERROR OCCURED IN STRONG_CUTTING')
                     new_dualbound.append(1000000)
@@ -320,10 +320,14 @@ if __name__ == "__main__":
     seed = 223
     G = nx.barabasi_albert_graph(n, m, seed=seed)
     nx.set_edge_attributes(G, {e: np.random.normal() for e in G.edges}, name='weight')
-    model, x, y = maxcut_mccormic_model(G)
+    model, x, y = maxcut_mccormic_model(G, use_cuts=False)
     # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
-    hparams = {'max_per_root': 200000, 'max_per_round': 1, 'criterion': 'random', 'forcecut': True}
+    hparams = {'max_per_root': 200000,
+               'max_per_round': 10,
+               'criterion': 'most_effective',
+               'forcecut': True,
+               'cuts_budget': 2000}
     ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
     model.includeSepa(ci_cut, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
@@ -335,9 +339,14 @@ if __name__ == "__main__":
     # model.setIntParam('separating/maxrounds', -1)
     # model.setIntParam('separating/maxroundsroot', 10)
     model.setIntParam('separating/maxcuts', 20)
-    model.setIntParam('separating/maxcutsroot', 10)
+    model.setIntParam('separating/maxcutsroot', 100)
+    model.setIntParam('separating/maxstallroundsroot', -1)
+    model.setIntParam('separating/maxroundsroot', 2100)
+
     model.setLongintParam('limits/nodes', 1)
     model.optimize()
+    ci_cut.finish_experiment()
+    stats = ci_cut.stats
     print("Solved using user's cutting-planes callback. Objective {}".format(model.getObjVal()))
     cycle_cuts_applied = -1
     # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
@@ -346,4 +355,6 @@ if __name__ == "__main__":
     print('cycles added: ', cuts, ', cycles applied: ', cuts_applied)
     # print(ci_cut.stats)
     print('total cuts applied: ', model.getNCutsApplied())
+    print('separation time frac: ', stats['cycles_sepa_time'][-1] / stats['solving_time'][-1])
+
     print('finish')
