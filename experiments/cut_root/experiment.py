@@ -40,6 +40,10 @@ def experiment(config):
                 print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!1')
                 return
 
+    if config['max_per_round'] == 1 and config['criterion'] != sweep_config['sweep']['criterion']['values'][0]:
+        print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!1')
+        return
+
     # read graph
     graph_idx = config['graph_idx']
     filepath = os.path.join(config['data_abspath'], "graph_idx_{}.pkl".format(graph_idx))
@@ -80,23 +84,8 @@ def experiment(config):
     # collect statistics TODO collect stats every round in sepa
     sepa.finish_experiment()
     stats = sepa.stats
-    # cycles_sepa_time = sepa.time_spent / model.getSolvingTime()
-    # if config['max_per_root'] > 0:
-    #     cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(model, 'MLCycles')
-    # else:
-    #     cycle_cuts, cycle_cuts_applied = 0, 0
-    #
-    # # Statistics
-    # stats = {}
-    # stats['cycle_cuts'] = cycle_cuts
-    # stats['cycle_cuts_applied'] = cycle_cuts_applied
-    # stats['total_cuts_applied'] = model.getNCutsApplied()
-    # stats['cycles_sepa_time'] = cycles_sepa_time
-    # stats['solving_time'] = model.getSolvingTime()
-    # stats['processed_nodes'] = model.getNNodes()
-    # stats['gap'] = model.getGap()
-    # stats['LP_rounds'] = model.getNLPs()
-
+    if stats['total_ncuts_applied'] < config['cuts_budget']:
+        print('************* DID NOT EXPLOIT ALL CUTS BUDGET *************')
     # set log-dir for tensorboard logging of the specific trial
     log_dir = tune.track.trial_dir()
 
