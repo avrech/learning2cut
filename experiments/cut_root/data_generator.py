@@ -102,7 +102,7 @@ def annotate_data(datadir, time_limit=600):
         """ Define a controller and appropriate callback to add user's cuts """
         hparams = {'max_per_root': 100,
                    'max_per_node': 100,
-                   'max_per_round': 0.5,
+                   'max_per_round': 1,
                    'criterion': 'most_violated_cycle',
                    'cuts_budget': 1000000}
         ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
