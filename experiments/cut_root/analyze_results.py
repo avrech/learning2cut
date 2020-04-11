@@ -123,9 +123,9 @@ for s in tqdm(summary, desc='Parsing files'):
         s['config']['policy'] = 'default_cut_selection'
     elif s['config']['policy'] == 'baseline' and s['config']['max_per_root'] == 0:
         s['config']['policy'] = 'no_cycles'
-    elif s['config']['policy'] == 'baseline' and s['config']['max_per_round'] < 1:
+    elif s['config']['policy'] == 'baseline' and s['config']['max_per_round'] > 0:
         s['config']['policy'] = 'force{}{}'.format(s['config']['max_per_round'], s['config']['criterion'])
-    elif s['config']['policy'] == 'baseline' and s['config']['max_per_round'] == 1:
+    elif s['config']['policy'] == 'baseline' and s['config']['max_per_round'] == -1:
         s['config']['policy'] = 'force_all_cycles'
 
     # create skeleton for storing stats collected from experiments with config
