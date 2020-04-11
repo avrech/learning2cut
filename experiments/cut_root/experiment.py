@@ -84,7 +84,7 @@ def experiment(config):
     # collect statistics TODO collect stats every round in sepa
     sepa.finish_experiment()
     stats = sepa.stats
-    if stats['total_ncuts_applied'] < config['cuts_budget']:
+    if stats['total_ncuts_applied'][-1] < config['cuts_budget']:
         print('************* DID NOT EXPLOIT ALL CUTS BUDGET *************')
     # set log-dir for tensorboard logging of the specific trial
     log_dir = tune.track.trial_dir()

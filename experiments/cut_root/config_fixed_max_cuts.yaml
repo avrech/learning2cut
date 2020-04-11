@@ -14,7 +14,7 @@ sweep:
     values: [2000000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
   max_per_round:
     search: grid
-    values: [1]
+    values: [-1]
   criterion:
     search: grid
     values: [most_violated_cycle]

@@ -14,16 +14,13 @@ sweep:
     values: [2000000] # in practice it is disable / enable. 0 must be the first in list for experiment control reason
   max_per_round:
     search: grid
-    values: [1, 0.2]
+    values: [-1, 10]
   criterion:
     search: grid
     values: [random, most_violated_cycle]
 #  max_per_node:
 #    search: grid
 #    values: [10, 50, 100]
-#  max_per_round_relative_to:
-#    search: grid
-#    values: [num_vars] #, 'num_violations'] #, num_fractions
   forcecut:
     search: grid
     values: [True]
@@ -72,7 +69,6 @@ constants:
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
 #  max_per_node: 1000
 #  max_per_round: 1
-#  max_per_round_relative_to: num_vars
 #  criterion: most_infeasible_var
 #  max_per_root: 2000
 

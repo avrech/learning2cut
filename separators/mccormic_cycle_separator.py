@@ -25,10 +25,9 @@ class MccormicCycleSeparator(Sepa):
         self.forcecut = hparams.get('forcecut', False)
 
         self.max_per_node = hparams.get('max_per_node', 5)
-        self.max_per_round = hparams.get('max_per_round', 0.1)
+        self.max_per_round = hparams.get('max_per_round', -1)  # -1 means unlimited
         self.max_per_root = hparams.get('max_per_root', 100)
         self.criterion = hparams.get('criterion', 'most_violated_cycle')
-        self.max_per_round_relative_to = hparams.get('max_per_round_relative_to', 'num_vars')
         self.cuts_budget = hparams.get('cuts_budget', 2000)
 
         self.chordless_only = hparams.get('chordless_only', False)
@@ -37,6 +36,7 @@ class MccormicCycleSeparator(Sepa):
 
         # statistics
         self.ncuts = 0
+        self.ncuts_probing = 0
         self.time_spent = 0
         self.stats = {
             'cycle_ncuts': [],
@@ -167,22 +167,10 @@ class MccormicCycleSeparator(Sepa):
         costs = []
         already_added = set()
         max_cycles = self.max_per_root if self.model.getCurrentNode().getNumber() == 1 else self.max_per_node
-        if self.max_per_round_relative_to == 'num_vars':
-            num_cycles_to_add = int(np.ceil(self.max_per_round * self.G.number_of_nodes()))
-        elif self.max_per_round_relative_to == 'num_fractions':
-            num_fractions = self.G.number_of_nodes() - sum(np.logical_or(x == 0, x == 1))
-            num_cycles_to_add = int(np.ceil(self.max_per_round * num_fractions))
-        elif self.max_per_round_relative_to == 'num_violations':
-            num_cycles_to_add = -1
+        num_cycles_to_add = self.max_per_round if self.max_per_round > 0 else self.G.number_of_nodes()
         num_cycles_to_add = np.min([num_cycles_to_add,
                                     max_cycles - self._ncuts_at_cur_node,
                                     self.cuts_budget - self.model.getNCutsApplied()])
-
-        if self.criterion == 'most_infeasible_var':
-            early_exit = True
-        else:
-            # self.criterion == 'most_violated_cycle' or self.criterion == 'random':
-            early_exit = False
 
         for runs, i in enumerate(most_infeasible_nodes):
             cost, path = dijkstra(self._dijkstra_edge_list, (i, 1), (i, 2))
@@ -203,29 +191,53 @@ class MccormicCycleSeparator(Sepa):
                     violated_cycles.append((cycle_edges, F, C_minus_F))
                     costs.append(cost)
                     already_added.add((tuple(F), tuple(C_minus_F)))
-            if early_exit and len(violated_cycles) == num_cycles_to_add:
-                # record the fraction of useful dijkstra runs
-                self._separation_efficiency = num_cycles_to_add / (runs + 1)
-                return violated_cycles
 
         # define how many cycles to add
-        num_violations = len(violated_cycles)
-        if self.max_per_round_relative_to == 'num_violations':
-            num_cycles_to_add = int(np.ceil(self.max_per_round * num_violations))
 
-        # record the fraction of useful dijkstra runs
-        self._separation_efficiency = num_cycles_to_add / len(most_infeasible_nodes)
+
         if self.criterion == 'most_violated_cycle':
             # sort the violated cycles, most violated first (lower cost):
             most_violated_cycles = np.argsort(costs)
             return np.array(violated_cycles)[most_violated_cycles[:num_cycles_to_add]]
-        else:
+        elif self.criterion == 'most_infeasible_var':
+            return np.array(violated_cycles)[:num_cycles_to_add]
+        elif self.criterion == 'random':
             # choose random cycles
             random_cycles = np.array(violated_cycles)
             np.random.shuffle(random_cycles)
             return random_cycles[:num_cycles_to_add]
+        elif self.criterion == 'strong_cutting':
+            """ test all the violated cycles in probing mode, and sort them by their 
+            dualbound improvement """
+            assert not self.model.inRepropagation()
+            assert not self.model.inProbing()
+            new_dualbound = []
+            for cycle in violated_cycles:
+                self.model.startProbing()
+                assert not self.model.isObjChangedProbing()
+                # self.model.fixVarProbing(self.cont, 2.0)
+                # self.model.constructLP()
+                # todo - check if separation storage flush is needed
+                # add cycle to the separation storage
+                self.add_cut(cycle, probing=True)
+                self.model.applyCutsProbing()
+                self.ncuts_probing += 1
+                # solve the LP
+                lperror, _ = self.model.solveProbingLP()
+                if not lperror:
+                    obj = self.model.getLPObjVal()
+                    new_dualbound.append(obj)
+                else:
+                    print('LPERROR OCCURED IN STRONG_CUTTING')
+                    new_dualbound.append(1000000)
+                self.model.endProbing()
+            assert len(new_dualbound) == len(violated_cycles)
+            # sort the violated cycles, most effective first (lower dualbound):
+            most_effective = np.argsort(new_dualbound)
+            return np.array(violated_cycles)[most_effective[:num_cycles_to_add]]
 
-    def add_cut(self, violated_cycle):
+
+    def add_cut(self, violated_cycle, probing=False):
         result = SCIP_RESULT.DIDNOTRUN
         model = self.model
 
@@ -242,7 +254,8 @@ class MccormicCycleSeparator(Sepa):
         cycle_edges, F, C_minus_F = violated_cycle
 
         cutrhs = len(F) - 1
-        cut = model.createEmptyRowSepa(self, "cycle%d" % self.ncuts, lhs=None, rhs=cutrhs,
+        name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
+        cut = model.createEmptyRowSepa(self, name, lhs=None, rhs=cutrhs,
                                        local=self.local,
                                        removable=self.removable)
         model.cacheRowExtensions(cut)
