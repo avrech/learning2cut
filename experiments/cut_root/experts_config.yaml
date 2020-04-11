@@ -44,7 +44,7 @@ sweep:
 #    values: [-1]
   maxroundsroot:
     search: grid
-    values: [500]
+    values: [-1]
 #  maxcuts:
 #    search: grid
 #    values: [100]
