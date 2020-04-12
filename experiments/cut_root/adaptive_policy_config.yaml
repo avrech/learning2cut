@@ -65,8 +65,9 @@ constants:
   time_limit_sec: 300
   dataset_generation_seed: 100
   graph_size: 50
-  policy: expert
+  policy: adaptive
   cuts_budget: 2000
+  policy_update_freq: 10
 
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
 #  max_per_node: 1000

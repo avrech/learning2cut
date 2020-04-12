@@ -6,7 +6,7 @@ import numpy as np
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
 from utils.functions import dijkstra
 import operator
-
+import pickle
 
 class MccormicCycleSeparator(Sepa):
     def __init__(self, G, x, y, name='MLCycles',
@@ -34,10 +34,20 @@ class MccormicCycleSeparator(Sepa):
 
         self._dijkstra_edge_list = None
 
+        # policy
+        self.policy = hparams.get('policy', 'baseline')
+
+        # adaptive policy
+        self.starting_policies = []
+        self.policy_update_freq = hparams.get('policy_update_freq', -1)  # number of LP rounds between each params update.
+        if self.policy == 'adaptive':
+            with open('starting_policies.pkl', 'rb') as f:
+                self.starting_policies = pickle.load(f)
+
         # statistics
         self.ncuts = 0
         self.ncuts_probing = 0
-        self._lp_rounds = 0
+
         # accumulate probing stats overhead for subtracting from the problem solving stats
         self._cuts_probing = 0
         self._cuts_applied_probing = 0
@@ -56,7 +66,7 @@ class MccormicCycleSeparator(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
-        self._round_cnt = 0
+        self._n_lp_rounds = 0
         self._sepa_cnt = 0
         self._separation_efficiency = 0
         self._ncuts_at_cur_node = 0
@@ -70,11 +80,16 @@ class MccormicCycleSeparator(Sepa):
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
         self.update_stats()
+
+        if self.policy == 'adaptive' and self._n_lp_rounds % self.policy_update_freq == 0:
+            config = self.starting_policies.pop(0) if len(self.starting_policies) > 0 else {}
+            self.update_cut_selection_policy(config=config)
+
         t0 = time()
         result = self.separate()
         t_left = time() - t0
         self.time_spent += t_left
-        self._round_cnt += 1
+        self._n_lp_rounds += 1
         return result
 
     def finish_experiment(self):
@@ -319,6 +334,17 @@ class MccormicCycleSeparator(Sepa):
         cycle = nx.subgraph(self.G, cycle_nodes)
         return nx.is_chordal(cycle)
 
+    def update_cut_selection_policy(self, config={}):
+        """
+        Set self.model params to config. If config is empty, set SCIP defauls.
+        :param config: a dictionary containing the following key-value pairs.
+        """
+        # set scip params:
+        self.model.setRealParam('separating/objparalfac', config.get('objparalfac',0.1))
+        self.model.setRealParam('separating/dircutoffdistfac', config.get('dircutoffdistfac',0.5))
+        self.model.setRealParam('separating/efficacyfac', config.get('efficacyfac', 1))
+        self.model.setRealParam('separating/intsupportfac', config.get('intsupportfac', 0.1))
+        self.model.setIntParam('separating/maxcutsroot', config.get('maxcutsroot', 2000))
 
 
 if __name__ == "__main__":
@@ -339,10 +365,26 @@ if __name__ == "__main__":
     # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
     hparams = {'max_per_root': 200000,
-               'max_per_round': 10,
-               'criterion': 'most_effective',
-               'forcecut': True,
-               'cuts_budget': 2000}
+               'max_per_round': -1,
+               'criterion': 'random',
+               'forcecut': False,
+               'cuts_budget': 2000,
+               'policy': 'adaptive',
+               'policy_update_freq': 10,
+               'starting_policies': [{'objparalfac': 0.1,
+                                      'dircutoffdistfac': 0.5,
+                                      'efficacyfac': 1,
+                                      'intsupportfac': 0.1,
+                                      'maxcutsroot': 1},
+                                     {'objparalfac': 0.1,
+                                      'dircutoffdistfac': 0.5,
+                                      'efficacyfac': 1,
+                                      'intsupportfac': 0.1,
+                                      'maxcutsroot': 5},
+
+                                     ]
+               }
+
     ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
     model.includeSepa(ci_cut, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
@@ -357,7 +399,7 @@ if __name__ == "__main__":
     model.setIntParam('separating/maxcutsroot', 100)
     model.setIntParam('separating/maxstallroundsroot', -1)
     model.setIntParam('separating/maxroundsroot', 2100)
-
+    model.setRealParam('limits/time', 300)
     model.setLongintParam('limits/nodes', 1)
     model.optimize()
     ci_cut.finish_experiment()
@@ -371,5 +413,5 @@ if __name__ == "__main__":
     # print(ci_cut.stats)
     print('total cuts applied: ', model.getNCutsApplied())
     print('separation time frac: ', stats['cycles_sepa_time'][-1] / stats['solving_time'][-1])
-
+    print('cuts applied vs time', stats['total_ncuts_applied'])
     print('finish')

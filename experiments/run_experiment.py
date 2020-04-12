@@ -21,8 +21,7 @@ parser.add_argument('--log-dir', type=str, default='cut_root/results/maxcutsappl
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
-parser.add_argument('--tensorboard', action='store_true',
-                    help='log to tensorboard')
+
 args = parser.parse_args()
 
 # load sweep configuration
