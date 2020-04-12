@@ -41,7 +41,7 @@ class MccormicCycleSeparator(Sepa):
         self.starting_policies = []
         self.policy_update_freq = hparams.get('policy_update_freq', -1)  # number of LP rounds between each params update.
         if self.policy == 'adaptive':
-            with open('starting_policies.pkl', 'rb') as f:
+            with open(hparams['starting_policies_abspath'], 'rb') as f:
                 self.starting_policies = pickle.load(f)
 
         # statistics
