@@ -37,6 +37,10 @@ class MccormicCycleSeparator(Sepa):
         # statistics
         self.ncuts = 0
         self.ncuts_probing = 0
+        self._lp_iterations_probing = 0
+        self._lp_rounds = 0
+        self._cuts_probing = 0
+        self._cuts_applied_probing = 0
         self.time_spent = 0
         self.stats = {
             'cycle_ncuts': [],
@@ -84,15 +88,15 @@ class MccormicCycleSeparator(Sepa):
         # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
         # if self._round_cnt > 0:
         cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
-        self.stats['cycle_ncuts'].append(cycle_cuts)
-        self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied)
-        self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
+        self.stats['cycle_ncuts'].append(cycle_cuts - self._cuts_probing)
+        self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied - self._cuts_applied_probing)
+        self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied() - self._cuts_applied_probing)
         self.stats['cycles_sepa_time'].append(self.time_spent)
         self.stats['solving_time'].append(self.model.getSolvingTime())
         self.stats['processed_nodes'].append(self.model.getNNodes())
         self.stats['gap'].append(self.model.getGap())
-        self.stats['lp_rounds'].append(self.model.getNLPs())
-        self.stats['lp_iterations'].append(self.model.getNLPIterations())
+        self.stats['lp_rounds'].append(self.model.getNLPs() - self._lp_rounds_probing)
+        self.stats['lp_iterations'].append(self.model.getNLPIterations() - self._lp_iterations_probing)
         self.stats['dualbound'].append(self.model.getDualbound())
 
     def separate(self):
@@ -212,6 +216,9 @@ class MccormicCycleSeparator(Sepa):
             assert not self.model.inRepropagation()
             assert not self.model.inProbing()
             new_dualbound = []
+            self._cuts_probing, self._cuts_applied_probing = get_separator_cuts_applied(self.model, self.name)
+            self._lp_iterations_probing = self.model.getNLPIterations()
+            self._lp_rounds_probing = self.model.getNLPs()
             for cycle in violated_cycles:
                 self.model.startProbing()
                 assert not self.model.isObjChangedProbing()
@@ -231,6 +238,12 @@ class MccormicCycleSeparator(Sepa):
                     print('LPERROR OCCURED IN STRONG_CUTTING')
                     new_dualbound.append(1000000)
                 self.model.endProbing()
+            # calculate how many cuts applied in probing to subtract from stats
+            ncuts, ncuts_applied = get_separator_cuts_applied(self.model, self.name)
+            self._cuts_probing = ncuts - self._cuts_probing
+            self._cuts_applied_probing = ncuts_applied - self._cuts_applied_probing
+            self._lp_iterations_probing = self.model.getNLPIterations() - self._lp_iterations_probing
+            self._lp_rounds_probing = self.model.getNLPs() - self._lp_rounds_probing
             assert len(new_dualbound) == len(violated_cycles)
             # sort the violated cycles, most effective first (lower dualbound):
             most_effective = np.argsort(new_dualbound)
