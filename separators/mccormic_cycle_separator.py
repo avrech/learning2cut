@@ -37,10 +37,11 @@ class MccormicCycleSeparator(Sepa):
         # statistics
         self.ncuts = 0
         self.ncuts_probing = 0
-        self._lp_iterations_probing = 0
         self._lp_rounds = 0
         self._cuts_probing = 0
         self._cuts_applied_probing = 0
+        self._lp_iterations_probing = 0
+        self._lp_rounds_probing = 0
         self.time_spent = 0
         self.stats = {
             'cycle_ncuts': [],
