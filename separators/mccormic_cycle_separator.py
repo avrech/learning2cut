@@ -38,6 +38,7 @@ class MccormicCycleSeparator(Sepa):
         self.ncuts = 0
         self.ncuts_probing = 0
         self._lp_rounds = 0
+        # accumulate probing stats overhead for subtracting from the problem solving stats
         self._cuts_probing = 0
         self._cuts_applied_probing = 0
         self._lp_iterations_probing = 0
@@ -63,7 +64,7 @@ class MccormicCycleSeparator(Sepa):
         self.finished = False
 
     def sepaexeclp(self):
-        if self.model.getNCutsApplied() >= self.cuts_budget:
+        if self.model.getNCutsApplied() - self._cuts_applied_probing >= self.cuts_budget:
             # terminate
             self.finish_experiment()
             return {"result": SCIP_RESULT.DIDNOTRUN}
@@ -217,9 +218,9 @@ class MccormicCycleSeparator(Sepa):
             assert not self.model.inRepropagation()
             assert not self.model.inProbing()
             new_dualbound = []
-            self._cuts_probing, self._cuts_applied_probing = get_separator_cuts_applied(self.model, self.name)
-            self._lp_iterations_probing = self.model.getNLPIterations()
-            self._lp_rounds_probing = self.model.getNLPs()
+            cuts_probing_start, cuts_applied_probing_start = get_separator_cuts_applied(self.model, self.name)
+            lp_iterations_probing_start = self.model.getNLPIterations()
+            lp_rounds_probing_start = self.model.getNLPs()
             for cycle in violated_cycles:
                 self.model.startProbing()
                 assert not self.model.isObjChangedProbing()
@@ -240,11 +241,11 @@ class MccormicCycleSeparator(Sepa):
                     new_dualbound.append(1000000)
                 self.model.endProbing()
             # calculate how many cuts applied in probing to subtract from stats
-            ncuts, ncuts_applied = get_separator_cuts_applied(self.model, self.name)
-            self._cuts_probing = ncuts - self._cuts_probing
-            self._cuts_applied_probing = ncuts_applied - self._cuts_applied_probing
-            self._lp_iterations_probing = self.model.getNLPIterations() - self._lp_iterations_probing
-            self._lp_rounds_probing = self.model.getNLPs() - self._lp_rounds_probing
+            ncuts_probing_end, ncuts_applied_probing_end = get_separator_cuts_applied(self.model, self.name)
+            self._cuts_probing += ncuts_probing_end - cuts_probing_start
+            self._cuts_applied_probing += ncuts_applied_probing_end - cuts_applied_probing_start
+            self._lp_iterations_probing += self.model.getNLPIterations() - lp_iterations_probing_start
+            self._lp_rounds_probing += self.model.getNLPs() - lp_rounds_probing_start
             assert len(new_dualbound) == len(violated_cycles)
             # sort the violated cycles, most effective first (lower dualbound):
             most_effective = np.argsort(new_dualbound)
