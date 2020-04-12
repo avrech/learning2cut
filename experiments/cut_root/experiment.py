@@ -52,6 +52,7 @@ def experiment(config):
 
     scip_seed = config['scip_seed']
     model, x, y = maxcut_mccormic_model(G, use_cuts=False)
+
     sepa = MccormicCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
 
     model.includeSepa(sepa, 'MLCycles',
