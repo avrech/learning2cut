@@ -92,7 +92,7 @@ class MccormicCycleSeparator(Sepa):
         cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
         self.stats['cycle_ncuts'].append(cycle_cuts - self._cuts_probing)
         self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied - self._cuts_applied_probing)
-        self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied() - self._cuts_applied_probing)
+        self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
         self.stats['cycles_sepa_time'].append(self.time_spent)
         self.stats['solving_time'].append(self.model.getSolvingTime())
         self.stats['processed_nodes'].append(self.model.getNNodes())
