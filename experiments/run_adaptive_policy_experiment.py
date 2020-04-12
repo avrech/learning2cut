@@ -54,8 +54,10 @@ track.init()
 
 # run experiment:
 # initialize starting policies:
+os.makedirs(args.log_dir)
 starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
-tune_search_space['starting_policies_abspath'] = tune.grid_search([data_abspath])
+tune_search_space['starting_policies_abspath'] = tune.grid_search([starting_policies_abspath])
+
 with open(starting_policies_abspath, 'wb') as f:
     pickle.dump([], f)
 
