@@ -68,6 +68,7 @@ constants:
   policy: adaptive
   cuts_budget: 2000
   policy_update_freq: 10
+  n_policy_iterations: 10
 
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
 #  max_per_node: 1000

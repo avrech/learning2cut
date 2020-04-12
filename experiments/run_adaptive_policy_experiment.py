@@ -54,8 +54,11 @@ track.init()
 
 # run experiment:
 # initialize starting policies:
-with open(os.path.join('cut_root', 'starting_policies.pkl'), 'wb') as f:
+starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
+tune_search_space['starting_policies_abspath'] = tune.grid_search([data_abspath])
+with open(starting_policies_abspath, 'wb') as f:
     pickle.dump([], f)
+
 # run n policy iterations,
 # in each iteration k, load k-1 starting policies from args.experiment,
 # run exhaustive search for the best k'th policy - N LP rounds search,
@@ -66,7 +69,7 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     # run exhaustive search
     iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter))
     iter_analysisdir = os.path.join(args.log_dir, 'iter{}analysis'.format(k_iter))
-    tune.run(experiment.experiment,
+    tune.run(experiment,
              config=tune_search_space,
              resources_per_trial={'cpu': 1, 'gpu': 0},
              local_dir=iter_logdir,
@@ -83,10 +86,10 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     best_policy = analysis['best_policy'][0]
 
     # append best policy to starting policies
-    with open(os.path.join('cut_root', 'starting_policies.pkl'), 'rb') as f:
+    with open(starting_policies_abspath, 'rb') as f:
         starting_policies = pickle.load(f)
     starting_policies.append(best_policy)
-    with open(os.path.join('cut_root', 'starting_policies.pkl'), 'wb') as f:
+    with open(starting_policies_abspath, 'wb') as f:
         pickle.dump(starting_policies, f)
 
 # finally create a tensorboard from the best adaptive policy only:
