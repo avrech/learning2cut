@@ -51,7 +51,7 @@ def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60):
                 """ Define a controller and appropriate callback to add user's cuts """
                 hparams = {'max_per_root': 500,
                            'max_per_node': 100,
-                           'max_per_round': 1,
+                           'max_per_round': -1,
                            'criterion': 'most_violated_cycle',
                            'cuts_budget': 1000000}
                 ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)

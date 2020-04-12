@@ -30,7 +30,7 @@ with open(args.config_file) as f:
 
 # dataset generation
 data_generator = import_module('experiments.' + args.experiment + '.data_generator')
-data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=False, time_limit=600)
+data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
