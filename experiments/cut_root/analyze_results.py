@@ -67,7 +67,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             print('Adding dataset ', dataset)
             analysis[dataset] = {}
             datasets[dataset] = {}
-            datasets[dataset]['config_keys'] = [k for k in s['config'].keys() if k != 'scip_seed' and k != 'graph_idx' and k != 'sweep_config' and k != 'data_abspath']
+            datasets[dataset]['config_keys'] = [k for k in s['config'].keys() if k != 'scip_seed' and k != 'graph_idx' and k != 'sweep_config' and k != 'data_abspath' and k != 'starting_policies_abspath']
             # store these two to ensure that all the experiments completed successfully.
             datasets[dataset]['scip_seeds'] = set(s['config']['sweep_config']['sweep']['scip_seed']['values'])
             datasets[dataset]['graph_idx_range'] = list(range(s['config']['sweep_config']['sweep']['graph_idx']['range']))
@@ -112,7 +112,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 s['config']['efficacyfac'] == 1 and \
                 s['config']['dircutoffdistfac'] == 0.5 and \
                 s['config']['objparalfac'] == 0.1 and \
-                not s['config']['forcecut']:
+                not s['config']['forcecut'] and \
+                s['config']['policy'] != 'adaptive':
             s['config']['policy'] = 'default_cut_selection'
         elif s['config']['policy'] == 'baseline' and s['config']['max_per_root'] == 0:
             s['config']['policy'] = 'no_cycles'
@@ -124,7 +125,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         # create skeleton for storing stats collected from experiments with config
         if config not in datasets[dataset]['configs'].keys():
             datasets[dataset]['configs'][config] = s['config']
-            if s['config']['policy'] == 'expert':
+            if s['config']['policy'] == 'expert' or s['config']['policy'] == 'adaptive':
                 results[dataset][config] = {stat_key: {graph_idx: {}
                                                        for graph_idx in range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
                                             for stat_key in s['stats'].keys()}
@@ -134,7 +135,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               for stat_key in s['stats'].keys()}
 
         # now store the experiment results in the appropriate dictionary
-        dictionary = results if s['config']['policy'] == 'expert' else baselines
+        dictionary = baselines if s['config']['policy'] == 'baseline' else results
         for stat_key, value in s['stats'].items():
             dictionary[dataset][config][stat_key][graph_idx][scip_seed] = value
 
