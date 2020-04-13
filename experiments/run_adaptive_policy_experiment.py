@@ -60,9 +60,9 @@ if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
 starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
 tune_search_space['starting_policies_abspath'] = tune.grid_search([starting_policies_abspath])
-
-with open(starting_policies_abspath, 'wb') as f:
-    pickle.dump([], f)
+if not os.path.exists(starting_policies_abspath):
+    with open(starting_policies_abspath, 'wb') as f:
+        pickle.dump([], f)
 
 # run n policy iterations,
 # in each iteration k, load k-1 starting policies from args.experiment,
@@ -73,11 +73,13 @@ iter_logdir = ''
 for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     # recovering from checkpoints:
     # skip iteration if completed in previous runs
+    print('loading stating policies from: ', starting_policies_abspath)
     with open(starting_policies_abspath, 'rb') as f:
         starting_policies = pickle.load(f)
     if len(starting_policies) > k_iter:
         print('iteration completed - continue')
         continue
+    print('################ RUNNING ITERATION {} ################'.format(k_iter))
 
     # run exhaustive search
     iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter))
