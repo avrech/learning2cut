@@ -71,6 +71,14 @@ with open(starting_policies_abspath, 'wb') as f:
 # Then when all experiments ended, find the best policy for the i'th iteration and append to starting policies.
 iter_logdir = ''
 for k_iter in range(sweep_config['constants']['n_policy_iterations']):
+    # recovering from checkpoints:
+    # skip iteration if completed in previous runs
+    with open(starting_policies_abspath, 'rb') as f:
+        starting_policies = pickle.load(f)
+    if len(starting_policies) > k_iter:
+        print('iteration completed - continue')
+        continue
+
     # run exhaustive search
     iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter))
     iter_analysisdir = os.path.join(args.log_dir, 'iter{}analysis'.format(k_iter))
