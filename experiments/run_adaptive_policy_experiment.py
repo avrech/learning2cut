@@ -13,6 +13,8 @@ from datetime import datetime
 import os, pickle
 from experiments.cut_root.experiment import experiment
 from experiments.cut_root.analyze_results import analyze_results
+from tqdm import tqdm
+from pathlib import Path
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
@@ -72,6 +74,16 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     # run exhaustive search
     iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter))
     iter_analysisdir = os.path.join(args.log_dir, 'iter{}analysis'.format(k_iter))
+    # create a list of completed trials for from previos checkpoints for recovering from failures.
+    print('loading checkpoints from ', iter_logdir)
+    checkpoint = []
+    for path in tqdm(Path(iter_logdir).rglob('experiment_results.pkl'), desc='Loading files'):
+        with open(path, 'rb') as f:
+            res = pickle.load(f)
+            checkpoint.append(res)
+    with open(os.path.join(iter_logdir, 'checkpoint.pkl'), 'wb') as f:
+        pickle.dump(checkpoint, f)
+
     tune.run(experiment,
              config=tune_search_space,
              resources_per_trial={'cpu': 1, 'gpu': 0},

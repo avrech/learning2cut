@@ -40,16 +40,16 @@ def experiment(config):
     # search in the iteration logdir if the current experiment has been already executed.
     if config['policy'] == 'adaptive':
         iterdir = os.path.dirname(os.path.dirname(log_dir))
-        print('loading checkpoints from ', iterdir)
-        for path in tqdm(Path(iterdir).rglob('experiment_results.pkl'), desc='Loading files'):
-            with open(path, 'rb') as f:
-                res = pickle.load(f)
+        print('loading checkpoint from ', iterdir)
+        with open(os.path.join(iterdir, 'checkpoint.pkl'), 'rb') as f:
+            checkpoint = pickle.load(f)
+        for res in checkpoint:
             cfg = res['config']
             match = True
             for k, v in config.items():
                 if k != 'sweep_config' and v != cfg[k]:
                     match = False
-                    print('mismatch:', k, v, cfg[k])
+                    # print('mismatch:', k, v, cfg[k])
                     break
             if match:
                 print('experiment results found!')
