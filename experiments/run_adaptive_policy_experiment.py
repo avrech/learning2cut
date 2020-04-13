@@ -83,6 +83,8 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
 
     # run exhaustive search
     iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter))
+    if not os.path.exists(iter_logdir):
+        os.makedirs(iter_logdir)
     iter_analysisdir = os.path.join(args.log_dir, 'iter{}analysis'.format(k_iter))
     # create a list of completed trials for from previos checkpoints for recovering from failures.
     print('loading checkpoints from ', iter_logdir)
