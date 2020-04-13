@@ -54,7 +54,8 @@ track.init()
 
 # run experiment:
 # initialize starting policies:
-os.makedirs(args.log_dir)
+if not os.path.exists(args.log_dir):
+    os.makedirs(args.log_dir)
 starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
 tune_search_space['starting_policies_abspath'] = tune.grid_search([starting_policies_abspath])
 
