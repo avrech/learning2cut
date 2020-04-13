@@ -21,9 +21,11 @@ from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
 from separators.mccormic_cycle_separator import MccormicCycleSeparator
 import pickle
 import os
-
+from tqdm import tqdm
+from pathlib import Path
 
 def experiment(config):
+    log_dir = tune.track.trial_dir()
     # load config if experiment launched from complete_experiment.py
     if 'complete_experiment' in config.keys():
         config = config['complete_experiment']
@@ -32,6 +34,27 @@ def experiment(config):
     sweep_config = config['sweep_config']
     for k, v in sweep_config['constants'].items():
         config[k] = v
+
+    # recover from checkpoints for adaptive policy experiment only.
+    # for a case the long experiment terminated unexpectedly and launched again,
+    # search in the iteration logdir if the current experiment has been already executed.
+    if config['policy'] == 'adaptive':
+        iterdir = os.path.dirname(os.path.dirname(log_dir))
+        print('loading checkpoints from ', iterdir)
+        for path in tqdm(Path(iterdir).rglob('experiment_results.pkl'), desc='Loading files'):
+            with open(path, 'rb') as f:
+                res = pickle.load(f)
+            cfg = res['config']
+            match = True
+            for k, v in config.items():
+                if k != 'sweep_config' and v != cfg[k]:
+                    match = False
+                    print('mismatch:', k, v, cfg[k])
+                    break
+            if match:
+                print('experiment results found!')
+                return
+
 
     if config['max_per_root'] == 0:
         # run this configuration only once with all hparams get their first choice (the default)
@@ -87,8 +110,6 @@ def experiment(config):
     stats = sepa.stats
     if stats['total_ncuts_applied'][-1] < config['cuts_budget']:
         print('************* DID NOT EXPLOIT ALL CUTS BUDGET *************')
-    # set log-dir for tensorboard logging of the specific trial
-    log_dir = tune.track.trial_dir()
 
     # save stats to pkl
     experiment_results_filepath = os.path.join(log_dir, 'experiment_results.pkl')
