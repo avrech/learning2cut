@@ -81,7 +81,7 @@ class MccormicCycleSeparator(Sepa):
 
         self.update_stats()
 
-        if self.policy == 'adaptive' and self._n_lp_rounds % self.policy_update_freq == 0:
+        if self.policy == 'adaptive' and self._n_lp_rounds > 0 and self._n_lp_rounds % self.policy_update_freq == 0:
             config = self.starting_policies.pop(0) if len(self.starting_policies) > 0 else {}
             self.update_cut_selection_policy(config=config)
 
