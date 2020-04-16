@@ -340,14 +340,14 @@ class MccormicCycleSeparator(Sepa):
         :param config: a dictionary containing the following key-value pairs.
         """
         # set scip params:
-        if self.hparams['debug']:
+        if self.hparams.get('debug', False):
             oldparams = {p: self.model.getParam('separating/'+p) for p in ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot']}
         self.model.setRealParam('separating/objparalfac', config.get('objparalfac',0.1))
         self.model.setRealParam('separating/dircutoffdistfac', config.get('dircutoffdistfac',0.5))
         self.model.setRealParam('separating/efficacyfac', config.get('efficacyfac', 1))
         self.model.setRealParam('separating/intsupportfac', config.get('intsupportfac', 0.1))
         self.model.setIntParam('separating/maxcutsroot', config.get('maxcutsroot', 2000))
-        if self.hparams['debug']:
+        if self.hparams.get('debug', False):
             newparams = {p: self.model.getParam('separating/'+p) for p in ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot']}
             print('changed scip params from:')
             print(oldparams)
