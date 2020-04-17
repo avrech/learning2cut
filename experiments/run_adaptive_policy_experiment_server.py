@@ -31,29 +31,32 @@ parser.add_argument('--cpus-per-task', type=int, default=32,
 args = parser.parse_args()
 
 def submit_job(config_file, jobname):
-    # SLURM COMMAND
-    commandline = 'sbatch ' + \
-        ' --time=00::00' + \
-        ' --account=def-alodi' + \
-        ' --output=graham-output/%j.out' + \
-        ' --mem-per-cpu=8G' + \
-        ' --cpus-per-task=1' + \
-        ' --mem=0' + \
-        ' --mail-user=avrech@campus.tecnion.ac.il' + \
-        ' --mail-type=BEGIN' + \
-        ' --mail-type=END' + \
-        ' --mail-type=FAIL' + \
-        ' --nodes=1' + \
-        ' --job-name={}'.format(jobname) + \
-        ' --ntasks-per-node=1' + \
-        ' --cpus-per-task='.format(args.cpus_per_task) + \
-        ' python adaptive_policy_runner.py --experiment {} --log_dir {} --config-file {} --data-dir {}'.format(
+    # CREATE SBATCH FILE
+    job_file = jobname + '.sh'
+    with open(job_file) as fh:
+        fh.writelines("#!/bin/bash\n")
+        fh.writelines('#SBATCH --time=00::00\n')
+        fh.writelines('#SBATCH --account=def-alodi\n')
+        fh.writelines('#SBATCH --output=output/%j.out\n')
+        fh.writelines('#SBATCH --mem-per-cpu=8G\n')
+        fh.writelines('#SBATCH --cpus-per-task=1\n')
+        fh.writelines('#SBATCH --mem=0\n')
+        fh.writelines('#SBATCH --mail-user=avrech@campus.technion.ac.il\n')
+        fh.writelines('#SBATCH --mail-type=END\n')
+        fh.writelines('#SBATCH --mail-type=FAIL\n')
+        fh.writelines('#SBATCH --nodes=1\n')
+        fh.writelines('#SBATCH --job-name={}\n'.format(jobname))
+        fh.writelines('#SBATCH --ntasks-per-node=1\n')
+        fh.writelines('#SBATCH --cpus-per-task={}\n'.format(args.cpus_per_task))
+        fh.writelines(' python adaptive_policy_runner.py --experiment {} --log_dir {} --config-file {} --data-dir {}\n'.format(
             os.path.abspath(args.experiment),
             os.path.abspath(args.log_dir),
             config_file,
             os.path.abspath(args.data_dir)
-        )
-    os.system(commandline)
+        ))
+
+    os.system("sbatch {}".format(job_file))
+    print('sbatch {}'.format(job_file))
 
 # load sweep configuration
 with open(args.config_file) as f:
@@ -146,14 +149,16 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     # hardcoded config files are predefined.
     # submit 5 experiments each one execute one config file.
     # after all jobs complete, continue to the next iteration.
+    print('submitting jobs:')
     for cfgidx in range(5):
         config_file = os.path.abspath('cut_root/adaptive_policy_config{}.yaml'.format(cfgidx))
-        jobname = 'runner{}'.format(cfgidx)
+        jobname = 'iter{}-cfg{}'.format(k_iter, cfgidx)
         submit_job(config_file, jobname)
         time.sleep(1)
 
     print('submitted jobs')
     print('run again when all jobs completed')
+    exit(0)
 
 # finally create a tensorboard from the best adaptive policy only:
 analyze_results(rootdir=iter_logdir, dstdir=os.path.join(args.log_dir, 'final_analysis'), tensorboard=True)
