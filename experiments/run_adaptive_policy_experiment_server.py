@@ -33,7 +33,7 @@ args = parser.parse_args()
 def submit_job(config_file, jobname):
     # CREATE SBATCH FILE
     job_file = jobname + '.sh'
-    with open(job_file) as fh:
+    with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
         fh.writelines('#SBATCH --time=00::00\n')
         fh.writelines('#SBATCH --account=def-alodi\n')
