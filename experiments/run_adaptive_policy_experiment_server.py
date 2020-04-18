@@ -46,7 +46,7 @@ def submit_job(config_file, jobname):
         fh.writelines('#SBATCH --job-name={}\n'.format(jobname))
         fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines('#SBATCH --cpus-per-task={}\n'.format(args.cpus_per_task))
-        fh.writelines(' python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
+        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
             args.experiment,
             os.path.abspath(args.log_dir),
             config_file,
@@ -158,7 +158,14 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     print('run again when all jobs completed')
     exit(0)
 
-# finally create a tensorboard from the best adaptive policy only:
-analyze_results(rootdir=iter_logdir, dstdir=os.path.join(args.log_dir, 'final_analysis'), tensorboard=True)
+# run the final adaptive policy in a clean directory and save the experiment results
+config_file = os.path.abspath('cut_root/final_adaptive_policy_config.yaml')
+os.system('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
+    args.experiment,
+    os.path.abspath(os.path.join(args.log_dir, 'final_adaptive_policy')),
+    config_file,
+    os.path.abspath(args.data_dir)
+))
+# analyze_results(rootdir=iter_logdir, dstdir=os.path.join(args.log_dir, 'final_analysis'), tensorboard=True)
 print('finished adaptive policy search. congrats!')
 

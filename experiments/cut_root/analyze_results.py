@@ -94,6 +94,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         if graph_idx not in datasets[dataset]['optimal_values'].keys():
             # read the annotated graph and update its optimal value if any
             filepath = os.path.join(s['config']['data_abspath'], 'graph_idx_{}.pkl'.format(graph_idx))
+            # filepath = 'data/barabasi-albert-n50-m10-weights-normal-seed100/graph_idx_0.pkl'
             with open(filepath, 'rb') as f:
                 G = pickle.load(f)
             cut = nx.get_edge_attributes(G, 'cut')
