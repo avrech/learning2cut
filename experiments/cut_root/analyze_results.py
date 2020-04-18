@@ -11,7 +11,7 @@ import pandas as pd
 import operator
 
 
-def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1):
+def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1, csv=False):
     # make directory where to save analysis files - tables, tensorboard etc.
     if not os.path.exists(dstdir):
         os.makedirs(dstdir)
@@ -87,8 +87,6 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         # for a case some scip seed was missing when the dictionary was created
         datasets[dataset]['scip_seeds'].update(s['config']['sweep_config']['sweep']['scip_seed']['values'])
 
-        # create a hashable config identifier
-        config = tuple([s['config'][k] for k in datasets[dataset]['config_keys']])
         graph_idx = s['config']['graph_idx']
         scip_seed = s['config']['scip_seed']
 
@@ -122,6 +120,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         elif s['config']['policy'] == 'baseline' and s['config']['max_per_round'] == -1:
             s['config']['policy'] = 'force_all_cycles'
 
+        # create a hashable config identifier
+        config = tuple([s['config'][k] for k in datasets[dataset]['config_keys']])
+
         # create skeleton for storing stats collected from experiments with config
         if config not in datasets[dataset]['configs'].keys():
             datasets[dataset]['configs'][config] = s['config']
@@ -135,7 +136,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               for stat_key in s['stats'].keys()}
 
         # now store the experiment results in the appropriate dictionary
-        dictionary = baselines if s['config']['policy'] == 'baseline' else results
+        dictionary = results if s['config']['policy'] == 'expert' or s['config']['policy'] == 'adaptive' else baselines
         for stat_key, value in s['stats'].items():
             dictionary[dataset][config][stat_key][graph_idx][scip_seed] = value
 
@@ -262,71 +263,72 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             else:
                 best_dualbound_integral_avg.append('-')
                 best_dualbound_integral_std.append('-')
-                best_config.append(None)
-                k_best_configs.append(None)
+                # best_config.append(None)
+                # k_best_configs.append(None)
 
 
         ######################################################################################
         # 5. write the summary into pandas.DataFrame
         ######################################################################################
-        # collect the relevant baseline stats for the table
-        baselines_table = {}
-        for config, stats in bsl.items():
-            bsl_str = 'nocycles' if datasets[dataset]['configs'][config]['max_per_root'] == 0 else '{}{}'.format(
-                datasets[dataset]['configs'][config]['max_per_round'], datasets[dataset]['configs'][config]['criterion'])
-            baseline_dualbound_integral_avg = []
-            baseline_dualbound_integral_std = []
-            baseline_dualbound = []
+        if csv:
+            # collect the relevant baseline stats for the table
+            baselines_table = {}
+            for config, stats in bsl.items():
+                bsl_str = 'nocycles' if datasets[dataset]['configs'][config]['max_per_root'] == 0 else '{}{}'.format(
+                    datasets[dataset]['configs'][config]['max_per_round'], datasets[dataset]['configs'][config]['criterion'])
+                baseline_dualbound_integral_avg = []
+                baseline_dualbound_integral_std = []
+                baseline_dualbound = []
+                for graph_idx in datasets[dataset]['graph_idx_range']:
+                    baseline_dualbound_integral_avg.append(stats['dualbound_integral'][graph_idx].get('avg', '-'))
+                    baseline_dualbound_integral_std.append(stats['dualbound_integral'][graph_idx].get('std', '-'))
+                    baseline_dualbound.append(np.mean([db[-1] for db in stats['dualbound'][graph_idx].values()]))
+                baseline_dualbound_integral_avg.append(np.mean(baseline_dualbound_integral_avg))  # avg across graphs
+                baseline_dualbound_integral_std.append(np.mean(baseline_dualbound_integral_std))  # std of stds across graphs
+                baseline_dualbound.append(np.mean(baseline_dualbound))  # avg across graphs
+                baselines_table[config] = {bsl_str + ' integral avg': baseline_dualbound_integral_avg,
+                                           bsl_str + ' integral std': baseline_dualbound_integral_std,
+                                           bsl_str + ' dualbound': baseline_dualbound}
+
+            optimal_values = [datasets[dataset]['optimal_values'][graph_idx] for graph_idx in datasets[dataset]['graph_idx_range']]
+            optimal_values.append(np.mean(optimal_values))
+            best_dualbound_avg = []
             for graph_idx in datasets[dataset]['graph_idx_range']:
-                baseline_dualbound_integral_avg.append(stats['dualbound_integral'][graph_idx].get('avg', '-'))
-                baseline_dualbound_integral_std.append(stats['dualbound_integral'][graph_idx].get('std', '-'))
-                baseline_dualbound.append(np.mean([db[-1] for db in stats['dualbound'][graph_idx].values()]))
-            baseline_dualbound_integral_avg.append(np.mean(baseline_dualbound_integral_avg))  # avg across graphs
-            baseline_dualbound_integral_std.append(np.mean(baseline_dualbound_integral_std))  # std of stds across graphs
-            baseline_dualbound.append(np.mean(baseline_dualbound))  # avg across graphs
-            baselines_table[config] = {bsl_str + ' integral avg': baseline_dualbound_integral_avg,
-                                       bsl_str + ' integral std': baseline_dualbound_integral_std,
-                                       bsl_str + ' dualbound': baseline_dualbound}
+                # append the average across seeds
+                best_dualbound_avg.append(np.mean([db[-1] for db in res[best_config[graph_idx]]['dualbound'][graph_idx].values()]))
+            best_dualbound_avg.append(np.mean(best_dualbound_avg))  # append the average across graphs
 
-        optimal_values = [datasets[dataset]['optimal_values'][graph_idx] for graph_idx in datasets[dataset]['graph_idx_range']]
-        optimal_values.append(np.mean(optimal_values))
-        best_dualbound_avg = []
-        for graph_idx in datasets[dataset]['graph_idx_range']:
-            # append the average across seeds
-            best_dualbound_avg.append(np.mean([db[-1] for db in res[best_config[graph_idx]]['dualbound'][graph_idx].values()]))
-        best_dualbound_avg.append(np.mean(best_dualbound_avg))  # append the average across graphs
+            # create a table dictionary: keys - columns name, values - columns values.
+            # row indices will be the graph_idx + 'avg' as the bottomline
+            table_dict = {
+                'Best integral avg': best_dualbound_integral_avg + [np.mean(best_dualbound_integral_avg) if '-' not in best_dualbound_integral_avg else '-'],
+                'Best integral std': best_dualbound_integral_std + [np.mean(best_dualbound_integral_std) if '-' not in best_dualbound_integral_std else '-'],
+                'Best dualbound avg': best_dualbound_avg,
+            }
+            for d in baselines_table.values():
+                for k, v in d.items():
+                    table_dict[k] = v
 
-        # create a table dictionary: keys - columns name, values - columns values.
-        # row indices will be the graph_idx + 'avg' as the bottomline
-        table_dict = {
-            'Best integral avg': best_dualbound_integral_avg + [np.mean(best_dualbound_integral_avg) if '-' not in best_dualbound_integral_avg else '-'],
-            'Best integral std': best_dualbound_integral_std + [np.mean(best_dualbound_integral_std) if '-' not in best_dualbound_integral_std else '-'],
-            'Best dualbound avg': best_dualbound_avg,
-        }
-        for d in baselines_table.values():
-            for k, v in d.items():
-                table_dict[k] = v
+            for k in datasets[dataset]['configs'][best_config[0]]['sweep_config']['sweep'].keys():
+                table_dict[k] = []
 
-        for k in datasets[dataset]['configs'][best_config[0]]['sweep_config']['sweep'].keys():
-            table_dict[k] = []
-
-        for graph_idx, bc in enumerate(best_config):
-            best_hparams = datasets[dataset]['configs'][bc]['sweep_config']['sweep']
+            for graph_idx, bc in enumerate(best_config):
+                best_hparams = datasets[dataset]['configs'][bc]['sweep_config']['sweep']
+                for k, v in best_hparams.items():
+                    table_dict[k].append(v)
+            # append empty row for the 'avg' row
             for k, v in best_hparams.items():
-                table_dict[k].append(v)
-        # append empty row for the 'avg' row
-        for k, v in best_hparams.items():
-            table_dict[k].append('-')
+                table_dict[k].append('-')
 
-        tables_dir = os.path.join(dstdir, 'tables')
-        if not os.path.exists(tables_dir):
-            os.makedirs(tables_dir)
-        csv_file = os.path.join(tables_dir, dataset + '_results.csv')
-        df = pd.DataFrame(data=table_dict, index=datasets[dataset]['graph_idx_range'] + ['avg'])
-        df.to_csv(csv_file, float_format='%.3f')
-        print('Experiment summary saved to {}'.format(csv_file))
-        # latex_str = df.to_latex(float_format='%.3f')
-        # print(latex_str)
+            tables_dir = os.path.join(dstdir, 'tables')
+            if not os.path.exists(tables_dir):
+                os.makedirs(tables_dir)
+            csv_file = os.path.join(tables_dir, dataset + '_results.csv')
+            df = pd.DataFrame(data=table_dict, index=datasets[dataset]['graph_idx_range'] + ['avg'])
+            df.to_csv(csv_file, float_format='%.3f')
+            print('Experiment summary saved to {}'.format(csv_file))
+            # latex_str = df.to_latex(float_format='%.3f')
+            # print(latex_str)
 
         ######################################################################################
         # 6. report on missing experiments and create a terminal command to accomplish them
@@ -541,6 +543,8 @@ if __name__ == '__main__':
     parser.add_argument('--dstdir', type=str, default='analysis/' + NOW, help='path to store tables, tensorboard etc.')
     parser.add_argument('--filepattern', type=str, default='experiment_results.pkl', help='pattern of pickle files')
     parser.add_argument('--tensorboard', action='store_true', help='generate tensorboard folder in <dstdir>/tb')
+    parser.add_argument('--csv', action='store_true', help='print csv table to <dstdir>/tables')
+
     parser.add_argument('--tb-k-best', type=int, help='generate tensorboard for the k best configs (and baseline)',
                         default=1)
     parser.add_argument('--support-partition', type=int,
@@ -549,4 +553,4 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     analyze_results(rootdir=args.rootdir, dstdir=args.dstdir, filepattern=args.filepattern,
-                    tensorboard=args.tensorboard, tb_k_best=args.tb_k_best)
+                    tensorboard=args.tensorboard, tb_k_best=args.tb_k_best, csv=args.csv)
