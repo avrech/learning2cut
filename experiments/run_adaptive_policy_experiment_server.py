@@ -35,11 +35,9 @@ def submit_job(config_file, jobname):
     job_file = jobname + '.sh'
     with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
-        fh.writelines('#SBATCH --time=00::00\n')
+        fh.writelines('#SBATCH --time=00:30:00\n')
         fh.writelines('#SBATCH --account=def-alodi\n')
-        fh.writelines('#SBATCH --output=output/%j.out\n')
-        fh.writelines('#SBATCH --mem-per-cpu=8G\n')
-        fh.writelines('#SBATCH --cpus-per-task=1\n')
+        fh.writelines('#SBATCH --output={}.out\n'.format(jobname))
         fh.writelines('#SBATCH --mem=0\n')
         fh.writelines('#SBATCH --mail-user=avrech@campus.technion.ac.il\n')
         fh.writelines('#SBATCH --mail-type=END\n')
@@ -48,8 +46,8 @@ def submit_job(config_file, jobname):
         fh.writelines('#SBATCH --job-name={}\n'.format(jobname))
         fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines('#SBATCH --cpus-per-task={}\n'.format(args.cpus_per_task))
-        fh.writelines(' python adaptive_policy_runner.py --experiment {} --log_dir {} --config-file {} --data-dir {}\n'.format(
-            os.path.abspath(args.experiment),
+        fh.writelines(' python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
+            args.experiment,
             os.path.abspath(args.log_dir),
             config_file,
             os.path.abspath(args.data_dir)
