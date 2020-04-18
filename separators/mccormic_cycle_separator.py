@@ -43,6 +43,10 @@ class MccormicCycleSeparator(Sepa):
         if self.policy == 'adaptive':
             with open(hparams['starting_policies_abspath'], 'rb') as f:
                 self.starting_policies = pickle.load(f)
+            # append the given hparams to the starting policies, so when they will finish,
+            # the separator will use the given hparams for an additional iteration.
+            # after that, the defaults are used.
+            self.starting_policies.append(hparams)
 
         # statistics
         self.ncuts = 0
@@ -81,7 +85,7 @@ class MccormicCycleSeparator(Sepa):
 
         self.update_stats()
 
-        if self.policy == 'adaptive' and self._n_lp_rounds > 0 and self._n_lp_rounds % self.policy_update_freq == 0:
+        if self.policy == 'adaptive' and self._n_lp_rounds % self.policy_update_freq == 0:
             config = self.starting_policies.pop(0) if len(self.starting_policies) > 0 else {}
             self.update_cut_selection_policy(config=config)
 
