@@ -155,12 +155,13 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
         time.sleep(1)
 
     print('submitted jobs')
-    print('run again when all jobs completed')
-    exit(0)
+    print('waiting 45 minutes')
+    time.sleep(60*45)
 
 # run the final adaptive policy in a clean directory and save the experiment results
 config_file = os.path.abspath('cut_root/final_adaptive_policy_config.yaml')
-os.system('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
+print('To generate clean final results run:')
+print('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
     args.experiment,
     os.path.abspath(os.path.join(args.log_dir, 'final_adaptive_policy')),
     config_file,
