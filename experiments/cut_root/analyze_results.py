@@ -11,7 +11,7 @@ import pandas as pd
 import operator
 
 
-def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1, csv=False):
+def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False):
     # make directory where to save analysis files - tables, tensorboard etc.
     if not os.path.exists(dstdir):
         os.makedirs(dstdir)
@@ -127,7 +127,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         # create skeleton for storing stats collected from experiments with config
         if config not in datasets[dataset]['configs'].keys():
             datasets[dataset]['configs'][config] = s['config']
-            if s['config']['policy'] == 'expert' or s['config']['policy'] == 'adaptive':
+            if s['config']['policy'] == 'expert' or (s['config']['policy'] == 'adaptive' and not final_adaptive):
                 results[dataset][config] = {stat_key: {graph_idx: {}
                                                        for graph_idx in range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
                                             for stat_key in s['stats'].keys()}
@@ -551,7 +551,8 @@ if __name__ == '__main__':
     parser.add_argument('--support-partition', type=int,
                         help='number of support partitions to compute the dualbound integral', default=4)
     parser.add_argument('--generate-experts', action='store_true', help='save experts configs to <dstdir>/experts')
+    parser.add_argument('--final-adaptive', action='store_true', help='include "adaptive" policy with baselines')
 
     args = parser.parse_args()
     analyze_results(rootdir=args.rootdir, dstdir=args.dstdir, filepattern=args.filepattern,
-                    tensorboard=args.tensorboard, tb_k_best=args.tb_k_best, csv=args.csv)
+                    tensorboard=args.tensorboard, tb_k_best=args.tb_k_best, csv=args.csv, final_adaptive=args.final_adaptive)

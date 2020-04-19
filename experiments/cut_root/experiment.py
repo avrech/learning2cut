@@ -121,3 +121,28 @@ def experiment(config):
         pickle.dump(experiment_results, f)
         print('Saved experiment results to: ' + experiment_results_filepath)
 
+
+if __name__ == '__main__':
+    # run the final adaptive policy found on Niagara
+    from ray.tune import track
+    import yaml
+    from experiments.cut_root.data_generator import generate_data
+    track.init(experiment_dir='results/adaptive_policy')
+    log_dir = tune.track.trial_dir()
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    with open(os.path.join(os.path.dirname(os.path.dirname(log_dir)), 'checkpoint.pkl'), 'wb') as f:
+        pickle.dump([], f)
+    with open('adaptive_policy_config.yaml') as f:
+        sweep_config = yaml.load(f, Loader=yaml.FullLoader)
+    config = sweep_config['constants']
+    for k, v in sweep_config['sweep'].items():
+        if k == 'graph_idx':
+            config[k] = 0
+        else:
+            config[k] = v['values'][0]
+    data_abspath = generate_data(sweep_config, 'data', solve_maxcut=True, time_limit=600)
+    config['sweep_config'] = sweep_config
+    config['data_abspath'] = data_abspath
+    config['starting_policies_abspath'] = os.path.abspath('results/adaptive_policy/starting_policies.pkl')
+    experiment(config)
