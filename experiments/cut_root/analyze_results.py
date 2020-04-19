@@ -137,7 +137,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               for stat_key in s['stats'].keys()}
 
         # now store the experiment results in the appropriate dictionary
-        dictionary = results if s['config']['policy'] == 'expert' or s['config']['policy'] == 'adaptive' else baselines
+        dictionary = results if s['config']['policy'] == 'expert' or (s['config']['policy'] == 'adaptive' and not final_adaptive) else baselines
         for stat_key, value in s['stats'].items():
             dictionary[dataset][config][stat_key][graph_idx][scip_seed] = value
 
