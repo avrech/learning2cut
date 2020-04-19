@@ -99,7 +99,7 @@ search_space_size = np.prod([d['range'] if k =='graph_idx' else len(d['values'])
 product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
 products = list(product(*product_lists))
 n_tasks = len(products)
-time_limit_minutes = np.ceil(1.5*search_space_size/n_tasks) + 2
+time_limit_minutes = np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2
 assert 60 > time_limit_minutes > 0
 
 # run n policy iterations, parallelizing on n_tasks, each task on a separated node.
