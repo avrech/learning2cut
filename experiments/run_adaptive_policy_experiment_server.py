@@ -4,8 +4,6 @@ Requires a folder in ./ containing experiment.py, data_generator,py and config_f
 See example in ./variability
 """
 from importlib import import_module
-from ray import tune
-from ray.tune import track
 from argparse import ArgumentParser
 import numpy as np
 import yaml
@@ -40,7 +38,7 @@ def submit_job(config_file, jobname, taskid, time_limit_minutes):
         fh.writelines("#!/bin/bash\n")
         fh.writelines('#SBATCH --time=00:{}:00\n'.format(time_limit_minutes))
         fh.writelines('#SBATCH --account=def-alodi\n')
-        fh.writelines('#SBATCH --output=output/%j.out\n')
+        fh.writelines('#SBATCH --output={}.out\n'.format(jobname))
         fh.writelines('#SBATCH --mem=0\n')
         fh.writelines('#SBATCH --mail-user=avrech@campus.technion.ac.il\n')
         fh.writelines('#SBATCH --mail-type=END\n')
@@ -167,7 +165,7 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
         submit_job(config_file, jobname, taskid, time_limit_minutes)
         time.sleep(1)
 
-    print('submitted jobs - run again in {} minutes'.format(time_limit_minutes))
+    print('submitted jobs - run again in {} minutes after all jobs completed'.format(time_limit_minutes))
     exit(0)
 
 # run the final adaptive policy in a clean directory and save the experiment results

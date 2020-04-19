@@ -63,7 +63,7 @@ def experiment(config):
                 print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!1')
                 return
 
-    if config['max_per_round'] == -1 and config['criterion'] != sweep_config['sweep']['criterion']['values'][0]:
+    if config['max_per_round'] == -1 and 'criterion' in sweep_config['sweep'].keys() and config['criterion'] != sweep_config['sweep']['criterion']['values'][0]:
         print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!1')
         return
 
