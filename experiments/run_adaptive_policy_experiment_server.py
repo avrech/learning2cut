@@ -26,7 +26,7 @@ parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
 parser.add_argument('--cpus-per-task', type=int, default=32,
                     help='Graham - 32, Niagara - 40')
-parser.add_argument('--product-keys', nargs='+',
+parser.add_argument('--product-keys', nargs='+', default=['objparalfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
 
 args = parser.parse_args()
@@ -95,7 +95,7 @@ if not os.path.exists(starting_policies_abspath):
         pickle.dump([], f)
 
 # fix some hparams ranges according to taskid:
-search_space_size = np.prod([len(d['values']) for d in sweep_config['sweep'].values()])
+search_space_size = np.prod([d['range'] if k =='graph_idx' else len(d['values']) for k, d in sweep_config['sweep'].items()])
 product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
 products = list(product(*product_lists))
 n_tasks = len(products)
