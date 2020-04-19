@@ -12,6 +12,7 @@ import yaml
 from datetime import datetime
 import os, pickle
 from experiments.cut_root.experiment import experiment
+from itertools import product
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
@@ -23,6 +24,10 @@ parser.add_argument('--log-dir', type=str, default='cut_root/results/adaptive_po
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
+parser.add_argument('--taskid', type=int,
+                    help='serial number to choose maxcutsroot and objparalfac')
+parser.add_argument('--product-keys', nargs='+',
+                    help='list of hparam keys on which to product')
 
 args = parser.parse_args()
 
@@ -43,6 +48,13 @@ for hp, config in sweep_config['sweep'].items():
                        'randint': tune.randint(config.get('min'), config.get('max')),
                        'uniform': tune.sample_from(lambda spec: np.random.uniform(config.get('min'), config.get('max')))
                              }.get(config['search'])
+
+# fix some hparams ranges according to taskid:
+product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
+products = list(product(*product_lists))
+task_values = products[args.taskid]
+for idx, k in enumerate(args.product_keys):
+    tune_search_space[k] = tune.grid_search([task_values[idx]])
 
 # add the sweep_config and data_abspath as constant parameters for global experiment management
 tune_search_space['sweep_config'] = tune.grid_search([sweep_config])

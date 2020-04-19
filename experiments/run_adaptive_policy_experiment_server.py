@@ -14,6 +14,7 @@ import os, pickle, time
 from experiments.cut_root.analyze_results import analyze_results
 from tqdm import tqdm
 from pathlib import Path
+from itertools import product
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
@@ -27,15 +28,17 @@ parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
 parser.add_argument('--cpus-per-task', type=int, default=32,
                     help='Graham - 32, Niagara - 40')
+parser.add_argument('--product-keys', nargs='+',
+                    help='list of hparam keys on which to product')
 
 args = parser.parse_args()
 
-def submit_job(config_file, jobname):
+def submit_job(config_file, jobname, taskid, time_limit_minutes):
     # CREATE SBATCH FILE
     job_file = jobname + '.sh'
     with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
-        fh.writelines('#SBATCH --time=00::00\n')
+        fh.writelines('#SBATCH --time=00:{}:00\n'.format(time_limit_minutes))
         fh.writelines('#SBATCH --account=def-alodi\n')
         fh.writelines('#SBATCH --output=output/%j.out\n')
         fh.writelines('#SBATCH --mem=0\n')
@@ -46,11 +49,13 @@ def submit_job(config_file, jobname):
         fh.writelines('#SBATCH --job-name={}\n'.format(jobname))
         fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines('#SBATCH --cpus-per-task={}\n'.format(args.cpus_per_task))
-        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
+        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} --product-keys {}\n'.format(
             args.experiment,
             os.path.abspath(args.log_dir),
             config_file,
-            os.path.abspath(args.data_dir)
+            os.path.abspath(args.data_dir),
+            taskid,
+            ' '.join(args.product_keys)
         ))
 
     os.system("sbatch {}".format(job_file))
@@ -64,34 +69,42 @@ with open(args.config_file) as f:
 data_generator = import_module('experiments.' + args.experiment + '.data_generator')
 data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
 
-# generate tune config for the sweep hparams
-tune_search_space = dict()
-for hp, config in sweep_config['sweep'].items():
-    tune_search_space[hp] = {'grid': tune.grid_search(config.get('values')),
-                       'grid_range': tune.grid_search(list(range(config.get('range', 2)))),
-                       'choice': tune.choice(config.get('values')),
-                       'randint': tune.randint(config.get('min'), config.get('max')),
-                       'uniform': tune.sample_from(lambda spec: np.random.uniform(config.get('min'), config.get('max')))
-                             }.get(config['search'])
+# # generate tune config for the sweep hparams
+# tune_search_space = dict()
+# for hp, config in sweep_config['sweep'].items():
+#     tune_search_space[hp] = {'grid': tune.grid_search(config.get('values')),
+#                        'grid_range': tune.grid_search(list(range(config.get('range', 2)))),
+#                        'choice': tune.choice(config.get('values')),
+#                        'randint': tune.randint(config.get('min'), config.get('max')),
+#                        'uniform': tune.sample_from(lambda spec: np.random.uniform(config.get('min'), config.get('max')))
+#                              }.get(config['search'])
+#
+# # add the sweep_config and data_abspath as constant parameters for global experiment management
+# tune_search_space['sweep_config'] = tune.grid_search([sweep_config])
+# tune_search_space['data_abspath'] = tune.grid_search([data_abspath])
 
-# add the sweep_config and data_abspath as constant parameters for global experiment management
-tune_search_space['sweep_config'] = tune.grid_search([sweep_config])
-tune_search_space['data_abspath'] = tune.grid_search([data_abspath])
-
-# initialize global tracker for all experiments
-track.init()
+# # initialize global tracker for all experiments
+# track.init()
 
 # run experiment:
 # initialize starting policies:
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
 starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
-tune_search_space['starting_policies_abspath'] = tune.grid_search([starting_policies_abspath])
+# tune_search_space['starting_policies_abspath'] = tune.grid_search([starting_policies_abspath])
 if not os.path.exists(starting_policies_abspath):
     with open(starting_policies_abspath, 'wb') as f:
         pickle.dump([], f)
 
-# run n policy iterations,
+# fix some hparams ranges according to taskid:
+search_space_size = np.prod([len(d['values']) for d in sweep_config['sweep'].values()])
+product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
+products = list(product(*product_lists))
+n_tasks = len(products)
+time_limit_minutes = np.ceil(1.5*search_space_size/n_tasks) + 2
+assert 60 > time_limit_minutes > 0
+
+# run n policy iterations, parallelizing on n_tasks, each task on a separated node.
 # in each iteration k, load k-1 starting policies from args.experiment,
 # run exhaustive search for the best k'th policy - N LP rounds search,
 # and for the rest use default cut selection.
@@ -148,15 +161,14 @@ for k_iter in range(sweep_config['constants']['n_policy_iterations']):
     # submit 5 experiments each one execute one config file.
     # after all jobs complete, continue to the next iteration.
     print('submitting jobs:')
-    for cfgidx in range(5):
-        config_file = os.path.abspath('cut_root/adaptive_policy_config{}.yaml'.format(cfgidx))
-        jobname = 'iter{}-cfg{}'.format(k_iter, cfgidx)
-        submit_job(config_file, jobname)
+    for taskid in range(n_tasks):
+        config_file = os.path.abspath('cut_root/adaptive_policy_config.yaml')
+        jobname = 'iter{}-cfg{}'.format(k_iter, taskid)
+        submit_job(config_file, jobname, taskid, time_limit_minutes)
         time.sleep(1)
 
-    print('submitted jobs')
-    print('waiting 45 minutes')
-    time.sleep(60*45)
+    print('submitted jobs - run again in {} minutes'.format(time_limit_minutes))
+    exit(0)
 
 # run the final adaptive policy in a clean directory and save the experiment results
 config_file = os.path.abspath('cut_root/final_adaptive_policy_config.yaml')
