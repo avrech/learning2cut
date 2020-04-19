@@ -26,7 +26,7 @@ parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
 parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
-parser.add_argument('--product-keys', nargs='+',
+parser.add_argument('--product-keys', nargs='+', default=[],
                     help='list of hparam keys on which to product')
 
 args = parser.parse_args()
@@ -50,18 +50,19 @@ for hp, config in sweep_config['sweep'].items():
                              }.get(config['search'])
 
 # fix some hparams ranges according to taskid:
-product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
-products = list(product(*product_lists))
-task_values = products[args.taskid]
-for idx, k in enumerate(args.product_keys):
-    tune_search_space[k] = tune.grid_search([task_values[idx]])
+if len(args.product_keys) > 0:
+    product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
+    products = list(product(*product_lists))
+    task_values = products[args.taskid]
+    for idx, k in enumerate(args.product_keys):
+        tune_search_space[k] = tune.grid_search([task_values[idx]])
 
 # add the sweep_config and data_abspath as constant parameters for global experiment management
 tune_search_space['sweep_config'] = tune.grid_search([sweep_config])
 tune_search_space['data_abspath'] = tune.grid_search([data_abspath])
 
 # initialize global tracker for all experiments
-track.init()
+track.init(experiment_dir=args.log_dir)
 
 # run experiment:
 # initialize starting policies:

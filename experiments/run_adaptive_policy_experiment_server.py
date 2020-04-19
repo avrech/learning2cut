@@ -20,16 +20,18 @@ parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
 parser.add_argument('--config-file', type=str, default='cut_root/adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log-dir', type=str, default='cut_root/results/adaptive_policy/' + NOW,
+parser.add_argument('--log-dir', type=str, default='/cut_root/results/adaptive_policy',
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
-parser.add_argument('--cpus-per-task', type=int, default=32,
+parser.add_argument('--cpus-per-task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
 parser.add_argument('--product-keys', nargs='+', default=['objparalfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
 
 args = parser.parse_args()
+if not os.path.exists(args.log_dir):
+    os.makedirs(args.log_dir)
 
 def submit_job(config_file, jobname, taskid, time_limit_minutes):
     # CREATE SBATCH FILE
@@ -38,7 +40,7 @@ def submit_job(config_file, jobname, taskid, time_limit_minutes):
         fh.writelines("#!/bin/bash\n")
         fh.writelines('#SBATCH --time=00:{}:00\n'.format(time_limit_minutes))
         fh.writelines('#SBATCH --account=def-alodi\n')
-        fh.writelines('#SBATCH --output={}.out\n'.format(jobname))
+        fh.writelines('#SBATCH --output={}/{}.out\n'.format(args.log_dir,jobname))
         fh.writelines('#SBATCH --mem=0\n')
         fh.writelines('#SBATCH --mail-user=avrech@campus.technion.ac.il\n')
         fh.writelines('#SBATCH --mail-type=END\n')
@@ -47,11 +49,16 @@ def submit_job(config_file, jobname, taskid, time_limit_minutes):
         fh.writelines('#SBATCH --job-name={}\n'.format(jobname))
         fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines('#SBATCH --cpus-per-task={}\n'.format(args.cpus_per_task))
+        fh.writelines('module load python\n')
+        fh.writelines('source $HOME/server_bashrc\n')
+        fh.writelines('source $HOME/venv/bin/activate\n')
         fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} --product-keys {}\n'.format(
             args.experiment,
-            os.path.abspath(args.log_dir),
+#            os.path.abspath(args.log_dir),
+            args.log_dir,
             config_file,
-            os.path.abspath(args.data_dir),
+            args.data_dir,
+#            os.path.abspath(args.data_dir),
             taskid,
             ' '.join(args.product_keys)
         ))
@@ -86,9 +93,9 @@ data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_m
 
 # run experiment:
 # initialize starting policies:
-if not os.path.exists(args.log_dir):
-    os.makedirs(args.log_dir)
-starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
+#starting_policies_abspath = os.path.abspath(os.path.join(args.log_dir, 'starting_policies.pkl'))
+starting_policies_abspath = os.path.join(args.log_dir, 'starting_policies.pkl')
+
 # tune_search_space['starting_policies_abspath'] = tune.grid_search([starting_policies_abspath])
 if not os.path.exists(starting_policies_abspath):
     with open(starting_policies_abspath, 'wb') as f:
@@ -99,7 +106,7 @@ search_space_size = np.prod([d['range'] if k =='graph_idx' else len(d['values'])
 product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
 products = list(product(*product_lists))
 n_tasks = len(products)
-time_limit_minutes = np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2
+time_limit_minutes = max(int(np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)
 assert 60 > time_limit_minutes > 0
 
 # run n policy iterations, parallelizing on n_tasks, each task on a separated node.
