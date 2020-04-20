@@ -220,7 +220,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         else:
                             maxcutsroot = hp['maxcutsroot']
                         cuts_applied_normalized = cuts_applied / maxcutsroot
-                        cuts_generated_normalized = cuts_applied / maxcutsroot
+                        cuts_generated_normalized = cuts_generated / maxcutsroot
                         stats['cuts_applied'][graph_idx][scip_seed] = cuts_applied.tolist()
                         stats['cuts_generated'][graph_idx][scip_seed] = cuts_generated.tolist()
                         stats['cuts_applied_normalized'][graph_idx][scip_seed] = cuts_applied_normalized.tolist()
@@ -595,7 +595,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             tensorboard_commandline = None
 
         if plot:
-            def plot_y_vs_x(y, x, records, hparams={}, fignum=1, subplot=0, xstr=None, ystr=None, title=None, label=None, style=None):
+            def plot_y_vs_x(y, x, records, hparams={}, fignum=1, subplot=0, xstr=None, ystr=None, title=None, label=None, style=None, ncol=1):
                 plt.figure(fignum)
                 if subplot > 0:
                     plt.subplot(subplot)
@@ -611,7 +611,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 plt.title(title)
                 plt.xlabel(xstr)
                 plt.ylabel(ystr)
-                plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=True, ncol=2, borderaxespad=0.)
+                plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=True, ncol=ncol, borderaxespad=0.)
 
             fig_filenames = {1: 'dualbound.png',
                              # 1: 'dualbound_vs_lp_rounds.png',
@@ -662,7 +662,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 records = {'dualbound': [v, v], 'lp_iterations': [0, support_end], 'solving_time': [0, 90], 'lp_rounds': [0, 1000]}
                 plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, subplot=311, label='optimal', style='-k')
                 plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 1, subplot=312, label='optimal', style='-k')
-                plot_y_vs_x('dualbound', 'solving_time', records, {}, 1, subplot=313, label='optimal', style='-k')
+                plot_y_vs_x('dualbound', 'solving_time', records, {}, 1, subplot=313, label='optimal', style='-k', ncol=2)
 
             # save all figures
             for fignum, filename in fig_filenames.items():
