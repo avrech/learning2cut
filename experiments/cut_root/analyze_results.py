@@ -208,7 +208,16 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         cuts_generated[1:] -= cuts_generated[:-1]
                         hp = datasets[dataset]['configs'][config]
                         if hp['policy'] == 'adaptive':
-                        cuts_applied_normalized = cuts_applied / cuts_generated
+                            with open(os.path.join(args.rootdir, 'starting_policies.pkl'), 'rb') as f:
+                                sp = pickle.load(f)
+                            freq = hp['policy_update_freq']
+                            n_iter = hp['n_policy_iterations']
+                            maxcutsroot = [sp[it]['maxcutsroot'] for it in range(n_iter) for rnd in range(freq)]
+                            maxcutsroot += [2000]*(len(cuts_applied) - len(maxcutsroot))
+                            maxcutsroot = np.array(maxcutsroot)
+                        else:
+                            maxcutsroot = hp['maxcutsroot']
+                        cuts_applied_normalized = cuts_applied / maxcutsroot
                         stats['cuts_applied'][graph_idx][scip_seed] = cuts_applied.tolist()
                         stats['cuts_generated'][graph_idx][scip_seed] = cuts_generated.tolist()
                         stats['cuts_applied_normalized'][graph_idx][scip_seed] = cuts_applied_normalized.tolist()
