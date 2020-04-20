@@ -569,9 +569,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 plt.ylabel(ystr)
                 plt.legend()
 
-            fig_filenames = {1: 'dualbound_vs_lp_rounds.jpg',
-                             2: 'dualbound_vs_lp_iterations.jpg',
-                             3: 'dualbound_vs_solving_time.jpg'}
+            fig_filenames = {1: 'dualbound_vs_lp_rounds.png',
+                             2: 'dualbound_vs_lp_iterations.png',
+                             3: 'dualbound_vs_solving_time.png'}
             figcnt = 4
             ####################################################
             # add plots for the best config
@@ -588,7 +588,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
                         plot_y_vs_x('cycle_ncuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
                         plot_y_vs_x('cycle_ncuts', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        fig_filenames[figcnt] = '{}-g{}-scipseed{}.jpg'.format(hparams['policy'], graph_idx, scip_seed)
+                        fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
             # add plots of metrics vs time for the baseline
@@ -602,7 +602,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
                         plot_y_vs_x('cycle_ncuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
                         plot_y_vs_x('cycle_ncuts', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        fig_filenames[figcnt] = '{}-g{}-scipseed{}.jpg'.format(hparams['policy'], graph_idx, scip_seed)
+                        fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
             # plot the optimal value as constant on the dualbound plots
