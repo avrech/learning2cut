@@ -124,10 +124,22 @@ def experiment(config):
 
 if __name__ == '__main__':
     # run the final adaptive policy found on Niagara
+    import argparse
     from ray.tune import track
     import yaml
     from experiments.cut_root.data_generator import generate_data
-    track.init(experiment_dir='results/adaptive_policy')
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--log-dir', type=str, default='results/adaptive_policy',
+                        help='path to results root')
+    parser.add_argument('--data-dir', type=str, default='data',
+                        help='path to generate/read data')
+    parser.add_argument('--starting-policies-abspath', type=str, default='results/adaptive_policy/starting_policies.pkl',
+                        help='path to load starting policies')
+
+    args = parser.parse_args()
+
+    track.init(experiment_dir=args.log_dir)
     log_dir = tune.track.trial_dir()
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
@@ -144,5 +156,5 @@ if __name__ == '__main__':
     data_abspath = generate_data(sweep_config, 'data', solve_maxcut=True, time_limit=600)
     config['sweep_config'] = sweep_config
     config['data_abspath'] = data_abspath
-    config['starting_policies_abspath'] = os.path.abspath('results/adaptive_policy/starting_policies.pkl')
+    config['starting_policies_abspath'] = os.path.abspath(args.starting_policies_abspath)
     experiment(config)
