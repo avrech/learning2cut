@@ -645,9 +645,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 for graph_idx in stats['dualbound'].keys():
                     for scip_seed, db in stats['dualbound'][graph_idx].items():
                         records = {k: v[graph_idx][scip_seed] for k, v in stats.items() if k != 'dualbound_integral'}
-                        plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
-                        plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
-                        plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
+                        plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1, subplot=311)
+                        plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 1, subplot=312)
+                        plot_y_vs_x('dualbound', 'solving_time', records, hparams, 1, subplot=313)
                         plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, subplot=121, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
                         plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, subplot=121, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
                         plot_y_vs_x('cuts_applied_normalized', 'lp_rounds', records, hparams, figcnt, subplot=122, ystr='# Cuts', title=hparams['policy'], label='cuts applied normalized', style='-')
@@ -659,10 +659,10 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             for graph_idx in datasets[dataset]['graph_idx_range']:
                 v = datasets[dataset]['optimal_values'][graph_idx]
                 support_end = max(list(max_lp_iterations[graph_idx].values()))
-                records = {'dualbound': [v, v], 'lp_iterations': [0, support_end], 'solving_time': [0, 90], 'lp_rounds': [0, 100]}
-                plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, label='optimal', style='-k')
-                plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 2, label='optimal', style='-k')
-                plot_y_vs_x('dualbound', 'solving_time', records, {}, 3, label='optimal', style='-k')
+                records = {'dualbound': [v, v], 'lp_iterations': [0, support_end], 'solving_time': [0, 90], 'lp_rounds': [0, 1000]}
+                plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, subplot=311, label='optimal', style='-k')
+                plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 1, subplot=312, label='optimal', style='-k')
+                plot_y_vs_x('dualbound', 'solving_time', records, {}, 1, subplot=313, label='optimal', style='-k')
 
             # save all figures
             for fignum, filename in fig_filenames.items():
@@ -671,6 +671,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                     os.makedirs(plots_dir)
                 filepath = os.path.join(plots_dir, filename)
                 plt.figure(fignum)
+                plt.tight_layout()
                 plt.savefig(filepath, bbox_inches='tight')
             print('Saved all plots to: ', plots_dir)
 
