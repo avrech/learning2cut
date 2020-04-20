@@ -565,12 +565,12 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 style = {'default_cut_selection': '--',
                          'expert': '-',
                          'adaptive': '-',
-                         'force10most_effective': '.-'}.get(hparams['policy'], '.-') if style is None else style
+                         'force10most_effective': '-.'}.get(hparams['policy'], ':') if style is None else style
                 plt.plot(records[x], records[y], style, label=label)
                 plt.title(title)
                 plt.xlabel(xstr)
                 plt.ylabel(ystr)
-                plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=2)
+                plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=True, ncol=2, borderaxespad=0.)
 
             fig_filenames = {1: 'dualbound_vs_lp_rounds.png',
                              2: 'dualbound_vs_lp_iterations.png',
@@ -624,7 +624,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                     os.makedirs(plots_dir)
                 filepath = os.path.join(plots_dir, filename)
                 plt.figure(fignum)
-                plt.savefig(filepath)
+                plt.savefig(filepath, bbox_inches='tight')
             print('Saved all plots to: ', plots_dir)
 
         # return analysis
