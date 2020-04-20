@@ -613,8 +613,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 plt.ylabel(ystr)
                 plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=True, ncol=ncol, borderaxespad=0.)
 
-            fig_filenames = {1: 'dualbound.png',
-                             # 1: 'dualbound_vs_lp_rounds.png',
+            fig_filenames = {1: 'dualbound_vs_lp_rounds.png',
                              2: 'dualbound_vs_lp_iterations.png',
                              3: 'dualbound_vs_solving_time.png'}
             figcnt = 2
