@@ -9,9 +9,9 @@ import pickle
 from torch.utils.tensorboard import SummaryWriter
 import pandas as pd
 import operator
+import matplotlib.pyplot as plt
 
-
-def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False):
+def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False, plot=False):
     # make directory where to save analysis files - tables, tensorboard etc.
     if not os.path.exists(dstdir):
         os.makedirs(dstdir)
@@ -467,6 +467,11 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               scalar_value=records['dualbound'],
                                               global_step=records['total_ncuts_applied'],
                                               walltime=records['solving_time'])
+                            writer.add_scalar(tag='Dualbound_vs_LP_Rounds/g{}'.format(graph_idx),
+                                              scalar_value=records['dualbound'],
+                                              global_step=records['lp_rounds'],
+                                              walltime=records['solving_time'])
+
                             writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
                                               scalar_value=records['cycle_ncuts_applied'],
                                               global_step=records['lp_rounds'],
@@ -494,6 +499,11 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               scalar_value=records['dualbound'],
                                               global_step=records['lp_iterations'],
                                               walltime=records['solving_time'])
+                            writer.add_scalar(tag='Dualbound_vs_LP_Rounds/g{}'.format(graph_idx),
+                                              scalar_value=records['dualbound'],
+                                              global_step=records['lp_rounds'],
+                                              walltime=records['solving_time'])
+
                             # dualbound vs. cycles applied
                             if 'cycle_ncuts_applied' in records.keys():
                                 writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
@@ -545,6 +555,74 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         else:
             tensorboard_commandline = None
 
+        if plot:
+            def plot_y_vs_x(y, x, records, hparams={}, fignum=1, xstr=None, ystr=None, title=None, label=None, style=None):
+                plt.figure(fignum)
+                xstr = ' '.join([s[0].upper() + s[1:] for s in x.split('_')]) if xstr is None else xstr
+                ystr = ' '.join([s[0].upper() + s[1:] for s in y.split('_')]) if ystr is None else ystr
+                title = ystr + ' vs. ' + xstr if title is None else title
+                label = hparams['policy'] if label is None else label
+                style = {'default_cut_selection': '--', 'expert': '-', 'adaptive': '-*'}.get(hparams['policy'], ':') if style is None else style
+                plt.plot(records[x], records[y], style, label=label)
+                plt.title(title)
+                plt.xlabel(xstr)
+                plt.ylabel(ystr)
+                plt.legend()
+
+            fig_filenames = {1: 'dualbound_vs_lp_rounds.jpg',
+                             2: 'dualbound_vs_lp_iterations.jpg',
+                             3: 'dualbound_vs_solving_time.jpg'}
+            figcnt = 4
+            ####################################################
+            # add plots for the best config
+            # each graph plot separately.
+            ####################################################
+            for graph_idx, config_list in tqdm(enumerate(k_best_configs), desc='Generating tensorboard scalars'):
+                for place, config in enumerate(config_list):
+                    stats = res[config]
+                    hparams = datasets[dataset]['configs'][config]
+                    for scip_seed, db in stats['dualbound'][graph_idx].items():
+                        plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
+                        plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
+                        plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
+                        plot_y_vs_x('cycle_ncuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
+                        plot_y_vs_x('cycle_ncuts', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
+                        fig_filenames[figcnt] = '{}-g{}-scipseed{}.jpg'.format(hparams['policy'], graph_idx, scip_seed)
+                        figcnt += 1
+
+            # add plots of metrics vs time for the baseline
+            for bsl_idx, (config, stats) in enumerate(bsl.items()):
+                hparams = datasets[dataset]['configs'][config]
+                for graph_idx in stats['dualbound'].keys():
+                    for scip_seed, db in stats['dualbound'][graph_idx].items():
+                        records = {k: v[graph_idx][scip_seed][lp_round] for k, v in stats.items() if k != 'dualbound_integral'}
+                        plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
+                        plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
+                        plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
+                        plot_y_vs_x('cycle_ncuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
+                        plot_y_vs_x('cycle_ncuts', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
+                        fig_filenames[figcnt] = '{}-g{}-scipseed{}.jpg'.format(hparams['policy'], graph_idx, scip_seed)
+                        figcnt += 1
+
+            # plot the optimal value as constant on the dualbound plots
+            for graph_idx in datasets[dataset]['graph_idx_range']:
+                v = datasets[dataset]['optimal_values'][graph_idx]
+                support_end = max(list(max_lp_iterations[graph_idx].values()))
+                records = {'dualbound': [v, v], 'lp_iterations': [0, support_end], 'solving_time': [0, 90], 'lp_rounds': [0, 100]}
+                plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, label='optimal', style='-k')
+                plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 2, label='optimal', style='-k')
+                plot_y_vs_x('dualbound', 'solving_time', records, {}, 3, label='optimal', style='-k')
+
+            # save all figures
+            for fignum, filename in fig_filenames.items():
+                plots_dir = os.path.join(dstdir, 'plots')
+                if not os.path.exists(plots_dir):
+                    os.makedirs(plots_dir)
+                filepath = os.path.join(plots_dir, filename)
+                plt.figure(fignum)
+                plt.savefig(filepath)
+            print('Saved all plots to: ', plots_dir)
+
         # return analysis
         best_policy = [datasets[dataset]['configs'][bc] for bc in best_config]
         analysis[dataset]['best_policy'] = best_policy
@@ -569,7 +647,8 @@ if __name__ == '__main__':
                         help='number of support partitions to compute the dualbound integral', default=4)
     parser.add_argument('--generate-experts', action='store_true', help='save experts configs to <dstdir>/experts')
     parser.add_argument('--final-adaptive', action='store_true', help='include "adaptive" policy with baselines')
+    parser.add_argument('--plot', action='store_true', help='generates matplotlib figures')
 
     args = parser.parse_args()
     analyze_results(rootdir=args.rootdir, dstdir=args.dstdir, filepattern=args.filepattern,
-                    tensorboard=args.tensorboard, tb_k_best=args.tb_k_best, csv=args.csv, final_adaptive=args.final_adaptive)
+                    tensorboard=args.tensorboard, tb_k_best=args.tb_k_best, csv=args.csv, final_adaptive=args.final_adaptive, plot=args.plot)
