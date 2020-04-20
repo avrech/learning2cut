@@ -167,7 +167,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     # after all jobs complete, continue to the next iteration.
     print('submitting jobs:')
     for taskid in range(n_tasks):
-        config_file = os.path.abspath('cut_root/adaptive_policy_config.yaml')
+        config_file = os.path.abspath(args.config_file)
         jobname = 'iter{}-cfg{}'.format(k_iter, taskid)
         submit_job(config_file, jobname, taskid, time_limit_minutes)
         time.sleep(1)
