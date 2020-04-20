@@ -191,6 +191,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 all_values = []  # all dualbound integrals to compute overall average
                 all_stds = []  # all graph-wise integral std to compute std of stds
                 stats['dualbound_integral'] = {}
+                stats['cuts_applied'] = {}
+                stats['cuts_applied_normalized'] = {}
+                stats['cuts_generated'] = {}
                 for graph_idx in datasets[dataset]['graph_idx_range']:
                     values = []  # dualbound integrals of the current graph to compute average and std across seeds
                     stats['dualbound_integral'][graph_idx] = {}
@@ -203,10 +206,12 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         cuts_generated = np.array(stats['cycle_ncuts'][graph_idx][scip_seed])
                         cuts_applied[1:] -= cuts_applied[:-1]
                         cuts_generated[1:] -= cuts_generated[:-1]
+                        hp = datasets[dataset]['configs'][config]
+                        if hp['policy'] == 'adaptive':
                         cuts_applied_normalized = cuts_applied / cuts_generated
-                        stats['cuts_applied'][graph_idx][scip_seed] = cuts_applied
-                        stats['cuts_generated'][graph_idx][scip_seed] = cuts_generated
-                        stats['cuts_applied_normalized'][graph_idx][scip_seed] = cuts_applied_normalized
+                        stats['cuts_applied'][graph_idx][scip_seed] = cuts_applied.tolist()
+                        stats['cuts_generated'][graph_idx][scip_seed] = cuts_generated.tolist()
+                        stats['cuts_applied_normalized'][graph_idx][scip_seed] = cuts_applied_normalized.tolist()
 
                         # the integral support is [0, max_lp_iterations]
                         # TODO: check if extension is saved to the source object.
