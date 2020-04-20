@@ -616,7 +616,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             fig_filenames = {1: 'dualbound_vs_lp_rounds.png',
                              2: 'dualbound_vs_lp_iterations.png',
                              3: 'dualbound_vs_solving_time.png'}
-            figcnt = 2
+            figcnt = 4
             ####################################################
             # add plots for the best config
             # each graph plot separately.
