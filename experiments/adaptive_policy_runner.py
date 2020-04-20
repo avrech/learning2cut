@@ -80,7 +80,7 @@ if not os.path.exists(starting_policies_abspath):
 # and for the rest use default cut selection.
 # Then when all experiments ended, find the best policy for the i'th iteration and append to starting policies.
 iter_logdir = ''
-for k_iter in range(sweep_config['constants']['n_policy_iterations']):
+for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
     # recovering from checkpoints:
     # skip iteration if completed in previous runs
     print('loading stating policies from: ', starting_policies_abspath)
