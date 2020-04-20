@@ -194,7 +194,20 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 for graph_idx in datasets[dataset]['graph_idx_range']:
                     values = []  # dualbound integrals of the current graph to compute average and std across seeds
                     stats['dualbound_integral'][graph_idx] = {}
+                    stats['cuts_applied'][graph_idx] = {}
+                    stats['cuts_applied_normalized'][graph_idx] = {}
+                    stats['cuts_generated'][graph_idx] = {}
                     for scip_seed in dualbounds[graph_idx].keys():
+                        # compute some more stats:
+                        cuts_applied = np.array(stats['cycle_ncuts_applied'][graph_idx][scip_seed])
+                        cuts_generated = np.array(stats['cycle_ncuts'][graph_idx][scip_seed])
+                        cuts_applied[1:] -= cuts_applied[:-1]
+                        cuts_generated[1:] -= cuts_generated[:-1]
+                        cuts_applied_normalized = cuts_applied / cuts_generated
+                        stats['cuts_applied'][graph_idx][scip_seed] = cuts_applied
+                        stats['cuts_generated'][graph_idx][scip_seed] = cuts_generated
+                        stats['cuts_applied_normalized'][graph_idx][scip_seed] = cuts_applied_normalized
+
                         # the integral support is [0, max_lp_iterations]
                         # TODO: check if extension is saved to the source object.
                         support_end = max_lp_iterations[graph_idx][scip_seed]
@@ -473,15 +486,19 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               walltime=records['solving_time'])
 
                             writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
-                                              scalar_value=records['cycle_ncuts_applied'],
+                                              scalar_value=records['cuts_applied'],
+                                              global_step=records['lp_rounds'],
+                                              walltime=records['solving_time'])
+                            writer.add_scalar(tag='Cycles_Applied_Normalized_vs_LP_round/g{}'.format(graph_idx),
+                                              scalar_value=records['cuts_applied_normalized'],
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
                             writer.add_scalar(tag='Cycles_Generated_vs_LP_round/g{}'.format(graph_idx),
-                                              scalar_value=records['cycle_ncuts'],
+                                              scalar_value=records['cuts_generated'],
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
 
-                        writer.close()
+                    writer.close()
 
             # add plots of metrics vs time for the baseline
             for bsl_idx, (config, stats) in enumerate(bsl.items()):
@@ -511,11 +528,15 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                                   global_step=records['cycle_ncuts_applied'],
                                                   walltime=records['solving_time'])
                                 writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
-                                                  scalar_value=records['cycle_ncuts_applied'],
+                                                  scalar_value=records['cuts_applied'],
+                                                  global_step=records['lp_rounds'],
+                                                  walltime=records['solving_time'])
+                                writer.add_scalar(tag='Cycles_Applied_Normalized_vs_LP_round/g{}'.format(graph_idx),
+                                                  scalar_value=records['cuts_applied_normalized'],
                                                   global_step=records['lp_rounds'],
                                                   walltime=records['solving_time'])
                                 writer.add_scalar(tag='Cycles_Generated_vs_LP_round/g{}'.format(graph_idx),
-                                                  scalar_value=records['cycle_ncuts'],
+                                                  scalar_value=records['cuts_generated'],
                                                   global_step=records['lp_rounds'],
                                                   walltime=records['solving_time'])
 
@@ -589,8 +610,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
                         plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
-                        plot_y_vs_x('cycle_ncuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
-                        plot_y_vs_x('cycle_ncuts', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
+                        plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
+                        plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
@@ -603,8 +624,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
                         plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
-                        plot_y_vs_x('cycle_ncuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
-                        plot_y_vs_x('cycle_ncuts', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
+                        plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
+                        plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
