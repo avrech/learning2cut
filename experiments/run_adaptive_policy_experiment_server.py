@@ -20,13 +20,13 @@ parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
 parser.add_argument('--config-file', type=str, default='cut_root/adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log-dir', type=str, default='/cut_root/results/adaptive_policy',
+parser.add_argument('--log-dir', type=str, default='cut_root/results/cutsbudget1000/adaptive_policy',
                     help='path to results root')
 parser.add_argument('--data-dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
 parser.add_argument('--cpus-per-task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
-parser.add_argument('--product-keys', nargs='+', default=['objparalfac', 'maxcutsroot'],
+parser.add_argument('--product-keys', nargs='+', default=['intsupportfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
 
 args = parser.parse_args()
