@@ -577,7 +577,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             # add plots for the best config
             # each graph plot separately.
             ####################################################
-            for graph_idx, config_list in tqdm(enumerate(k_best_configs), desc='Generating tensorboard scalars'):
+            for graph_idx, config_list in tqdm(enumerate(k_best_configs), desc='Generating plots'):
                 for place, config in enumerate(config_list):
                     stats = res[config]
                     hparams = datasets[dataset]['configs'][config]
