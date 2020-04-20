@@ -467,6 +467,15 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               scalar_value=records['dualbound'],
                                               global_step=records['total_ncuts_applied'],
                                               walltime=records['solving_time'])
+                            writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
+                                              scalar_value=records['cycle_ncuts_applied'],
+                                              global_step=records['lp_rounds'],
+                                              walltime=records['solving_time'])
+                            writer.add_scalar(tag='Cycles_Generated_vs_LP_round/g{}'.format(graph_idx),
+                                              scalar_value=records['cycle_ncuts'],
+                                              global_step=records['lp_rounds'],
+                                              walltime=records['solving_time'])
+
                         writer.close()
 
             # add plots of metrics vs time for the baseline
@@ -490,6 +499,14 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                 writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
                                                   scalar_value=records['dualbound'],
                                                   global_step=records['cycle_ncuts_applied'],
+                                                  walltime=records['solving_time'])
+                                writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
+                                                  scalar_value=records['cycle_ncuts_applied'],
+                                                  global_step=records['lp_rounds'],
+                                                  walltime=records['solving_time'])
+                                writer.add_scalar(tag='Cycles_Generated_vs_LP_round/g{}'.format(graph_idx),
+                                                  scalar_value=records['cycle_ncuts'],
+                                                  global_step=records['lp_rounds'],
                                                   walltime=records['solving_time'])
 
                             # dualbound vs. total cuts applied
