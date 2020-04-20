@@ -562,12 +562,15 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 ystr = ' '.join([s[0].upper() + s[1:] for s in y.split('_')]) if ystr is None else ystr
                 title = ystr + ' vs. ' + xstr if title is None else title
                 label = hparams['policy'] if label is None else label
-                style = {'default_cut_selection': '--', 'expert': '-', 'adaptive': '-*'}.get(hparams['policy'], ':') if style is None else style
+                style = {'default_cut_selection': '--',
+                         'expert': '-',
+                         'adaptive': '-',
+                         'force10most_effective': '.-'}.get(hparams['policy'], '.-') if style is None else style
                 plt.plot(records[x], records[y], style, label=label)
                 plt.title(title)
                 plt.xlabel(xstr)
                 plt.ylabel(ystr)
-                plt.legend()
+                plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=2)
 
             fig_filenames = {1: 'dualbound_vs_lp_rounds.png',
                              2: 'dualbound_vs_lp_iterations.png',
