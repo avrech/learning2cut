@@ -582,6 +582,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                     stats = res[config]
                     hparams = datasets[dataset]['configs'][config]
                     for scip_seed, db in stats['dualbound'][graph_idx].items():
+                        records = {k: v[graph_idx][scip_seed] for k, v in stats.items() if k != 'dualbound_integral'}
                         plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
                         plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
