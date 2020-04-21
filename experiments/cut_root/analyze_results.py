@@ -598,7 +598,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             tensorboard_commandline = None
 
         if plot:
-            def plot_y_vs_x(y, x, records, hparams={}, fignum=1, subplot=0, xstr=None, ystr=None, title=None, label=None, style=None, ncol=1):
+            def plot_y_vs_x(y, x, records, hparams={}, fignum=1, subplot=0, xstr=None, ystr=None, title=None, label=None, style=None, ncol=1, ylim=None):
                 plt.figure(fignum)
                 if subplot > 0:
                     plt.subplot(subplot)
@@ -614,6 +614,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 plt.title(title)
                 plt.xlabel(xstr)
                 plt.ylabel(ystr)
+                if ylim is not None:
+                    plt.ylim(ylim)
                 plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=True, ncol=ncol, borderaxespad=0.)
 
             fig_filenames = {1: 'dualbound_vs_lp_rounds.png',
@@ -635,7 +637,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
                         plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
                         plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k')
+                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k', ylim=[0, 50])
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
@@ -650,7 +652,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
                         plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
                         plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k')
+                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k', ylim=[0, 50])
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
