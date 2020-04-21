@@ -195,6 +195,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 stats['cuts_applied_normalized'] = {}
                 stats['cuts_generated'] = {}
                 stats['cuts_generated_normalized'] = {}
+                stats['maxcutsroot'] = {}
                 for graph_idx in datasets[dataset]['graph_idx_range']:
                     values = []  # dualbound integrals of the current graph to compute average and std across seeds
                     stats['dualbound_integral'][graph_idx] = {}
@@ -202,6 +203,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                     stats['cuts_applied_normalized'][graph_idx] = {}
                     stats['cuts_generated'][graph_idx] = {}
                     stats['cuts_generated_normalized'][graph_idx] = {}
+                    stats['maxcutsroot'][graph_idx] = {}
                     for scip_seed in dualbounds[graph_idx].keys():
                         # compute some more stats:
                         cuts_applied = np.array(stats['cycle_ncuts_applied'][graph_idx][scip_seed])
@@ -218,13 +220,14 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                             maxcutsroot += [2000]*(len(cuts_applied) - len(maxcutsroot))
                             maxcutsroot = np.array(maxcutsroot)
                         else:
-                            maxcutsroot = hp['maxcutsroot']
+                            maxcutsroot = np.array([hp['maxcutsroot']]*len(cuts_applied))
                         cuts_applied_normalized = cuts_applied / maxcutsroot
                         cuts_generated_normalized = cuts_generated / maxcutsroot
                         stats['cuts_applied'][graph_idx][scip_seed] = cuts_applied.tolist()
                         stats['cuts_generated'][graph_idx][scip_seed] = cuts_generated.tolist()
                         stats['cuts_applied_normalized'][graph_idx][scip_seed] = cuts_applied_normalized.tolist()
                         stats['cuts_generated_normalized'][graph_idx][scip_seed] = cuts_generated_normalized.tolist()
+                        stats['maxcutsroot'][graph_idx][scip_seed] = maxcutsroot.tolist()
 
                         # the integral support is [0, max_lp_iterations]
                         # TODO: check if extension is saved to the source object.
@@ -630,11 +633,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
                         plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
-                        plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, subplot=121, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
-                        plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, subplot=121, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        plot_y_vs_x('cuts_applied_normalized', 'lp_rounds', records, hparams, figcnt, subplot=122, ystr='# Cuts', title=hparams['policy'], label='cuts applied normalized', style='-')
-                        plot_y_vs_x('cuts_generated_normalized', 'lp_rounds', records, hparams, figcnt, subplot=122, ystr='# Cuts', title=hparams['policy'], label='cuts generated normalized', style='-')
-
+                        plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
+                        plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
+                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k')
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
@@ -647,10 +648,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'lp_rounds', records, hparams, 1)
                         plot_y_vs_x('dualbound', 'lp_iterations', records, hparams, 2)
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
-                        plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, subplot=121, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
-                        plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, subplot=121, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        plot_y_vs_x('cuts_applied_normalized', 'lp_rounds', records, hparams, figcnt, subplot=122, ystr='# Cuts', title=hparams['policy'], label='cuts applied normalized', style='-')
-                        plot_y_vs_x('cuts_generated_normalized', 'lp_rounds', records, hparams, figcnt, subplot=122, ystr='# Cuts', title=hparams['policy'], label='cuts generated normalized', style='-')
+                        plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
+                        plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
+                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k')
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
