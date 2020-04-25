@@ -13,6 +13,7 @@ from datetime import datetime
 import os, pickle
 from experiments.cut_root.experiment import experiment
 from itertools import product
+import sys
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
@@ -28,6 +29,8 @@ parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
 parser.add_argument('--product-keys', nargs='+', default=[],
                     help='list of hparam keys on which to product')
+parser.add_argument('--auto-cmd', type=str, default='none',
+                    help='run cmd automatically after the current iteration completed')
 
 args = parser.parse_args()
 
@@ -103,3 +106,18 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
              trial_name_creator=None,
              max_failures=1  # TODO learn how to recover from checkpoints
              )
+
+    if args.auto_cmd != 'none':
+        # write DONE to a file named "task-id-finished" in iter_logdir
+        with open(os.path.join(iter_logdir, 'task-{}-finished'.format(args.taskid)), 'w') as f:
+            f.writelines('DONE')
+
+        # check if all tasks finished and launch run_server.py again
+        # the number of tasks is always len(products) (defined in run_server.py)
+        all_finished = True
+        for taskid in range(len(products)):
+            if not os.path.exists(os.path.join(iter_logdir, 'task-{}-finished'.format(taskid))):
+                all_finished = False
+                break
+        if all_finished:
+            os.system(args.auto_cmd)

@@ -609,7 +609,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 style = {'default_cut_selection': '--',
                          'expert': '-',
                          'adaptive': '-',
-                         'force10most_effective': '-.'}.get(hparams['policy'], ':') if style is None else style
+                         'force10strong': '-.'}.get(hparams['policy'], ':') if style is None else style
                 plt.plot(records[x], records[y], style, label=label)
                 plt.title(title)
                 plt.xlabel(xstr)
@@ -661,9 +661,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 v = datasets[dataset]['optimal_values'][graph_idx]
                 support_end = max(list(max_lp_iterations[graph_idx].values()))
                 records = {'dualbound': [v, v], 'lp_iterations': [0, support_end], 'solving_time': [0, 90], 'lp_rounds': [0, 1000]}
-                plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, label='optimal', style='-k', ncol=2)
-                plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 2, label='optimal', style='-k', ncol=2)
-                plot_y_vs_x('dualbound', 'solving_time', records, {}, 3, label='optimal', style='-k', ncol=2)
+                plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, label='optimal objective', style='-k', ncol=2)
+                plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 2, label='optimal objective', style='-k', ncol=2)
+                plot_y_vs_x('dualbound', 'solving_time', records, {}, 3, label='optimal objective', style='-k', ncol=2)
 
             # save all figures
             for fignum, filename in fig_filenames.items():

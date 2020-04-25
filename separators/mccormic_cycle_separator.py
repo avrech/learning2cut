@@ -231,7 +231,7 @@ class MccormicCycleSeparator(Sepa):
             random_cycles = np.array(violated_cycles)
             np.random.shuffle(random_cycles)
             return random_cycles[:num_cycles_to_add]
-        elif self.criterion == 'most_effective':
+        elif self.criterion == 'strong':
             """ test all the violated cycles in probing mode, and sort them by their 
             dualbound improvement """
             assert not self.model.inRepropagation()
@@ -267,8 +267,8 @@ class MccormicCycleSeparator(Sepa):
             self._lp_rounds_probing += self.model.getNLPs() - lp_rounds_probing_start
             assert len(new_dualbound) == len(violated_cycles)
             # sort the violated cycles, most effective first (lower dualbound):
-            most_effective = np.argsort(new_dualbound)
-            return np.array(violated_cycles)[most_effective[:num_cycles_to_add]]
+            strongest = np.argsort(new_dualbound)
+            return np.array(violated_cycles)[strongest[:num_cycles_to_add]]
 
 
     def add_cut(self, violated_cycle, probing=False):

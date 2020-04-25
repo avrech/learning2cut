@@ -17,7 +17,7 @@ sweep:
     values: [-1, 1, 10]
   criterion:
     search: grid
-    values: [random, most_violated_cycle, most_effective]
+    values: [random, most_violated_cycle, strong]
   forcecut:
     search: grid
     values: [True]

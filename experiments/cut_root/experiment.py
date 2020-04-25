@@ -55,16 +55,8 @@ def experiment(config):
                 print('experiment results found!')
                 return
 
-
-    if config['max_per_root'] == 0:
-        # run this configuration only once with all hparams get their first choice (the default)
-        for k, v in sweep_config['sweep'].items():
-            if k != 'graph_idx' and k != 'scip_seed' and config[k] != v['values'][0]:
-                print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!1')
-                return
-
     if config['max_per_round'] == -1 and 'criterion' in sweep_config['sweep'].keys() and config['criterion'] != sweep_config['sweep']['criterion']['values'][0]:
-        print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!1')
+        print('!!!!!!!!!!!!!!!!!!!!! SKIPPING EXPERIMENT !!!!!!!!!!!!!!!!!!!!!!')
         return
 
     # read graph

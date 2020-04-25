@@ -8,11 +8,12 @@ from argparse import ArgumentParser
 import numpy as np
 import yaml
 from datetime import datetime
-import os, pickle, time
+import os, pickle, time, sys
 from experiments.cut_root.analyze_results import analyze_results
 from tqdm import tqdm
 from pathlib import Path
 from itertools import product
+import argunparse
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
@@ -28,12 +29,20 @@ parser.add_argument('--cpus-per-task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
 parser.add_argument('--product-keys', nargs='+', default=['intsupportfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
+parser.add_argument('--auto', action='store_true',
+                    help='run again automatically after each iteration completed')
 
 args = parser.parse_args()
+unparser = argunparse.ArgumentUnparser()
+kwargs = vars(args)
+prefix = f'python {sys.argv[0]} '
+arg_string = unparser.unparse(**kwargs)
+cmd_string = '"' + prefix + arg_string + '"'
+
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
 
-def submit_job(config_file, jobname, taskid, time_limit_minutes):
+def submit_job(jobname, taskid, time_limit_minutes):
     # CREATE SBATCH FILE
     job_file = jobname + '.sh'
     with open(job_file, 'w') as fh:
@@ -52,19 +61,17 @@ def submit_job(config_file, jobname, taskid, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} --product-keys {}\n'.format(
+        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} --product-keys {} --auto-cmd {}\n'.format(
             args.experiment,
-#            os.path.abspath(args.log_dir),
             args.log_dir,
-            config_file,
+            args.config_file,
             args.data_dir,
-#            os.path.abspath(args.data_dir),
             taskid,
-            ' '.join(args.product_keys)
+            ' '.join(args.product_keys),
+            cmd_string if args.auto else 'none'
         ))
 
     os.system("sbatch {}".format(job_file))
-    print('sbatch {}'.format(job_file))
 
 # load sweep configuration
 with open(args.config_file) as f:
@@ -167,9 +174,8 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     # after all jobs complete, continue to the next iteration.
     print('submitting jobs:')
     for taskid in range(n_tasks):
-        config_file = os.path.abspath(args.config_file)
         jobname = 'iter{}-cfg{}'.format(k_iter, taskid)
-        submit_job(config_file, jobname, taskid, time_limit_minutes)
+        submit_job(jobname, taskid, time_limit_minutes)
         time.sleep(1)
 
     print('submitted jobs - run again in {} minutes after all jobs completed'.format(time_limit_minutes))
