@@ -65,7 +65,8 @@ def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60):
                 sol = model.getBestSol()
                 for i in range(G.number_of_nodes()):
                     x_values[i] = model.getSolVal(sol, x[i])
-                assert model.getGap() == 0, 'graph no.{} not solved!'
+                if model.getGap() > 0:
+                    print('WARNING: graph no.{} not solved!')
                 cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
                 nx.set_edge_attributes(G, cut, name='cut')
 
