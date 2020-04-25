@@ -37,7 +37,7 @@ unparser = argunparse.ArgumentUnparser()
 kwargs = vars(args)
 prefix = f'python {sys.argv[0]} '
 arg_string = unparser.unparse(**kwargs)
-cmd_string = '"' + prefix + arg_string + '"'
+cmd_string = prefix + arg_string
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
@@ -193,3 +193,4 @@ print('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-fi
 # analyze_results(rootdir=iter_logdir, dstdir=os.path.join(args.log_dir, 'final_analysis'), tensorboard=True)
 print('finished adaptive policy search. congrats!')
 
+'"python /home/avrech/learning2cut/experiments/run_adaptive_policy_experiment_server.py --experiment=cut_root --config_file=cut_root/adaptive_policy_config.yaml --log_dir=cut_root/results/cutsbudget1000/adaptive_policy --data_dir=cut_root/data --cpus_per_task=40 --product_keys="[\'intsupportfac\', \'maxcutsroot\']" --auto"'

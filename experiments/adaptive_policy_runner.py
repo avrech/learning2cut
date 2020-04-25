@@ -13,7 +13,6 @@ from datetime import datetime
 import os, pickle
 from experiments.cut_root.experiment import experiment
 from itertools import product
-import sys
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
