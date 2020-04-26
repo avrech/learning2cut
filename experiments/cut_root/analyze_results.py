@@ -706,7 +706,7 @@ if __name__ == '__main__':
     parser.add_argument('--starting-policies-abspath', type=str, default='', help='pattern of pickle files')
     args = parser.parse_args()
     if args.starting_policies_abspath == '':
-        args.starting_policies_abspath = args.rootdir + 'starting_policies.pkl'
+        args.starting_policies_abspath = os.path.join(args.rootdir, 'starting_policies.pkl')
     analyze_results(rootdir=args.rootdir, dstdir=args.dstdir, filepattern=args.filepattern,
                     tensorboard=args.tensorboard, tb_k_best=args.tb_k_best, csv=args.csv,
                     final_adaptive=args.final_adaptive, plot=args.plot, starting_policies_abspath=args.starting_policies_abspath)
