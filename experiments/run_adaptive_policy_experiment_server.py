@@ -46,7 +46,7 @@ if not os.path.exists(args.log_dir):
 
 def submit_job(jobname, taskid, time_limit_minutes):
     # CREATE SBATCH FILE
-    job_file = jobname + '.sh'
+    job_file = os.path.join(args.log_dir, jobname + '.sh')
     with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
         fh.writelines('#SBATCH --time=00:{}:00\n'.format(time_limit_minutes))
@@ -69,8 +69,8 @@ def submit_job(jobname, taskid, time_limit_minutes):
             args.config_file,
             args.data_dir,
             taskid,
-            ' '.join(args.product_keys),
-            '--auto' if args.auto else ''
+            '--auto' if args.auto else '',
+            ' '.join(args.product_keys)
         ))
 
     os.system("sbatch {}".format(job_file))
