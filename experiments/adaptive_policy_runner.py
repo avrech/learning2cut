@@ -13,7 +13,7 @@ from datetime import datetime
 import os, pickle
 from experiments.cut_root.experiment import experiment
 from itertools import product
-
+import time
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
 parser.add_argument('--experiment', type=str, default='cut_root',
@@ -110,6 +110,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
         # write DONE to a file named "task-id-finished" in iter_logdir
         with open(os.path.join(iter_logdir, 'task-{}-finished'.format(args.taskid)), 'w') as f:
             f.writelines('DONE')
+        time.sleep(1)
 
         # check if all tasks finished and launch run_server.py again
         # the number of tasks is always len(products) (defined in run_server.py)
@@ -121,7 +122,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
         if all_finished:
             # override job output file and clean for the next iteration restarting
             with open(os.path.join(args.log_dir, 'iter{}-cfg{}.out'.format(k_iter, args.taskid)), 'w') as f:
-                f.writelines('RESTARTING ITERATION {}'.format(k_iter + 1))
+                f.writelines('RESTARTING ITERATION {}\n'.format(k_iter + 1))
 
             with open(os.path.join(args.log_dir, 'cmd.txt'), 'r') as f:
                 cmd = f.readline()
