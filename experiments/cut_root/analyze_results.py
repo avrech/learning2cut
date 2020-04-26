@@ -11,7 +11,9 @@ import pandas as pd
 import operator
 import matplotlib.pyplot as plt
 
-def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl', tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False, plot=False):
+def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl',
+                    tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False, plot=False,
+                    starting_policies_abspath=None):
     # make directory where to save analysis files - tables, tensorboard etc.
     if not os.path.exists(dstdir):
         os.makedirs(dstdir)
