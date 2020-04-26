@@ -38,6 +38,8 @@ kwargs = vars(args)
 prefix = f'python {sys.argv[0]} '
 arg_string = unparser.unparse(**kwargs)
 cmd_string = prefix + arg_string
+with open(os.path.join(args.log_dir, 'cmd.txt'), 'w') as f:
+    f.writelines(cmd_string + "\n")
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
@@ -61,14 +63,14 @@ def submit_job(jobname, taskid, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} --product-keys {} --auto-cmd {}\n'.format(
+        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} {} --product-keys {}\n'.format(
             args.experiment,
             args.log_dir,
             args.config_file,
             args.data_dir,
             taskid,
             ' '.join(args.product_keys),
-            cmd_string if args.auto else 'none'
+            '--auto' if args.auto else ''
         ))
 
     os.system("sbatch {}".format(job_file))

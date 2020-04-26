@@ -28,8 +28,8 @@ parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
 parser.add_argument('--product-keys', nargs='+', default=[],
                     help='list of hparam keys on which to product')
-parser.add_argument('--auto-cmd', type=str, default='none',
-                    help='run cmd automatically after the current iteration completed')
+parser.add_argument('--auto', action='store_true',
+                    help='run again automatically after each iteration completed')
 
 args = parser.parse_args()
 
@@ -106,7 +106,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
              max_failures=1  # TODO learn how to recover from checkpoints
              )
 
-    if args.auto_cmd != 'none':
+    if args.auto:
         # write DONE to a file named "task-id-finished" in iter_logdir
         with open(os.path.join(iter_logdir, 'task-{}-finished'.format(args.taskid)), 'w') as f:
             f.writelines('DONE')
@@ -119,4 +119,6 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
                 all_finished = False
                 break
         if all_finished:
-            os.system(args.auto_cmd)
+            with open(os.path.join(args.log_dir, 'cmd.txt'), 'r') as f:
+                cmd = f.readline()
+            os.system(cmd)
