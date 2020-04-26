@@ -38,11 +38,11 @@ kwargs = vars(args)
 prefix = f'python {sys.argv[0]} '
 arg_string = unparser.unparse(**kwargs)
 cmd_string = prefix + arg_string
-with open(os.path.join(args.log_dir, 'cmd.txt'), 'w') as f:
-    f.writelines(cmd_string + "\n")
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
+with open(os.path.join(args.log_dir, 'cmd.txt'), 'w') as f:
+    f.writelines(cmd_string + "\n")
 
 def submit_job(jobname, taskid, time_limit_minutes):
     # CREATE SBATCH FILE
