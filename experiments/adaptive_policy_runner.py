@@ -121,4 +121,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
         if all_finished:
             with open(os.path.join(args.log_dir, 'cmd.txt'), 'r') as f:
                 cmd = f.readline()
+            print('EXECUTING THE NEXT POLICY ITERATION')
+            print(cmd)
             os.system(cmd)
+
