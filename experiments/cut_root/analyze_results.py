@@ -212,7 +212,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         cuts_generated[1:] -= cuts_generated[:-1]
                         hp = datasets[dataset]['configs'][config]
                         if hp['policy'] == 'adaptive':
-                            with open(os.path.join(args.rootdir, 'starting_policies.pkl'), 'rb') as f:
+                            with open(os.path.join(rootdir, 'starting_policies.pkl'), 'rb') as f:
                                 sp = pickle.load(f)
                             freq = hp['policy_update_freq']
                             n_iter = hp['n_policy_iterations']
