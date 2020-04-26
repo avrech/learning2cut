@@ -85,7 +85,7 @@ iter_logdir = ''
 for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
     # recovering from checkpoints:
     # skip iteration if completed in previous runs
-    print('loading stating policies from: ', starting_policies_abspath)
+    print('loading starting policies from: ', starting_policies_abspath)
     with open(starting_policies_abspath, 'rb') as f:
         starting_policies = pickle.load(f)
     if len(starting_policies) > k_iter:
@@ -103,8 +103,8 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
              resources_per_trial={'cpu': 1, 'gpu': 0},
              local_dir=iter_logdir,
              trial_name_creator=None,
-             max_failures=1  # TODO learn how to recover from checkpoints
-             )
+             max_failures=1,  # TODO learn how to recover from checkpoints
+             verbose=0)
 
     if args.auto:
         # write DONE to a file named "task-id-finished" in iter_logdir
