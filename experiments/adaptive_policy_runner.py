@@ -18,15 +18,15 @@ NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', 
 parser = ArgumentParser()
 parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
-parser.add_argument('--config-file', type=str, default='cut_root/adaptive_policy_config.yaml',
+parser.add_argument('--config_file', type=str, default='cut_root/adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log-dir', type=str, default='cut_root/results/adaptive_policy/' + NOW,
+parser.add_argument('--log_dir', type=str, default='cut_root/results/adaptive_policy/' + NOW,
                     help='path to results root')
-parser.add_argument('--data-dir', type=str, default='cut_root/data',
+parser.add_argument('--data_dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
 parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
-parser.add_argument('--product-keys', nargs='+', default=[],
+parser.add_argument('--product_keys', nargs='+', default=[],
                     help='list of hparam keys on which to product')
 parser.add_argument('--auto', action='store_true',
                     help='run again automatically after each iteration completed')

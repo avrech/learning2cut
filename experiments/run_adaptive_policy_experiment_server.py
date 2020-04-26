@@ -19,15 +19,15 @@ NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', 
 parser = ArgumentParser()
 parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
-parser.add_argument('--config-file', type=str, default='cut_root/adaptive_policy_config.yaml',
+parser.add_argument('--config_file', type=str, default='cut_root/adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log-dir', type=str, default='cut_root/results/cutsbudget1000/adaptive_policy',
+parser.add_argument('--log_dir', type=str, default='cut_root/results/cutsbudget1000/adaptive_policy',
                     help='path to results root')
-parser.add_argument('--data-dir', type=str, default='cut_root/data',
+parser.add_argument('--data_dir', type=str, default='cut_root/data',
                     help='path to generate/read data')
-parser.add_argument('--cpus-per-task', type=int, default=40,
+parser.add_argument('--cpus_per_task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
-parser.add_argument('--product-keys', nargs='+', default=['intsupportfac', 'maxcutsroot'],
+parser.add_argument('--product_keys', nargs='+', default=['intsupportfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
 parser.add_argument('--auto', action='store_true',
                     help='run again automatically after each iteration completed')
@@ -63,7 +63,7 @@ def submit_job(jobname, taskid, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {} --taskid {} {} --product-keys {}\n'.format(
+        fh.writelines('python adaptive_policy_runner.py --experiment {} --log_dir {} --config_file {} --data_dir {} --taskid {} {} --product_keys {}\n'.format(
             args.experiment,
             args.log_dir,
             args.config_file,
