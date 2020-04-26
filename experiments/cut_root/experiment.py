@@ -122,11 +122,11 @@ if __name__ == '__main__':
     from experiments.cut_root.data_generator import generate_data
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--log-dir', type=str, default='results/adaptive_policy',
+    parser.add_argument('--log_dir', type=str, default='results/adaptive_policy',
                         help='path to results root')
-    parser.add_argument('--data-dir', type=str, default='data',
+    parser.add_argument('--data_dir', type=str, default='data',
                         help='path to generate/read data')
-    parser.add_argument('--starting-policies-abspath', type=str, default='results/adaptive_policy/starting_policies.pkl',
+    parser.add_argument('--starting_policies_abspath', type=str, default='results/adaptive_policy/starting_policies.pkl',
                         help='path to load starting policies')
 
     args = parser.parse_args()
