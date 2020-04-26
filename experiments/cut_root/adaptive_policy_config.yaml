@@ -40,7 +40,7 @@ constants:
   graph_size: 100
   policy: adaptive
   cuts_budget: 600
-  policy_update_freq: 10
+  policy_update_freq: 5
   n_policy_iterations: 10
 
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
