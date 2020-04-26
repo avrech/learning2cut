@@ -127,7 +127,7 @@ iter_logdir = ''
 for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     # recovering from checkpoints:
     # skip iteration if completed in previous runs
-    print('loading stating policies from: ', starting_policies_abspath)
+    print('loading starting policies from: ', starting_policies_abspath)
     with open(starting_policies_abspath, 'rb') as f:
         starting_policies = pickle.load(f)
     if len(starting_policies) > k_iter:
@@ -140,7 +140,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     if not os.path.exists(iter_logdir):
         os.makedirs(iter_logdir)
     print('################ CHECKING ITERATION {} ################'.format(k_iter))
-    analyses = analyze_results(rootdir=iter_logdir, dstdir=iter_analysisdir)
+    analyses = analyze_results(rootdir=iter_logdir, dstdir=iter_analysisdir, starting_policies_abspath=starting_policies_abspath)
     if len(analyses) > 0:
         analysis = list(analyses.values())[0]
         if analysis.get('complete_experiment_commandline', None) is not None:
