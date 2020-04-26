@@ -120,15 +120,17 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
                 all_finished = False
                 break
         if all_finished:
-            # override job output file and clean for the next iteration restarting
-            with open(os.path.join(args.log_dir, 'iter{}-cfg{}.out'.format(k_iter, args.taskid)), 'w') as f:
-                f.writelines('RESTARTING ITERATION {}\n'.format(k_iter + 1))
-
+            # # override job output file and clean for the next iteration restarting
+            # with open(os.path.join(args.log_dir, 'iter{}-cfg{}.out'.format(k_iter, args.taskid)), 'w') as f:
+            #     f.writelines('RESTARTING ITERATION {}\n'.format(k_iter + 1))
+            print('################# RESTARTING ITERATION {} #################\n'.format(k_iter + 1))
             with open(os.path.join(args.log_dir, 'cmd.txt'), 'r') as f:
                 cmd = f.readline()
-            print('EXECUTING THE NEXT POLICY ITERATION')
+            print('################# EXECUTING THE NEXT POLICY ITERATION #################')
             print(cmd)
-            os.system(cmd)
+            retval = os.system(cmd)
+            print('os system command return value: {}'.format(retval))
+            
     print('Iteration completed successfully. Terminating.')
     exit(0)
 
