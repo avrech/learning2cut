@@ -97,14 +97,16 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
     iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter))
     if not os.path.exists(iter_logdir):
         os.makedirs(iter_logdir)
-
-    tune.run(experiment,
-             config=tune_search_space,
-             resources_per_trial={'cpu': 1, 'gpu': 0},
-             local_dir=iter_logdir,
-             trial_name_creator=None,
-             max_failures=1,  # TODO learn how to recover from checkpoints
-             verbose=0)
+    try:
+        tune.run(experiment,
+                 config=tune_search_space,
+                 resources_per_trial={'cpu': 1, 'gpu': 0},
+                 local_dir=iter_logdir,
+                 trial_name_creator=None,
+                 max_failures=1,  # TODO learn how to recover from checkpoints
+                 verbose=0)
+    except Exception as e:
+        print(e)
 
     if args.auto:
         # write DONE to a file named "task-id-finished" in iter_logdir
@@ -130,7 +132,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
             print(cmd)
             retval = os.system(cmd)
             print('os system command return value: {}'.format(retval))
-            
+
     print('Iteration completed successfully. Terminating.')
     exit(0)
 
