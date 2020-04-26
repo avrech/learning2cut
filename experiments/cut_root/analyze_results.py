@@ -219,7 +219,10 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                             freq = hp['policy_update_freq']
                             n_iter = hp['n_policy_iterations']
                             maxcutsroot = [sp[it]['maxcutsroot'] for it in range(n_iter) for rnd in range(freq)]
-                            maxcutsroot += [2000]*(len(cuts_applied) - len(maxcutsroot))
+                            if len(maxcutsroot) > len(cuts_applied):
+                                maxcutsroot = maxcutsroot[:len(cuts_applied)]
+                            else:
+                                maxcutsroot += [2000]*(len(cuts_applied) - len(maxcutsroot))
                             maxcutsroot = np.array(maxcutsroot)
                         else:
                             maxcutsroot = np.array([hp['maxcutsroot']]*len(cuts_applied))
