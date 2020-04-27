@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl',
                     tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False, plot=False,
-                    starting_policies_abspath=None):
+                    starting_policies_abspath=None, avg=False):
     # make directory where to save analysis files - tables, tensorboard etc.
     if not os.path.exists(dstdir):
         os.makedirs(dstdir)
@@ -305,6 +305,25 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 best_dualbound_integral_std.append('-')
                 # best_config.append(None)
                 # k_best_configs.append(None)
+
+        if avg:
+            # for graph_idx = 0 only, scip_seed = constant also.
+            # average the dual bound integral for each key-val in
+            # maxcutsroot, intsupportfac, objparalfac, dircutoffdist, efficacyfac
+            # and return to user as a dictionary.
+            graph_idx = 0
+            dbi_avg_dict = {}
+            scip_seed = datasets[dataset]['sweep_config']['sweep']['scip_seed']['values'][0]
+            for k in ['maxcutsroot', 'intsupportfac', 'objparalfac', 'dircutoffdist', 'efficacyfac']:
+                dbi_avg_dict[k] = {}
+                for v in datasets[dataset]['sweep_config']['sweep'][k]['values']:
+                    dbi = []
+                    for config, stats in res.items():
+                        cfg = datasets[dataset]['configs'][config]
+                        if cfg[k] == v:
+                            dbi.append(stats['dualbound_integral'][graph_idx][scip_seed])
+                    dbi_avg_dict[v] = np.mean(dbi)
+
 
 
         ######################################################################################
@@ -686,9 +705,41 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         analysis[dataset]['best_policy'] = best_policy
         analysis[dataset]['complete_experiment_commandline'] = complete_experiment_commandline
         analysis[dataset]['tensorboard_commandline'] = tensorboard_commandline
+        analysis[dataset]['dualbound_integral_average'] = dbi_avg_dict
 
     print('finished analysis!')
     return analysis
+
+
+def average_dualbound_integral(rootdir, dstdir, n_iter):
+    """
+    search for iter<>results inside rootdir.
+    at each subfolder run analysis, and store the dual bound integral average.
+    accumulate results in a table, and print everything to a csv.
+    :param rootdir:
+    :param dstdir:
+    :param n_iter:
+    :return:
+    """
+    results = None
+    for idx in range(n_iter):
+        iterdir = os.path.join(rootdir, 'iter{}results'.format(idx))
+        dbi_avg = list(analyze_results(rootdir=iterdir, avg=True).items())[0]['dualbound_integral_average']
+        if results is None:
+            for k, values in dbi_avg.items():
+                results[k] = {}
+                for v in values.keys():
+                    results[k][v] = []
+        for k, values in dbi_avg.items():
+            for val, dbi in values.items():
+                results[k][val].append(dbi)
+    # print each key in results to a separated file dstdir/<k>.csv
+    for param, d in results.items():
+        csv_file = os.path.join(dstdir, param+'.csv')
+        df = pd.DataFrame(data=d)
+        df.to_csv(csv_file, float_format='%.2f')
+    print('Saved all csv files to {}'.format(dstdir))
+
 
 if __name__ == '__main__':
     NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
