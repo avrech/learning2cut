@@ -705,7 +705,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         analysis[dataset]['best_policy'] = best_policy
         analysis[dataset]['complete_experiment_commandline'] = complete_experiment_commandline
         analysis[dataset]['tensorboard_commandline'] = tensorboard_commandline
-        analysis[dataset]['dualbound_integral_average'] = dbi_avg_dict
+        analysis[dataset]['dualbound_integral_average'] = dbi_avg_dict if avg else None
 
     print('finished analysis!')
     return analysis
