@@ -316,7 +316,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             graph_idx = 0
             dbi_avg_dict = {}
             scip_seed = datasets[dataset]['sweep_config']['sweep']['scip_seed']['values'][0]
-            for k in ['maxcutsroot', 'intsupportfac', 'objparalfac', 'dircutoffdist', 'efficacyfac']:
+            for k in ['maxcutsroot', 'intsupportfac', 'objparalfac', 'dircutoffdistfac', 'efficacyfac']:
                 dbi_avg_dict[k] = {}
                 for v in datasets[dataset]['sweep_config']['sweep'][k]['values']:
                     dbi = []
@@ -725,6 +725,7 @@ def average_dualbound_integral(rootdir, dstdir, n_iter):
     """
     results = None
     for idx in range(n_iter):
+        print('##### ANALYZING ITERATION {} #####'.format(idx))
         iterdir = os.path.join(rootdir, 'iter{}results'.format(idx))
         dbi_avg = list(analyze_results(rootdir=iterdir, avg=True).items())[0]['dualbound_integral_average']
         if results is None:
