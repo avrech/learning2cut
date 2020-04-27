@@ -209,6 +209,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                     for scip_seed in dualbounds[graph_idx].keys():
                         # compute some more stats:
                         cuts_applied = np.array(stats['cycle_ncuts_applied'][graph_idx][scip_seed])
+                        if sum(cuts_applied == -1) > 0:
+                            cuts_applied = np.array(stats['total_ncuts_applied'][graph_idx][scip_seed])
                         cuts_generated = np.array(stats['cycle_ncuts'][graph_idx][scip_seed])
                         cuts_applied[1:] -= cuts_applied[:-1]
                         cuts_generated[1:] -= cuts_generated[:-1]
@@ -676,7 +678,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         plot_y_vs_x('dualbound', 'solving_time', records, hparams, 3)
                         plot_y_vs_x('cuts_applied', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts applied', style='-')
                         plot_y_vs_x('cuts_generated', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='cuts generated', style='-')
-                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k', ylim=[0, 50])
+                        plot_y_vs_x('maxcutsroot', 'lp_rounds', records, hparams, figcnt, ystr='# Cuts', title=hparams['policy'], label='maxcutsroot', style='--k', ylim=[0, hparams['graph_size']])
                         fig_filenames[figcnt] = '{}-g{}-scipseed{}.png'.format(hparams['policy'], graph_idx, scip_seed)
                         figcnt += 1
 
