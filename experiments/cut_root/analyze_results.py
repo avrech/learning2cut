@@ -727,7 +727,7 @@ def average_dualbound_integral(rootdir, dstdir, n_iter):
     for idx in range(n_iter):
         print('##### ANALYZING ITERATION {} #####'.format(idx))
         iterdir = os.path.join(rootdir, 'iter{}results'.format(idx))
-        dbi_avg = list(analyze_results(rootdir=iterdir, avg=True).items())[0]['dualbound_integral_average']
+        dbi_avg = list(analyze_results(rootdir=iterdir, avg=True).values())[0]['dualbound_integral_average']
         if results is None:
             for k, values in dbi_avg.items():
                 results[k] = {}
