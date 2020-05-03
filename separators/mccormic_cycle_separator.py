@@ -289,7 +289,7 @@ class MccormicCycleSeparator(Sepa):
 
         cutrhs = len(F) - 1
         name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
-        cut = model.createEmptyRowSepa(self, name, lhs=None, rhs=cutrhs,
+        cut = model.createEmptyRowSepa(self, name, lhs=0, rhs=cutrhs,
                                        local=self.local,
                                        removable=self.removable)
         model.cacheRowExtensions(cut)
