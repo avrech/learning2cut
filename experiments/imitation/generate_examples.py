@@ -24,8 +24,7 @@ import pickle
 import os
 
 
-def experiment(config):
-    logdir = tune.track.trial_dir()
+def generate_examples_from_graph(config):
     # load config if experiment launched from complete_experiment.py
     if 'complete_experiment' in config.keys():
         config = config['complete_experiment']
@@ -37,7 +36,6 @@ def experiment(config):
 
     # read graph
     graph_idx = config['graph_idx']
-
     filepath = os.path.join(config['data_abspath'], "graph_idx_{}.pkl".format(graph_idx))
     with open(filepath, 'rb') as f:
         G = pickle.load(f)
@@ -82,38 +80,66 @@ def experiment(config):
     sampler.save_data()
     print('expeiment finished')
 
-    return 0
+
+def submit_job(jobname, taskid, time_limit_minutes):
+    # CREATE SBATCH FILE
+    job_file = os.path.join(args.log_dir, jobname + '.sh')
+    with open(job_file, 'w') as fh:
+        fh.writelines("#!/bin/bash\n")
+        fh.writelines('#SBATCH --time=00:{}:00\n'.format(time_limit_minutes))
+        fh.writelines('#SBATCH --account=def-alodi\n')
+        fh.writelines('#SBATCH --output={}/{}.out\n'.format(args.log_dir,jobname))
+        fh.writelines('#SBATCH --mem=0\n')
+        fh.writelines('#SBATCH --mail-user=avrech@campus.technion.ac.il\n')
+        fh.writelines('#SBATCH --mail-type=END\n')
+        fh.writelines('#SBATCH --mail-type=FAIL\n')
+        fh.writelines('#SBATCH --nodes=1\n')
+        fh.writelines('#SBATCH --job-name={}\n'.format(jobname))
+        fh.writelines('#SBATCH --ntasks-per-node=1\n')
+        fh.writelines('#SBATCH --cpus-per-task={}\n'.format(args.cpus_per_task))
+        fh.writelines('module load python\n')
+        fh.writelines('source $HOME/server_bashrc\n')
+        fh.writelines('source $HOME/venv/bin/activate\n')
+        fh.writelines('python adaptive_policy_runner.py --experiment {} --log_dir {} --config_file {} --data_dir {} --taskid {} {} --product_keys {}\n'.format(
+            args.experiment,
+            args.log_dir,
+            args.config_file,
+            args.data_dir,
+            taskid,
+            '--auto' if args.auto else '',
+            ' '.join(args.product_keys)
+        ))
+
+    os.system("sbatch {}".format(job_file))
 
 if __name__ == '__main__':
-    # run the final adaptive policy found on Niagara
     import argparse
-    from ray.tune import track
     import yaml
-    from experiments.cut_root.data_generator import generate_data
+    from experiments.imitation.data_generator import generate_data
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', type=str, default='results/test',
-                        help='path to results root')
     parser.add_argument('--datadir', type=str, default='data',
                         help='path to generate/read data')
+    parser.add_argument('--graphidx', type=str, default='data',
+                        help='path to generate/read data')
+    parser.add_argument('--configfile', type=str, default='datagen_config.yaml',
+                        help='path to generate/read data')
+    parser.add_argument('--ntasks-per-node', type=int, default=40,
+                        help='Graham - 32, Niagara - 40')
+    parser.add_argument('--graphs', nargs='+', default=[0],
+                        help='list of hparam keys on which to product')
 
     args = parser.parse_args()
 
-    track.init(experiment_dir=args.logdir)
-    logdir = tune.track.trial_dir()
-    if not os.path.exists(logdir):
-        os.makedirs(logdir)
-    with open(os.path.join(os.path.dirname(os.path.dirname(logdir)), 'checkpoint.pkl'), 'wb') as f:
-        pickle.dump([], f)
     with open('datagen_config.yaml') as f:
         sweep_config = yaml.load(f, Loader=yaml.FullLoader)
     config = sweep_config['constants']
     for k, v in sweep_config['sweep'].items():
         if k == 'graph_idx':
-            config[k] = 0
+            config[k] = args.graphidx
         else:
             config[k] = v['values'][0]
     data_abspath = generate_data(sweep_config, 'data', solve_maxcut=True, time_limit=600)
     config['sweep_config'] = sweep_config
     config['data_abspath'] = data_abspath
-    experiment(config)
+    generate_examples_from_graph(config)
