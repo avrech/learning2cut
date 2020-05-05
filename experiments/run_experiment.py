@@ -15,22 +15,26 @@ NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', 
 parser = ArgumentParser()
 parser.add_argument('--experiment', type=str, default='cut_root',
                     help='experiment dir')
-parser.add_argument('--config-file', type=str, default='cut_root/experts_config.yaml',
+parser.add_argument('--configfile', type=str, default='cut_root/experts_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log-dir', type=str, default='cut_root/results/maxcutsapplied2000/' + NOW,
+parser.add_argument('--logdir', type=str, default='cut_root/results/maxcutsapplied2000/' + NOW,
                     help='path to results root')
-parser.add_argument('--data-dir', type=str, default='cut_root/data',
+parser.add_argument('--datadir', type=str, default='cut_root/data',
                     help='path to generate/read data')
+parser.add_argument('--solvegraphs', action='store_true',
+                    help='whether to solve the graphs to optimality when generating data or not.')
 
 args = parser.parse_args()
 
 # load sweep configuration
-with open(args.config_file) as f:
+with open(args.configfile) as f:
     sweep_config = yaml.load(f, Loader=yaml.FullLoader)
 
 # dataset generation
+if not os.path.exists(args.logdir):
+    os.makedirs(args.logdir)
 data_generator = import_module('experiments.' + args.experiment + '.data_generator')
-data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
+data_abspath = data_generator.generate_data(sweep_config, args.datadir, solve_maxcut=args.solvegraphs, time_limit=600)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
@@ -54,7 +58,7 @@ track.init()
 analysis = tune.run(experiment.experiment,
                     config=tune_search_space,
                     resources_per_trial={'cpu': 1, 'gpu': 0},
-                    local_dir=args.log_dir,
+                    local_dir=args.logdir,
                     trial_name_creator=None,
                     max_failures=1  # TODO learn how to recover from checkpoints
                     )

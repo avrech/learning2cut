@@ -3,7 +3,7 @@ sweep:
   # INSTANCE PARAMETERS
   graph_idx:
     search: grid_range
-    range: 1000
+    range: 2  # 1000
   scip_seed:
     search: grid
     values: [52]  #[46, 52] #223, 100] #, 521] #, 46, 52] #, 14, 176, 80, 174, 198]
@@ -39,7 +39,10 @@ constants:
   dataset_generation_seed: 36
   graph_size: 20
   policy: default_cut_selection
-  cuts_budget: -1
+  cuts_budget: 1000
+  # SAMPLER PARAMETERS
+  saving_mode: epsiode
+  relative_savedir: examples  # path to save examples relative to data_abspath set in run_experiment
 
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
   max_per_round: -1

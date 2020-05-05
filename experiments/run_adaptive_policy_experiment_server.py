@@ -29,6 +29,7 @@ parser.add_argument('--cpus_per_task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
 parser.add_argument('--product_keys', nargs='+', default=['intsupportfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
+# TODO: that doesn't work. use jobs dependency options in slurm.
 parser.add_argument('--auto', action='store_true',
                     help='run again automatically after each iteration completed')
 

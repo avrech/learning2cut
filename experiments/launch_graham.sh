@@ -13,4 +13,8 @@
 #SBATCH --mail-type=REQUEUE
 #SBATCH --mail-type=ALL
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# load modules and activate virtualenv
+
+# run the experiment
 srun python run_adaptive_policy_experiment.py

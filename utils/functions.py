@@ -114,3 +114,22 @@ def get_bipartite_graph(scip_state, scip_action=None):
                         nvars=nvars,
                         stats=stats)
     return data
+
+def get_data_memory(data, units='M'):
+    """
+    Computes the memory consumption of torch_geometric.data.Data object in MBytes
+    Counts for all torch.Tensor elements in data: x, y, edge_index, edge_attr, stats, etc.
+    :param data:
+    :return:
+    """
+    membytes = 0
+    for k in data.keys:
+        v = data[k]
+        if type(v) is torch.Tensor:
+            membytes += v.element_size() * v.nelement()
+    mem = {'B': membytes,
+           'K': membytes / 2**10,
+           'M': membytes / 2**20,
+           'G': membytes / 2**30,
+           }.get(units)
+    return mem
