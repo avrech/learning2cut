@@ -7,9 +7,11 @@ from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
 from utils.functions import dijkstra
 import operator
 import pickle
+from torch_geometric.data import Data
 
-class MccormicCycleSeparator(Sepa):
-    def __init__(self, G, x, y, name='MLCycles',
+
+class RLSeparator(Sepa):
+    def __init__(self, G, x, y, name='RLSeparator',
                  hparams={}
                  ):
         """
@@ -39,7 +41,8 @@ class MccormicCycleSeparator(Sepa):
 
         # adaptive policy
         self.starting_policies = []
-        self.policy_update_freq = hparams.get('policy_update_freq', -1)  # number of LP rounds between each params update.
+        self.policy_update_freq = hparams.get('policy_update_freq',
+                                              -1)  # number of LP rounds between each params update.
         if self.policy == 'adaptive':
             with open(hparams['starting_policies_abspath'], 'rb') as f:
                 self.starting_policies = pickle.load(f)
@@ -78,6 +81,10 @@ class MccormicCycleSeparator(Sepa):
         self.finished = False
 
     def sepaexeclp(self):
+        state_dict = self.model.getState(state_format='dict')
+        state_tensor = self.model.getState(state_format='tensor')
+        gnn_state = 0
+
         if self.model.getNCutsApplied() - self._cuts_applied_probing >= self.cuts_budget:
             # terminate
             self.finish_experiment()
@@ -108,7 +115,7 @@ class MccormicCycleSeparator(Sepa):
         # NOTE: the last update must be done after the solver terminates optimization,
         # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
         # if self._round_cnt > 0:
-        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
+        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, 'MLCycles')
         self.stats['cycle_ncuts'].append(cycle_cuts - self._cuts_probing)
         self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied - self._cuts_applied_probing)
         self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
@@ -328,15 +335,6 @@ class MccormicCycleSeparator(Sepa):
         model.releaseRow(cut)
         return {"result": result}
 
-    def is_chordless(self, path):
-        """
-        Check if any non-adjacent pair of nodes in the cycle are connected directly in the graph.
-        :param path: a list of edges ((from, _), (to, _)), forming a simple cycle.
-        :return: True if chordless, otherwise False.
-        """
-        cycle_nodes = [e[0] for e in path[:-1]]
-        cycle = nx.subgraph(self.G, cycle_nodes)
-        return nx.is_chordal(cycle)
 
     def update_cut_selection_policy(self, config={}):
         """
@@ -361,6 +359,7 @@ class MccormicCycleSeparator(Sepa):
 
 if __name__ == "__main__":
     import sys
+    from separators.mccormic_cycle_separator import MccormicCycleSeparator
     if '--mixed-debug' in sys.argv:
         import ptvsd
 
@@ -381,32 +380,18 @@ if __name__ == "__main__":
                'criterion': 'random',
                'forcecut': False,
                'cuts_budget': 2000,
-               'policy': 'adaptive',
-               'policy_update_freq': 10,
-               'starting_policies': [{'objparalfac': 0.1,
-                                      'dircutoffdistfac': 0.5,
-                                      'efficacyfac': 1,
-                                      'intsupportfac': 0.1,
-                                      'maxcutsroot': 1},
-                                     {'objparalfac': 0.1,
-                                      'dircutoffdistfac': 0.5,
-                                      'efficacyfac': 1,
-                                      'intsupportfac': 0.1,
-                                      'maxcutsroot': 5},
-
-                                     ]
+               'policy': 'default'
                }
 
-    ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
-    model.includeSepa(ci_cut, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
+    cycle_sepa = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
+    model.includeSepa(cycle_sepa, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
                       freq=1)
-    # model.setRealParam('separating/objparalfac', 0.1)
-    # model.setRealParam('separating/dircutoffdistfac', 0.5)
-    # model.setRealParam('separating/efficacyfac', 1)
-    # model.setRealParam('separating/intsupportfac', 0.1)
-    # model.setIntParam('separating/maxrounds', -1)
-    # model.setIntParam('separating/maxroundsroot', 10)
+    rlsepa = RLSeparator(G=G, x=x, y=y)
+    model.includeSepa(rlsepa, rlsepa.name,
+                      "Reinforcement learning separator",
+                      priority=100000,
+                      freq=1)
     model.setIntParam('separating/maxcuts', 20)
     model.setIntParam('separating/maxcutsroot', 100)
     model.setIntParam('separating/maxstallroundsroot', -1)
@@ -414,8 +399,8 @@ if __name__ == "__main__":
     model.setRealParam('limits/time', 300)
     model.setLongintParam('limits/nodes', 1)
     model.optimize()
-    ci_cut.finish_experiment()
-    stats = ci_cut.stats
+    cycle_sepa.finish_experiment()
+    stats = cycle_sepa.stats
     print("Solved using user's cutting-planes callback. Objective {}".format(model.getObjVal()))
     cycle_cuts_applied = -1
     # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
