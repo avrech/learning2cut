@@ -77,7 +77,6 @@ def get_bipartite_graph(scip_state, scip_action=None):
     C = torch.from_numpy(scip_state['C'])
     V = torch.from_numpy(scip_state['V'])
     A = torch.from_numpy(scip_state['A'])
-    cut_parallelism = scip_state['cut_parallelism']
     nzrcoef = scip_state['nzrcoef']['vals']
     nzrrows = scip_state['nzrcoef']['rowidxs']
     nzrcols = scip_state['nzrcoef']['colidxs']
@@ -150,7 +149,7 @@ def get_bipartite_graph(scip_state, scip_action=None):
     # follow the example in https://pytorch-geometric.readthedocs.io/en/latest/notes/batching.html
     # and do:
     # data_list = [PairData_1, PairData_2, ... PairData_n]
-    # loader = DataLoader(data_list, batch_size=2, follow_batch=['x_s', 'x_t'])
+    # loader = DataLoader(data_list, batch_size=<whatever>, follow_batch=['x_s', 'x_t'])
     pair_data = PairData(x_s=x_s,
                          edge_index_s=edge_index_s,
                          edge_attr_s=edge_attr_s,

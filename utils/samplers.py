@@ -28,6 +28,8 @@ class SepaSampler(Sepa):
         self.datapath = hparams.get('data_abspath', 'data')
         self.savedir = hparams.get('relative_savedir', 'examples')
         self.savedir = os.path.join(self.datapath, self.savedir)
+        self.filepath = os.path.join(self.savedir, self.name + '.pt')
+
         # saving mode: 'episode' | 'state'
         # 'episode': save all the state-action pairs in a single file,
         # as a Batch object.
@@ -75,9 +77,8 @@ class SepaSampler(Sepa):
     def save_data(self):
         if not os.path.exists(self.savedir):
             os.makedirs(self.savedir)
-        filepath = os.path.join(self.savedir, self.name + '.pt')
-        torch.save(self.data_list, filepath)
-        print('Saved data to: ', filepath)
+        torch.save(self.data_list, self.filepath)
+        print('Saved data to: ', self.filepath)
 
 
 def testSepaSampler():
@@ -136,7 +137,11 @@ def testSepaSampler():
     print('cuts applied vs time', stats['total_ncuts_applied'])
     print('finish')
     sampler.save_data()
-    print('saved data to: ', sampler.datapath)
+    from torch_geometric.data import DataLoader
+    data_list = torch.load(sampler.filepath)
+    loader = DataLoader(data_list, batch_size=2, follow_batch=['x_s', 'x_t'])
+    batch = next(iter(loader))
+    print('finished')
 
 
 class ConshdlrSampler(Conshdlr):
@@ -159,6 +164,7 @@ class ConshdlrSampler(Conshdlr):
         self.datapath = hparams.get('data_abspath', 'data')
         self.savedir = hparams.get('relative_savedir', 'examples')
         self.savedir = os.path.join(self.datapath, self.savedir)
+        self.filepath = os.path.join(self.savedir, self.name + '.pt')
         # saving mode: 'episode' | 'state'
         # 'episode': save all the state-action pairs in a single file,
         # as a Batch object.
@@ -226,8 +232,7 @@ class ConshdlrSampler(Conshdlr):
     def save_data(self):
         if not os.path.exists(self.savedir):
             os.makedirs(self.savedir)
-        filepath = os.path.join(self.savedir, self.name + '.pt')
-        torch.save(self.data_list, filepath)
+        torch.save(self.data_list, self.filepath)
         print('Saved data to: ', filepath)
 
 
@@ -289,7 +294,13 @@ def testConshdlrSampler():
     print('cuts applied vs time', stats['total_ncuts_applied'])
     print('finish')
     sampler.save_data()
-    print('saved data to: ', sampler.datapath)
+    print('saved data to: ', sampler.filepath)
+
+    data_list = torch.load(sampler.filepath)
+    from torch_geometric.data import DataLoader
+    loader = DataLoader(data_list, batchsize=2, follow_batch=['x_s', 'x_t'])
+    batch = next(iter(loader))
+    print('finished')
 
 if __name__ == '__main__':
     testSepaSampler()
