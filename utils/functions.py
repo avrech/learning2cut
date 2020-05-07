@@ -3,6 +3,8 @@ from collections import defaultdict
 import torch_geometric as tg
 import torch
 import numpy as np
+from torch_geometric
+
 
 def dijkstra(edges, s, t):
     """
@@ -83,7 +85,10 @@ def get_bipartite_graph(scip_state, scip_action=None):
     cuts_edge_index = np.vstack([cuts_nzrrows+ncons+nvars, cuts_nzrcols+ncons])
     edge_index = torch.from_numpy(np.hstack([lp_edge_index, cuts_edge_index]))
     edge_attributes = torch.from_numpy(np.concatenate([nzrcoef, cuts_nzrcoef]))
-
+    ncons_edges = len(nzrcoef)
+    ncuts_edges = len(cuts_nzrcoef)
+    cons_edges = torch.ones_like(edge_attributes, dtype=torch.int32)
+    cons_edges[ncons_edges:] = 0
     # Build the features tensor x:
     # if the variable and constraint features dimensionality is not equal,
     # pad with zeros to the maximal length
@@ -96,6 +101,10 @@ def get_bipartite_graph(scip_state, scip_action=None):
         A = torch.constant_pad_nd(A, [0, max_dim - cuts_feats_dim], value=0)
 
     x = torch.cat([C, V, A], dim=0)
+    vars_nodes = torch.zeros(x.shape[0], dtype=torch.int32)
+    vars_nodes[ncons:ncons+nvars] = 1
+    cuts_nodes = torch.zeros(x.shape[0], dtype=torch.int32)
+    cuts_nodes[ncons+nvars:] = 1
 
     # for imitation learning, store the target in y
     if scip_action is not None:
@@ -110,9 +119,19 @@ def get_bipartite_graph(scip_state, scip_action=None):
                         y=y,
                         cons_feats_dim=cons_feats_dim,
                         vars_feats_dim=vars_feats_dim,
+                        cuts_feats_dim=cuts_feats_dim,
                         ncons=ncons,
                         nvars=nvars,
+                        ncuts=ncuts,
+                        ncons_edges=ncons_edges,
+                        ncuts_edges=ncuts_edges,
+                        cons_edges=cons_edges,
+                        vars_nodes=vars_nodes,
+                        cuts_nodes=cuts_nodes,
                         stats=stats)
+
+    # pair graph
+
     return data
 
 def get_data_memory(data, units='M'):

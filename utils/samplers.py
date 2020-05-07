@@ -112,7 +112,7 @@ def testSepaSampler():
     model.includeSepa(cycle_sepa, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
                       freq=1)
-    sampler = Sampler(G=G, x=x, y=y, name='samplertest')
+    sampler = SepaSampler(G=G, x=x, y=y, name='samplertest')
     model.includeSepa(sampler, sampler.name,
                       "Reinforcement learning separator",
                       priority=100000,
@@ -265,10 +265,11 @@ def testConshdlrSampler():
                       priority=1000000,
                       freq=1)
     sampler = ConshdlrSampler(G=G, x=x, y=y, name='samplertest')
-    model.includeSepa(sampler, sampler.name,
-                      "Reinforcement learning separator",
-                      priority=100000,
-                      freq=1)
+    # TODO: include conshdlr properly
+    # model.includeConshdlr(sampler, sampler.name,
+    #                       "Reinforcement learning separator",
+    #                       sepapriority=100000,
+    #                       freq=1)
     model.setIntParam('separating/maxcuts', 20)
     model.setIntParam('separating/maxcutsroot', 100)
     model.setIntParam('separating/maxstallroundsroot', -1)
@@ -294,4 +295,4 @@ def testConshdlrSampler():
 
 if __name__ == '__main__':
     testSepaSampler()
-    testConshdlrSampler()
+    # testConshdlrSampler()
