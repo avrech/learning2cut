@@ -1,11 +1,9 @@
-from pyscipopt import Conshdlr, SCIP_RESULT, SCIP_STAGE
-from pyscipopt import Sepa
+from pyscipopt import  Sepa, Conshdlr, SCIP_RESULT, SCIP_STAGE
 from time import time
 import networkx as nx
-from pyscipopt import Conshdlr, SCIP_RESULT
 import numpy as np
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
-from utils.functions import get_bipartite_graph
+from utils.data import get_bipartite_graph
 import os
 import torch
 
