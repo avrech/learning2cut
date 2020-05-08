@@ -4,18 +4,22 @@ import os
 from tqdm import tqdm
 import pickle
 
+
 class CuttingPlanesDataset(InMemoryDataset):
-    def __init__(self, root, transform=None, pre_transform=None, hparams={}):
+    def __init__(self, root, transform=None, pre_transform=None, hparams={}, savefile=True):
         self.hparams = hparams
+        self.savefile = savefile
+
         self.filename = hparams.get('filename', 'cutting_planes_dataset.pt')
         self.num_instances = 0
         self.num_examples = 0
         super(CuttingPlanesDataset, self).__init__(root, transform, pre_transform)
-        self.data, self.slices = torch.load(self.processed_paths[0])
-        with open(self.processed_paths[0][:-3] + '_stats.pkl', 'rb') as f:
-            stats = pickle.load(f)
-        self.num_instances = stats['num_instances']
-        self.num_examples = stats['num_examples']
+        if self.savefile:
+            self.data, self.slices = torch.load(self.processed_paths[0])
+            with open(self.processed_paths[0][:-3] + '_stats.pkl', 'rb') as f:
+                stats = pickle.load(f)
+            self.num_instances = stats['num_instances']
+            self.num_examples = stats['num_examples']
 
     @property
     def raw_file_names(self):
@@ -49,11 +53,14 @@ class CuttingPlanesDataset(InMemoryDataset):
             data_list = [self.pre_transform(data) for data in data_list]
 
         data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[0])
-        with open(self.processed_paths[0][:-3] + '_stats.pkl', 'wb') as f:
-            pickle.dump({'num_instances': self.num_instances,
-                         'num_examples': self.num_examples}, f)
-
+        if self.savefile:
+            torch.save((data, slices), self.processed_paths[0])
+            with open(self.processed_paths[0][:-3] + '_stats.pkl', 'wb') as f:
+                pickle.dump({'num_instances': self.num_instances,
+                             'num_examples': self.num_examples}, f)
+        else:
+            self.data = data
+            self.slices = slices
 
 if __name__ == '__main__':
     rootdir = 'data/barabasi-albert-n50-m10-weights-normal-seed36/examples'

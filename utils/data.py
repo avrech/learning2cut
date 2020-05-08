@@ -113,7 +113,7 @@ def get_bipartite_graph(scip_state, scip_action=None):
     edge_attr_s = torch.from_numpy(np.concatenate([nzrcoef, cuts_nzrcoef]))
     ncons_edges = len(nzrcoef)
     ncuts_edges = len(cuts_nzrcoef)
-    cons_edges = torch.ones_like(edge_attr_s, dtype=torch.int32)
+    cons_edges = torch.ones_like(edge_attr_s, dtype=torch.bool)
     cons_edges[ncons_edges:] = 0
     # Build the features tensor x:
     # if the variable and constraint features dimensionality is not equal,
@@ -127,9 +127,9 @@ def get_bipartite_graph(scip_state, scip_action=None):
         A = torch.constant_pad_nd(A, [0, max_dim - cuts_feats_dim], value=0)
 
     x_s = torch.cat([C, V, A], dim=0)
-    vars_nodes = torch.zeros(x_s.shape[0], dtype=torch.int32)
+    vars_nodes = torch.zeros(x_s.shape[0], dtype=torch.bool)
     vars_nodes[ncons:ncons+nvars] = 1
-    cuts_nodes = torch.zeros(x_s.shape[0], dtype=torch.int32)
+    cuts_nodes = torch.zeros(x_s.shape[0], dtype=torch.bool)
     cuts_nodes[ncons+nvars:] = 1
 
     # build the clique graph the candidate cuts:
