@@ -3,7 +3,7 @@ sweep:
   # INSTANCE PARAMETERS
   graph_idx:
     search: grid_range
-    range: 1
+    range: 3
   scip_seed:
     search: grid
     values: [52]  #[46, 52] #223, 100] #, 521] #, 46, 52] #, 14, 176, 80, 174, 198]
@@ -32,12 +32,12 @@ sweep:
 # SPECIFY HERE OTHER PARAMETERS TO OVERRIDE DEFAULTS
 constants:
   # GENERAL EXPERIMENT PARAMETERS
-  barabasi_albert_m: 10
+  barabasi_albert_m: 7
   weights: normal  # uniform01 | normal | ones
   graph_type: barabasi-albert
   time_limit_sec: 600
   dataset_generation_seed: 36
-  graph_size: 50
+  graph_size: 15
   policy: default_cut_selection
   cuts_budget: 1000
   # SAMPLER PARAMETERS

@@ -10,7 +10,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import argparse
 import numpy as np
-# from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
+from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
 from experiments.imitation.evaluator import Evaluator
 from gnn.models import CutSelectionModel
@@ -24,13 +24,13 @@ def train(model, device, loader, optimizer):
     for step, batch in enumerate(tqdm(loader, desc="Iteration")):
         batch = batch.to(device)
 
-        if batch.x.shape[0] == 1 or batch.batch[-1] == 0:
+        if batch.x_s.shape[0] == 1 or batch.x_s_batch[-1] == 0:
             pass
         else:
-            pred = model(batch)
+            pred, probs = model(batch)
             optimizer.zero_grad()
 
-            loss = criterion(pred.to(torch.float32), batch.y.view(-1, ))
+            loss = criterion(probs.to(torch.float32), batch.y.view(-1, ))
 
             loss.backward()
             optimizer.step()
@@ -44,14 +44,14 @@ def eval(model, device, loader, evaluator):
     for step, batch in enumerate(tqdm(loader, desc="Iteration")):
         batch = batch.to(device)
 
-        if batch.x.shape[0] == 1:
+        if batch.x_s.shape[0] == 1:
             pass
         else:
             with torch.no_grad():
-                pred = model(batch)
+                pred, probs = model(batch)
 
-            y_true.append(batch.y.view(-1, 1).detach().cpu())
-            y_pred.append(torch.argmax(pred.detach(), dim=1).view(-1, 1).cpu())
+            y_true.append(batch.y_t.view(-1, 1).detach().cpu())
+            y_pred.append(pred.detach().view(-1, 1).cpu())
 
     y_true = torch.cat(y_true, dim=0).numpy()
     y_pred = torch.cat(y_pred, dim=0).numpy()
@@ -77,7 +77,7 @@ def main():
                         help='dropout ratio (default: 0.5)')
     parser.add_argument('--num_layer', type=int, default=5,
                         help='number of GNN message passing layers (default: 5)')
-    parser.add_argument('--emb_dim', type=int, default=300,
+    parser.add_argument('--emb_dim', type=int, default=32,
                         help='dimensionality of hidden units in GNNs (default: 300)')
     parser.add_argument('--batch_size', type=int, default=32,
                         help='input batch size for training (default: 32)')
@@ -94,7 +94,7 @@ def main():
     # cutting-planes stuff
     parser.add_argument('--logdir', type=str, default='results/test',
                         help='path to results root')
-    parser.add_argument('--datadir', type=str, default='data/barabasi-albert-n50-m10-weights-normal-seed36/examples',
+    parser.add_argument('--datadir', type=str, default='data/barabasi-albert-n15-m7-weights-normal-seed36/examples',
                         help='path to load data from')
     parser.add_argument('--lr', type=int, default=1e-3,
                         help='SGD learning rate')
@@ -102,32 +102,27 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
-
+    device = 'cpu'
     ### automatic dataloading and splitting
 
     # load dataset
     dataset = CuttingPlanesDataset(args.datadir, savefile=False)
 
     # loader = DataLoader(dataset, batchsize=args.batch_size, follow_batch=['x_s', 'x_t'])
-    #
-    # dataset = dataset.shuffle()
-    # one_tenth_length = int(len(dataset) * 0.1)
-    # train_dataset = dataset[:one_tenth_length * 8]
-    # val_dataset = dataset[one_tenth_length * 8:one_tenth_length * 9]
-    # test_dataset = dataset[one_tenth_length * 9:]
-    # len(train_dataset), len(val_dataset), len(test_dataset)
 
-    split_idx = dataset.get_idx_split()
+    dataset = dataset.shuffle()
+    one_tenth_length = int(len(dataset) * 0.1)
+    train_dataset = dataset[:one_tenth_length * 8]
+    val_dataset = dataset[one_tenth_length * 8:one_tenth_length * 9]
+    test_dataset = dataset[one_tenth_length * 9:]
+    print(f'Train-set: {len(train_dataset)}, Validation-set: {len(val_dataset)}, Test-set: {len(test_dataset)}')
 
     ### automatic evaluator. takes dataset name as input
     evaluator = Evaluator(args.dataset)
 
-    train_loader = DataLoader(dataset[split_idx["train"]], batch_size=args.batch_size, shuffle=True,
-                              num_workers=args.num_workers)
-    valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=args.batch_size, shuffle=False,
-                              num_workers=args.num_workers)
-    test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False,
-                             num_workers=args.num_workers)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, follow_batch=['x_s', 'x_t'])
+    valid_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_s', 'x_t'])
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_s', 'x_t'])
 
     # if args.gnn == 'gin':
     #     model = GNN(gnn_type='gin', num_class=dataset.num_classes, emb_dim=args.emb_dim, drop_ratio=args.drop_ratio,
@@ -146,8 +141,16 @@ def main():
 
     # model
     hparams = vars(args)
+    hparams['state/vars_feats_dim'] = train_dataset.data.vars_feats_dim[0]
+    hparams['state/cons_feats_dim'] = train_dataset.data.cons_feats_dim[0]
+    hparams['state/cuts_feats_dim'] = train_dataset.data.cuts_feats_dim[0]
+    hparams['state/edge_attr_dim'] = 1  # TODO: write in a more general way
+    hparams['cuts_embedding/cuts_only'] = True
+    hparams['cuts_embedding/aggr'] = 'mean'  # 'mean' | 'add'
+    hparams['cuts_selector/factorization'] = 'fg'
+    hparams['channels'] = args.emb_dim
     model = CutSelectionModel(hparams=hparams)
-
+    model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     valid_curve = []

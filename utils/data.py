@@ -15,26 +15,26 @@ class PairData(Data):
     between each pair of cuts.
     """
     def __init__(self,
-                 x_s,             # bipartite graph features       - LP state
-                 edge_index_s,    # bipartite graph edge_index     - LP nonzero indices
-                 edge_attr_s,     # bipartite graph edge weights   - LP nonzero coefficients
-                 x_t,             # cuts clique graph features     - empty tensor of size [ncuts, 1] reserved for the cuts embedding
-                 edge_index_t,    # cuts clique graph edge index   - fully connected
-                 edge_attr_t,     # cuts clique graph edge weights - orthogonality between each two cuts
-                 y_t,             # cuts clique graph node labels  - the action whether to apply the cut or not.
+                 x_s=None,             # bipartite graph features       - LP state
+                 edge_index_s=None,    # bipartite graph edge_index     - LP nonzero indices
+                 edge_attr_s=None,     # bipartite graph edge weights   - LP nonzero coefficients
+                 x_t=None,             # cuts clique graph features     - empty tensor of size [ncuts, 1] reserved for the cuts embedding
+                 edge_index_t=None,    # cuts clique graph edge index   - fully connected
+                 edge_attr_t=None,     # cuts clique graph edge weights - orthogonality between each two cuts
+                 y_t=None,             # cuts clique graph node labels  - the action whether to apply the cut or not.
                  # meta-data needed for processing the bipartite graph
-                 cons_feats_dim,
-                 vars_feats_dim,
-                 cuts_feats_dim,
-                 ncons,
-                 nvars,
-                 ncuts,
-                 ncons_edges,
-                 ncuts_edges,
-                 cons_edges,
-                 vars_nodes,
-                 cuts_nodes,
-                 stats
+                 cons_feats_dim=None,
+                 vars_feats_dim=None,
+                 cuts_feats_dim=None,
+                 ncons=None,
+                 nvars=None,
+                 ncuts=None,
+                 ncons_edges=None,
+                 ncuts_edges=None,
+                 cons_edges=None,
+                 vars_nodes=None,
+                 cuts_nodes=None,
+                 stats=None
                  ):
         super(PairData, self).__init__()
         self.x_s = x_s
@@ -66,7 +66,7 @@ class PairData(Data):
             return super(PairData, self).__inc__(key, value)
 
 
-def get_bipartite_graph(scip_state, scip_action=None):
+def get_pair_data_state(scip_state, scip_action=None):
     """
     Creates a torch_geometric.data.Data object from SCIP state
     produced by scip.Model.getState(format='tensor')
@@ -109,11 +109,11 @@ def get_bipartite_graph(scip_state, scip_action=None):
     # and build the directed edge_index of the graph representation
     lp_edge_index = np.vstack([nzrrows, nzrcols+ncons])
     cuts_edge_index = np.vstack([cuts_nzrrows+ncons+nvars, cuts_nzrcols+ncons])
-    edge_index_s = torch.from_numpy(np.hstack([lp_edge_index, cuts_edge_index]))
-    edge_attr_s = torch.from_numpy(np.concatenate([nzrcoef, cuts_nzrcoef]))
+    edge_index_s = torch.from_numpy(np.hstack([lp_edge_index, cuts_edge_index])).to(torch.long)
+    edge_attr_s = torch.from_numpy(np.concatenate([nzrcoef, cuts_nzrcoef])).unsqueeze(dim=1)
     ncons_edges = len(nzrcoef)
     ncuts_edges = len(cuts_nzrcoef)
-    cons_edges = torch.ones_like(edge_attr_s, dtype=torch.bool)
+    cons_edges = torch.ones_like(edge_attr_s, dtype=torch.bool).squeeze()
     cons_edges[ncons_edges:] = 0
     # Build the features tensor x:
     # if the variable and constraint features dimensionality is not equal,
@@ -135,6 +135,7 @@ def get_bipartite_graph(scip_state, scip_action=None):
     # build the clique graph the candidate cuts:
     x_t = torch.empty((ncuts, 1)) # only to reserve the keyword. will be overidden later by the cuts embeddings
     edge_index_t, edge_attr_t = dense_to_sparse(torch.from_numpy(cuts_orthogonality))
+    edge_attr_t.unsqueeze_(dim=1)
 
     # for imitation learning, store scip_action as cut labels in y,
     # for reinforcement learning store zeros
@@ -172,7 +173,7 @@ def get_bipartite_graph(scip_state, scip_action=None):
 
     return pair_data
 
-def get_data_memory(data, units='M'):
+def get_pair_data_memory(data, units='M'):
     """
     Computes the memory consumption of torch_geometric.data.Data object in MBytes
     Counts for all torch.Tensor elements in data: x, y, edge_index, edge_attr, stats, etc.

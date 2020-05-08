@@ -90,7 +90,8 @@ elif args.mp == 'mp':
     # time_limit_minutes = max(int(np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)
 
     with Pool() as p:
-        res = p.map(func, configs)
-
+        res = p.map_async(func, configs)
+        res.wait()
+        print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
 
 print('finished')

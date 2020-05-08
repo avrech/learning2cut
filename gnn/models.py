@@ -118,14 +118,14 @@ class CutsEmbedding(torch.nn.Module):
                  torch.Tensor([x_s.shape[0], out_channels]) otherwise
         """
         ### LEFT TO RIGHT CONVOLUTION ###
-        cons_edge_index = edge_index_s[cons_edges]  # constraints connectivity
-        cuts_edge_index = edge_index_s[cuts_edges]  # candidate cuts connectivity
+        cons_edge_index = edge_index_s[:, cons_edges]  # constraints connectivity
+        cuts_edge_index = edge_index_s[:, cuts_edges]  # candidate cuts connectivity
         cons_row, cons_col = cons_edge_index      # row and col correspond to constraint and variable nodes repectively
         cuts_row, cuts_col = cuts_edge_index
-        nvars = vars_nodes.sum()
-        ncuts = cuts_nodes.sum()
+        nvars = vars_nodes.sum().item()
+        ncuts = cuts_nodes.sum().item()
         ncons = x_s.shape[0] - nvars - ncuts
-        cons_nodes = torch.ones_like(vars_nodes, dtype=torch.int32) - vars_nodes - cuts_nodes
+        cons_nodes = (vars_nodes + cuts_nodes).logical_not()
 
         # cons to vars messages:
         g_v_input = torch.cat([x_s[cons_col][:, :self.vars_feats_dim],  # v_j
@@ -142,8 +142,8 @@ class CutsEmbedding(torch.nn.Module):
         h_v_out = self.h_v(h_v_input)
 
         # aggregate messages to a tensor of size [nvars, out_channels]:
-        aggr_g_v_out = self.aggr_func(g_v_out, cons_col, dim=0, dim_size=nvars) # TODO verify that dim_size-None is correct
-        aggr_h_v_out = self.aggr_func(h_v_out, cuts_col, dim=0, dim_size=nvars) # TODO verify that dim_size-None is correct
+        aggr_g_v_out = self.aggr_func(g_v_out, cons_col, dim=0) #, dim_size=nvars)  # TODO verify that dim_size-None is correct
+        aggr_h_v_out = self.aggr_func(h_v_out, cuts_col, dim=0) #, dim_size=nvars)  # TODO verify that dim_size-None is correct
 
         # update vars features with f:
         f_v_input = torch.cat(x_s[vars_nodes], aggr_g_v_out, aggr_h_v_out, dim=1)
@@ -300,6 +300,7 @@ class CutsSelector(torch.nn.Module):
 
 class CutSelectionModel(torch.nn.Module):
     def __init__(self, hparams={}):
+        super(CutSelectionModel, self).__init__()
         self.hparams = hparams
         assert hparams['cuts_embedding/cuts_only'], "not implemented"
 
@@ -332,7 +333,7 @@ class CutSelectionModel(torch.nn.Module):
                                              vars_nodes=state.vars_nodes,
                                              cuts_nodes=state.cuts_nodes,
                                              cons_edges=state.cons_edges,
-                                             cuts_edges=1 - state.cons_edges)
+                                             cuts_edges=state.cons_edges.logical_not())
         state.x_t = cuts_embedding
         y_t, probs = self.cuts_selector(x_t=state.x_t,
                                         edge_index_t=state.edge_index_t,
