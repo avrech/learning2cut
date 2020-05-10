@@ -3,7 +3,7 @@ from time import time
 import networkx as nx
 import numpy as np
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
-from utils.data import get_pair_data_state
+from utils.data import get_gnn_data
 import os
 import torch
 import pickle

@@ -3,7 +3,7 @@ from torch_geometric.data import InMemoryDataset
 import os
 from tqdm import tqdm
 import pickle
-from utils.data import get_pair_data_state, get_pair_data_memory
+from utils.data import get_gnn_data, get_data_memory
 
 class CuttingPlanesDataset(InMemoryDataset):
     def __init__(self, root, transform=None, pre_transform=None, hparams={}, savefile=False):
@@ -47,8 +47,8 @@ class CuttingPlanesDataset(InMemoryDataset):
                 with open(os.path.join(self.root, rawfile), 'rb') as f:
                     state_action_list = pickle.load(f)
                 for s, a in state_action_list:
-                    pairdata = get_pair_data_state(s, scip_action=a)
-                    data_list.append(pairdata)
+                    gnn_data = get_gnn_data(s, scip_action=a)
+                    data_list.append(gnn_data)
                     self.num_examples += 1
                 self.num_instances += 1
 
@@ -66,13 +66,8 @@ class CuttingPlanesDataset(InMemoryDataset):
                          'num_examples': self.num_examples}, f)
 
     def size(self, units='G'):
-        return get_pair_data_memory(self.data, units=units)
+        return get_data_memory(self.data, units=units)
 
-    @property
-    def num_classes(self):
-        r"""The number of classes in the dataset."""
-        data = self.data
-        return data.y_t.max().item() + 1 if data.y_t.dim() == 1 else data.y_t.size(1)
 
 if __name__ == '__main__':
     rootdir = 'data/barabasi-albert-n50-m10-weights-normal-seed36/examples'
@@ -81,5 +76,5 @@ if __name__ == '__main__':
 
     print('Such dataset of 1000 instances will:')
     print('provide ', int(dataset.num_examples*1000/dataset.num_instances), ' examples')
-    print('consume ', '{:.2f}'.format(get_pair_data_memory(dataset.data, 'G')*1000/dataset.num_instances), 'Gbytes')
+    print('consume ', '{:.2f}'.format(get_data_memory(dataset.data, 'G') * 1000 / dataset.num_instances), 'Gbytes')
     print('finished')

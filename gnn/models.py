@@ -1,7 +1,12 @@
 import torch
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU
 from torch_scatter import scatter_mean, scatter_add
-from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn.conv import MessagePassing, GCNConv
+import torch.nn.functional as F
+from torch_sparse import spspmm
+from torch_geometric.nn import TopKPooling
+from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops
+from torch_geometric.utils.repeat import repeat
 
 
 class CutsEmbedding(torch.nn.Module):
@@ -54,7 +59,7 @@ class CutsEmbedding(torch.nn.Module):
 
         Args:
             in_channels (int): Size of each input sample.
-            out_channels (int): Size of each output sample.
+            emb_dim (int): Size of each output sample.
             aggr (string, optional): The aggregation scheme to use
                 (:obj:`"add"`, :obj:`"mean"`, :obj:`"max"`).
                 (default: :obj:`"add"`)
@@ -64,14 +69,14 @@ class CutsEmbedding(torch.nn.Module):
                 :class:`torch_geometric.nn.conv.MessagePassing`.
         """
 
-    def __init__(self, vars_feats_dim, cons_feats_dim, cuts_feats_dim, edge_attr_dim,
-                 out_channels=32, aggr='mean', cuts_only=True):
+    def __init__(self, x_v_channels, x_c_channels, x_a_channels, edge_attr_dim,
+                 emb_dim=32, aggr='mean', cuts_only=True):
         super(CutsEmbedding, self).__init__()
-        self.vars_feats_dim = vars_feats_dim
-        self.cons_feats_dim = cons_feats_dim
-        self.cuts_feats_dim = cuts_feats_dim
+        self.x_v_channels = x_v_channels
+        self.x_c_channels = x_c_channels
+        self.x_a_channels = x_a_channels
         self.edge_attr_dim = edge_attr_dim
-        self.out_channels = out_channels
+        self.emb_dim = emb_dim
         self.aggr = aggr
         self.cuts_only = cuts_only
         if aggr == 'add':
@@ -81,72 +86,69 @@ class CutsEmbedding(torch.nn.Module):
 
         ### LEFT TO RIGHT LAYERS ###
         # vars embedding
-        self.g_v_in_channels = vars_feats_dim + cons_feats_dim + edge_attr_dim
-        self.h_v_in_channels = vars_feats_dim + cuts_feats_dim + edge_attr_dim
-        self.f_v_in_channels = vars_feats_dim + out_channels * 2
-        self.g_v = Seq(Lin(self.g_v_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
-        self.h_v = Seq(Lin(self.h_v_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
-        self.f_v = Seq(Lin(self.f_v_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
+        self.g_v_in_channels = x_v_channels + x_c_channels + edge_attr_dim
+        self.h_v_in_channels = x_v_channels + x_a_channels + edge_attr_dim
+        self.f_v_in_channels = x_v_channels + emb_dim * 2
+        self.g_v = Seq(Lin(self.g_v_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
+        self.h_v = Seq(Lin(self.h_v_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
+        self.f_v = Seq(Lin(self.f_v_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
 
         ### RIGHT TO LEFT LAYERS ###
         # cuts embedding
-        self.g_cuts_in_channels = cuts_feats_dim + out_channels + edge_attr_dim
-        self.f_cuts_in_channels = cuts_feats_dim + out_channels
-        self.g_cuts = Seq(Lin(self.g_cuts_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
-        self.f_cuts = Seq(Lin(self.f_cuts_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
+        self.g_a_in_channels = x_a_channels + emb_dim + edge_attr_dim
+        self.f_a_in_channels = x_a_channels + emb_dim
+        self.g_a = Seq(Lin(self.g_a_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
+        self.f_a = Seq(Lin(self.f_a_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
         # cons embedding:
         if not cuts_only:
-            self.g_cons_in_channels = cons_feats_dim + out_channels + edge_attr_dim
-            self.f_cons_in_channels = cons_feats_dim + out_channels
-            self.g_cons = Seq(Lin(self.g_cons_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
-            self.f_cons = Seq(Lin(self.f_cons_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
+            self.g_c_in_channels = x_c_channels + emb_dim + edge_attr_dim
+            self.f_c_in_channels = x_c_channels + emb_dim
+            self.g_c = Seq(Lin(self.g_c_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
+            self.f_c = Seq(Lin(self.f_c_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
 
-    def forward(self, x_s, edge_index_s, edge_attr_s, vars_nodes, cuts_nodes, cons_edges, cuts_edges):
+    def forward(self, x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v):
         """
         Compute the left-to-right convolution of a bipartite graph.
-        Assuming a PairData or Batch object, d, produced by
-        utils.data.get_bipartite_graph,
+        Assuming a PairTripartiteAndCliqueData or Batch object, d, produced by
+        utils.data.get_gnn_data,
         the module inputs should be as follows:
-        :param x_s:           = d.x_s
-        :param edge_index_s:  = d.edge_index_s
-        :param edge_attr_s:   = d.edge_attr_s
-        :param vars_nodes:  = d.vars_nodes
-        :param cuts_nodes:  = d.cuts_nodes
-        :param cons_edges:  = d.cons_edges
-        :param cuts_edges:  = 1 - cons_edges
+        :param x_c:             = d.x_c
+        :param x_v:             = d.x_v
+        :param x_a:             = d.x_a
+        :param edge_index_c2v:  = d.edge_index_c2v
+        :param edge_index_a2v:  = d.edge_index_a2v
+        :param edge_attr_c2v:   = d.edge_attr_c2v
+        :param edge_attr_a2v:   = d.edge_attr_a2v
         :return: torch.Tensor([d.ncuts.sum(), out_channels]) if self.cuts_only=True
                  torch.Tensor([x_s.shape[0], out_channels]) otherwise
         """
         ### LEFT TO RIGHT CONVOLUTION ###
-        cons_edge_index = edge_index_s[:, cons_edges]  # constraints connectivity
-        cuts_edge_index = edge_index_s[:, cuts_edges]  # candidate cuts connectivity
-        cons_row, cons_col = cons_edge_index      # row and col correspond to constraint and variable nodes repectively
-        cuts_row, cuts_col = cuts_edge_index
-        nvars = vars_nodes.sum().item()
-        ncuts = cuts_nodes.sum().item()
-        ncons = x_s.shape[0] - nvars - ncuts
-        cons_nodes = (vars_nodes + cuts_nodes).logical_not()
+        c2v_s, c2v_t = edge_index_c2v
+        a2v_s, a2v_t = edge_index_a2v
+        n_v_nodes = x_v.shape[0]
+        n_a_nodes = x_a.shape[0]
+        n_c_nodes = x_c.shape[0]
 
         # cons to vars messages:
-        g_v_input = torch.cat([x_s[cons_col][:, :self.vars_feats_dim],  # v_j
-                               x_s[cons_row][:, :self.cons_feats_dim],  # c_i
-                               edge_attr_s[cons_edges]],  # e_ij
+        g_v_input = torch.cat([x_v[c2v_t],      # v_j
+                               x_c[c2v_s],      # c_i
+                               edge_attr_c2v],  # e_ij
                               dim=1)
         g_v_out = self.g_v(g_v_input)
 
         # cuts to vars messages:
-        h_v_input = torch.cat([x_s[cuts_col][:, :self.vars_feats_dim],  # v_j
-                               x_s[cuts_row][:, :self.cuts_feats_dim],  # c_i
-                               edge_attr_s[cuts_edges]],  # e_ij
+        h_v_input = torch.cat([x_v[a2v_t],      # v_j
+                               x_a[a2v_s],      # c_i
+                               edge_attr_a2v],  # e_ij
                               dim=1)
         h_v_out = self.h_v(h_v_input)
 
         # aggregate messages to a tensor of size [nvars, out_channels]:
-        aggr_g_v_out = self.aggr_func(g_v_out, cons_col, dim=0) #, dim_size=nvars)  # TODO verify that dim_size-None is correct
-        aggr_h_v_out = self.aggr_func(h_v_out, cuts_col, dim=0) #, dim_size=nvars)  # TODO verify that dim_size-None is correct
+        aggr_g_v_out = self.aggr_func(g_v_out, c2v_t, dim=0, dim_size=n_v_nodes)  # TODO verify that dim_size-None is correct
+        aggr_h_v_out = self.aggr_func(h_v_out, a2v_t, dim=0, dim_size=n_v_nodes)  # TODO verify that dim_size-None is correct
 
         # update vars features with f:
-        f_v_input = torch.cat(x_s[vars_nodes], aggr_g_v_out, aggr_h_v_out, dim=1)
+        f_v_input = torch.cat([x_v, aggr_g_v_out, aggr_h_v_out], dim=1)
         f_v_out = self.f_v(f_v_input)
 
         # return a tensor of size [total_nvars, out_channels]
@@ -155,55 +157,41 @@ class CutsEmbedding(torch.nn.Module):
 
 
         ### RIGHT TO LEFT CONVOLUTION ###
-        # construct the edge_index for the updated vars features tensor:
-        # now, the updated vars features are indexed by range(nvars).
-        # we need to map the 2nd row of edge_index 1:1 to range(nvars).
-        # so only take the previous vars indices, and replace them by range(nvars)
-        # in the ascending order mapping.
-        vars_index_mapping = torch.zeros_like(vars_nodes)
-        vars_index_mapping[vars_nodes] = torch.arange(nvars)
-
         # vars to cuts messages, using the updated vars features:
-        g_cuts_input = torch.cat([x_s[cuts_row][:, :self.cuts_feats_dim],  # c_i
-                                  f_v_out[vars_index_mapping[cuts_col]],  # v'_j
-                                  edge_attr_s[cuts_edges]],  # e_ij
-                                 dim=1)
-        g_cuts_out = self.g_cuts(g_cuts_input)
+        g_a_input = torch.cat([x_a[a2v_s],      # a_i
+                               f_v_out[a2v_t],  # v'_j
+                               edge_attr_a2v],  # e_ij
+                              dim=1)
+        g_a_out = self.g_a(g_a_input)
 
         # aggregate messages to a tensor of size [ncuts, out_channels]:
-        aggr_g_cuts_out = self.aggr_func(g_cuts_out, cuts_row, dim=0, dim_size=ncuts)  # TODO verify that dim_size-None is correct
+        aggr_g_a_out = self.aggr_func(g_a_out, a2v_s, dim=0, dim_size=n_a_nodes)  # TODO verify that dim_size-None is correct
 
         # update cuts features with f_cuts:
-        f_cuts_input = torch.cat(x_s[cuts_nodes], aggr_g_cuts_out, dim=1)
-        f_cuts_out = self.f_cuts(f_cuts_input)
+        f_a_input = torch.cat([x_a, aggr_g_a_out], dim=-1)
+        f_a_out = self.f_a(f_a_input)
 
         if not self.cuts_only:
             # do the same for the constraint nodes:
             # vars to cons messages, using the updated vars features:
-            g_cons_input = torch.cat([x_s[cons_row][:, :self.cons_feats_dim],  # c_i
-                                      f_v_out[vars_index_mapping[cons_col]],  # v'_j
-                                      edge_attr_s[cons_edges]],  # e_ij
-                                     dim=1)
-            g_cons_out = self.g_cons(g_cons_input)
+            g_c_input = torch.cat([x_c[c2v_s],      # c_i
+                                   f_v_out[c2v_t],  # v'_j
+                                   edge_attr_c2v],  # e_ij
+                                  dim=1)
+            g_c_out = self.g_c(g_c_input)
 
             # aggregate messages to a tensor of size [ncons, out_channels]:
-            aggr_g_cons_out = self.aggr_func(g_cons_out, cons_row, dim=0,
-                                             dim_size=ncons)  # TODO verify that dim_size-None is correct
+            aggr_g_c_out = self.aggr_func(g_c_out, c2v_s, dim=0, dim_size=n_c_nodes)  # TODO verify that dim_size-None is correct
 
             # update cons features with f_cons:
-            f_cons_input = torch.cat(x_s[cons_nodes], aggr_g_cons_out, dim=1)
-            f_cons_out = self.f_cons(f_cons_input)
+            f_c_input = torch.cat([x_c, aggr_g_c_out], dim=-1)
+            f_c_out = self.f_c(f_c_input)
 
-            # construct the output tensor corresponding to x
-            # with the updated features.
-            out = torch.empty((x_s.shape[0], self.out_channels), dtype=torch.float32)
-            out[vars_nodes] = f_v_out
-            out[cons_nodes] = f_cons_out
-            out[cuts_nodes] = f_cuts_out
-            return out
+            # return the updated features of the constraint, variable and cut nodes
+            return f_c_out, f_v_out, f_a_out
 
-        # return a tensor of size [ncuts, out_channels]
-        return f_cuts_out
+        # if embedding only cuts:
+        return f_a_out
 
 
 class FGConv(MessagePassing):
@@ -245,7 +233,7 @@ class FGConv(MessagePassing):
         self.f.reset_parameters()
         self.g.reset_parameters()
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, x, edge_index, edge_attr, batch=None):
         """"""
         return self.propagate(edge_index, x=x, edge_attr=edge_attr)
 
@@ -260,66 +248,70 @@ class FGConv(MessagePassing):
 
     def __repr__(self):
         return '{}({}, {}, edge_attr_dim={})'.format(self.__class__.__name__,
-                                           self.in_channels, self.out_channels,
-                                           self.edge_attr_dim)
+                                                     self.in_channels, self.out_channels,
+                                                     self.edge_attr_dim)
 
 
 class CutsSelector(torch.nn.Module):
-    def __init__(self, channels, edge_attr_dim, factorization='fg'):
+    def __init__(self, channels, edge_attr_dim, hparams={}):
         super(CutsSelector, self).__init__()
         self.channels = channels
         self.edge_attr_dim = edge_attr_dim
-        self.factorization = factorization
+        self.factorization_arch = hparams.get('factorization_arch', 'FGConv')
+        self.factorization_aggr = hparams.get('factorization_aggr', 'mean')
         # TODO: support more factorizations, e.g. GCNConv, GATConv, etc.
         # In addition, support sequential selection
-        self.f = {'fg': FGConv(channels, edge_attr_dim, aggr='add')}[factorization]
-        self.classifier = Lin(channels, 1)  # binary decision, wheter to apply the cut or not.
+        self.f = {
+            'FGConv': FGConv(channels, edge_attr_dim, aggr=self.factorization_aggr),
+            'GraphUNet': GraphUNet(channels, channels, channels, depth=3)
+        }.get(self.factorization_arch, 'FGConv')
+        self.classifier = Seq(Lin(channels, 1))  # binary decision, wheter to apply the cut or not.
 
-    def forward(self, x_t, edge_index_t, edge_attr_t):
+    def forward(self, x_a, edge_index_a2a, edge_attr_a2a, batch=None):
         """
-        Assuming a PairData (or Batch) object, d, produced by utils.data.get_bipartite_graph,
-        this module work on the cuts clique graph of d.
-        The module applies some factorization function on the complete graph,
-        and then a classifier to select cuts.
+        Assuming a PairTripartiteAndClique (or Batch) object, d,
+        produced by utils.data.get_gnn_data,
+        this module works on the cuts clique graph of d.
+        The module applies some factorization function on the clique graph,
+        and then applies a classifier to select cuts.
         The module inputs are as follows
-        :param x_t: d.x_t (the updated cuts features from CutsEmbeddind)
-        :param edge_index_t: d.edge_index_t (batch-wise complete graph connectivity)
-        :param edge_attr_t: d.edge_attr_t (pairwise orthogonalities)
+        :param x_a: d.x_a (the updated cut features from CutsEmbedding)
+        :param edge_index_a2a: d.edge_index_a2a (instance-wise cuts clique graph connectivity)
+        :param edge_attr_a2a: d.edge_attr_a2a (intra-cuts orthogonality)
         :return:
         """
-        if self.factorization == 'fg':
-            # apply factor graph convolution, and the classify
-            x_t = self.f(x_t, edge_index_t, edge_attr_t)
-            probs = self.classifier(x_t)
-            # classify cuts as 1 ("good") if prob > 0.5, else 0 ("bad")
-            y_t = probs > 0.5
-            return y_t, probs
-        else:
-            raise NotImplementedError()
+        # apply factorization module
+        x_a = self.f(x_a, edge_index_a2a, edge_attr_a2a, batch)
+
+        # classify
+        probs = self.classifier(x_a).sigmoid()
+
+        # classify cuts as 1 ("good") if probs > 0.5, else 0 ("bad")
+        y = probs > 0.5
+        return y, probs
 
 
 class CutSelectionModel(torch.nn.Module):
     def __init__(self, hparams={}):
         super(CutSelectionModel, self).__init__()
         self.hparams = hparams
-        assert hparams['cuts_embedding/cuts_only'], "not implemented"
+        assert hparams['cuts_embedding_layers'] == 1, "Not implemented"
 
         # cuts embedding
         self.cuts_embedding = CutsEmbedding(
-            vars_feats_dim=hparams['state/vars_feats_dim'],         # mandatory - derived from state features
-            cons_feats_dim=hparams['state/cons_feats_dim'],         # mandatory - derived from state features
-            cuts_feats_dim=hparams['state/cuts_feats_dim'],         # mandatory - derived from state features
-            edge_attr_dim=hparams['state/edge_attr_dim'],           # mandatory - derived from state features
-            out_channels=hparams.get('channels', 32),               # default
-            aggr=hparams.get('cuts_embedding/aggr', 'mean'),        # default
-            cuts_only=hparams.get('cuts_embedding/cuts_only', True) # default
+            x_v_channels=hparams['state_x_v_channels'],             # mandatory - derived from state features
+            x_c_channels=hparams['state_x_c_channels'],             # mandatory - derived from state features
+            x_a_channels=hparams['state_x_a_channels'],             # mandatory - derived from state features
+            edge_attr_dim=hparams['state_edge_attr_dim'],           # mandatory - derived from state features
+            emb_dim=hparams.get('emb_dim', 32),                     # default
+            aggr=hparams.get('cuts_embedding_aggr', 'mean')         # default
         )
 
         # cut selector
         self.cuts_selector = CutsSelector(
-            channels=hparams.get('channels', 32),  # default
-            edge_attr_dim=1,  # this is the intra cuts orthogonalities
-            factorization=hparams.get('cuts_selector/factorization', 'fg') # default
+            channels=hparams.get('emb_dim', 32),                    # default
+            edge_attr_dim=hparams['state_edge_attr_dim'],           # this is the intra cuts orthogonalities
+            hparams=hparams
         )
 
     def forward(self, state):
@@ -327,16 +319,139 @@ class CutSelectionModel(torch.nn.Module):
         :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
                  torch.Tensor([x.shape[0], out_channels]) otherwise
         """
-        cuts_embedding = self.cuts_embedding(x_s=state.x_s,
-                                             edge_index_s=state.edge_index_s,
-                                             edge_attr_s=state.edge_attr_s,
-                                             vars_nodes=state.vars_nodes,
-                                             cuts_nodes=state.cuts_nodes,
-                                             cons_edges=state.cons_edges,
-                                             cuts_edges=state.cons_edges.logical_not())
-        state.x_t = cuts_embedding
-        y_t, probs = self.cuts_selector(x_t=state.x_t,
-                                        edge_index_t=state.edge_index_t,
-                                        edge_attr_t=state.edge_attr_t)
-        return y_t, probs
+        cuts_embedding = self.cuts_embedding(x_c=state.x_c,
+                                             x_v=state.x_v,
+                                             x_a=state.x_a,
+                                             edge_index_c2v=state.edge_index_c2v,
+                                             edge_index_a2v=state.edge_index_a2v,
+                                             edge_attr_c2v=state.edge_attr_c2v,
+                                             edge_attr_a2v=state.edge_attr_a2v)
 
+        y, probs = self.cuts_selector(x_a=cuts_embedding,
+                                      edge_index_a2a=state.edge_index_a2a,
+                                      edge_attr_a2a=state.edge_attr_a2a,
+                                      batch=state.x_a_batch)
+        return y, probs
+
+
+class GraphUNet(torch.nn.Module):
+    r"""The Graph U-Net model from the `"Graph U-Nets"
+    <https://arxiv.org/abs/1905.05178>`_ paper which implements a U-Net like
+    architecture with graph pooling and unpooling operations.
+    This version allows also edge attributes.
+    Args:
+        in_channels (int): Size of each input sample.
+        hidden_channels (int): Size of each hidden sample.
+        out_channels (int): Size of each output sample.
+        depth (int): The depth of the U-Net architecture.
+        pool_ratios (float or [float], optional): Graph pooling ratio for each
+            depth. (default: :obj:`0.5`)
+        sum_res (bool, optional): If set to :obj:`False`, will use
+            concatenation for integration of skip connections instead
+            summation. (default: :obj:`True`)
+        act (torch.nn.functional, optional): The nonlinearity to use.
+            (default: :obj:`torch.nn.functional.relu`)
+    """
+
+    def __init__(self, in_channels, hidden_channels, out_channels, depth,
+                 pool_ratios=0.5, sum_res=True, act=F.relu):
+        super(GraphUNet, self).__init__()
+        assert depth >= 1
+        self.in_channels = in_channels
+        self.hidden_channels = hidden_channels
+        self.out_channels = out_channels
+        self.depth = depth
+        self.pool_ratios = repeat(pool_ratios, depth)
+        self.act = act
+        self.sum_res = sum_res
+
+        channels = hidden_channels
+
+        self.down_convs = torch.nn.ModuleList()
+        self.pools = torch.nn.ModuleList()
+        self.down_convs.append(GCNConv(in_channels, channels, improved=True))
+        for i in range(depth):
+            self.pools.append(TopKPooling(channels, self.pool_ratios[i]))
+            self.down_convs.append(GCNConv(channels, channels, improved=True))
+
+        in_channels = channels if sum_res else 2 * channels
+
+        self.up_convs = torch.nn.ModuleList()
+        for i in range(depth - 1):
+            self.up_convs.append(GCNConv(in_channels, channels, improved=True))
+        self.up_convs.append(GCNConv(in_channels, out_channels, improved=True))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        for conv in self.down_convs:
+            conv.reset_parameters()
+        for pool in self.pools:
+            pool.reset_parameters()
+        for conv in self.up_convs:
+            conv.reset_parameters()
+
+    def forward(self, x, edge_index, edge_weight=None, batch=None):
+        """"""
+        if batch is None:
+            batch = edge_index.new_zeros(x.size(0))
+        if edge_weight is None:
+            edge_weight = x.new_ones(edge_index.size(1))
+        else:
+            edge_weight.squeeze_()
+
+        x = self.down_convs[0](x, edge_index, edge_weight)
+        x = self.act(x)
+
+        xs = [x]
+        edge_indices = [edge_index]
+        edge_weights = [edge_weight]
+        perms = []
+
+        for i in range(1, self.depth + 1):
+            edge_index, edge_weight = self.augment_adj(edge_index, edge_weight,
+                                                       x.size(0))
+            x, edge_index, edge_weight, batch, perm, _ = self.pools[i - 1](
+                x, edge_index, edge_weight, batch)
+
+            x = self.down_convs[i](x, edge_index, edge_weight)
+            x = self.act(x)
+
+            if i < self.depth:
+                xs += [x]
+                edge_indices += [edge_index]
+                edge_weights += [edge_weight]
+            perms += [perm]
+
+        for i in range(self.depth):
+            j = self.depth - 1 - i
+
+            res = xs[j]
+            edge_index = edge_indices[j]
+            edge_weight = edge_weights[j]
+            perm = perms[j]
+
+            up = torch.zeros_like(res)
+            up[perm] = x
+            x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
+
+            x = self.up_convs[i](x, edge_index, edge_weight)
+            x = self.act(x) if i < self.depth - 1 else x
+
+        return x
+
+    def augment_adj(self, edge_index, edge_weight, num_nodes):
+        edge_index, edge_weight = add_self_loops(edge_index, edge_weight,
+                                                 num_nodes=num_nodes)
+        edge_index, edge_weight = sort_edge_index(edge_index, edge_weight,
+                                                  num_nodes)
+        edge_index, edge_weight = spspmm(edge_index, edge_weight, edge_index,
+                                         edge_weight, num_nodes, num_nodes,
+                                         num_nodes)
+        edge_index, edge_weight = remove_self_loops(edge_index, edge_weight)
+        return edge_index, edge_weight
+
+    def __repr__(self):
+        return '{}({}, {}, {}, depth={}, pool_ratios={})'.format(
+            self.__class__.__name__, self.in_channels, self.hidden_channels,
+            self.out_channels, self.depth, self.pool_ratios)

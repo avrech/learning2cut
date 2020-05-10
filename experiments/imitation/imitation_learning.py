@@ -1,36 +1,32 @@
 # copied from ogb repository
 
-from sklearn.metrics import roc_auc_score
-import os
 from experiments.imitation.cutting_planes_dataset import CuttingPlanesDataset
 
 import torch
 from torch_geometric.data import DataLoader
 import torch.optim as optim
-from tqdm import tqdm
 import argparse
 import numpy as np
-from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
 from experiments.imitation.evaluator import Evaluator
 from gnn.models import CutSelectionModel
-
+import torch.utils.tensorboard as tb
 criterion = torch.nn.BCELoss()
 
 
 def train(model, device, loader, optimizer):
     model.train()
 
-    for step, batch in enumerate(tqdm(loader, desc="Iteration")):
+    for batch in loader:
         batch = batch.to(device)
 
-        if batch.x_s.shape[0] == 1 or batch.x_s_batch[-1] == 0:
+        if batch.x_c.shape[0] == 1 or batch.x_c_batch[-1] == 0: #  TODO what is this for?
             pass
         else:
             pred, probs = model(batch)
             optimizer.zero_grad()
 
-            loss = criterion(probs.to(torch.float32), batch.y.view(-1, ))
+            loss = criterion(probs.to(torch.float32), batch.y.view(-1, 1))
 
             loss.backward()
             optimizer.step()
@@ -41,16 +37,16 @@ def eval(model, device, loader, evaluator):
     y_true = []
     y_pred = []
 
-    for step, batch in enumerate(tqdm(loader, desc="Iteration")):
+    for batch in loader:
         batch = batch.to(device)
 
-        if batch.x_s.shape[0] == 1:
+        if batch.x_c.shape[0] == 1:
             pass
         else:
             with torch.no_grad():
                 pred, probs = model(batch)
 
-            y_true.append(batch.y_t.view(-1, 1).detach().cpu())
+            y_true.append(batch.y.view(-1, 1).detach().cpu())
             y_pred.append(pred.detach().view(-1, 1).cpu())
 
     y_true = torch.cat(y_true, dim=0).numpy()
@@ -98,11 +94,18 @@ def main():
                         help='path to load data from')
     parser.add_argument('--lr', type=int, default=1e-3,
                         help='SGD learning rate')
-
+    parser.add_argument('--cuts_embedding_layers', type=int, default=1,
+                        help='number of CutsEmbedding modules sequentialized')
+    parser.add_argument('--cuts_embedding_aggr', type=str, default='mean',
+                        help='aggregation function for message passing')
+    parser.add_argument('--factorization_arch', type=str, default='FGConv',
+                        help='FGConv or GraphUnet only')
+    parser.add_argument('--factorization_aggr', type=str, default='mean',
+                        help='aggregation function for message passing')
     args = parser.parse_args()
 
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
-    device = 'cpu'
+
     ### automatic dataloading and splitting
 
     # load dataset
@@ -120,35 +123,17 @@ def main():
     ### automatic evaluator. takes dataset name as input
     evaluator = Evaluator(args.dataset)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, follow_batch=['x_s', 'x_t'])
-    valid_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_s', 'x_t'])
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_s', 'x_t'])
-
-    # if args.gnn == 'gin':
-    #     model = GNN(gnn_type='gin', num_class=dataset.num_classes, emb_dim=args.emb_dim, drop_ratio=args.drop_ratio,
-    #                 virtual_node=False).to(device)
-    # elif args.gnn == 'gin-virtual':
-    #     model = GNN(gnn_type='gin', num_class=dataset.num_classes, emb_dim=args.emb_dim, drop_ratio=args.drop_ratio,
-    #                 virtual_node=True).to(device)
-    # elif args.gnn == 'gcn':
-    #     model = GNN(gnn_type='gcn', num_class=dataset.num_classes, emb_dim=args.emb_dim, drop_ratio=args.drop_ratio,
-    #                 virtual_node=False).to(device)
-    # elif args.gnn == 'gcn-virtual':
-    #     model = GNN(gnn_type='gcn', num_class=dataset.num_classes, emb_dim=args.emb_dim, drop_ratio=args.drop_ratio,
-    #                 virtual_node=True).to(device)
-    # else:
-    #     raise ValueError('Invalid GNN type')
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, follow_batch=['x_c', 'x_v', 'x_a'])
+    valid_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_c', 'x_v', 'x_a'])
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_c', 'x_v', 'x_a'])
 
     # model
     hparams = vars(args)
-    hparams['state/vars_feats_dim'] = train_dataset.data.vars_feats_dim[0]
-    hparams['state/cons_feats_dim'] = train_dataset.data.cons_feats_dim[0]
-    hparams['state/cuts_feats_dim'] = train_dataset.data.cuts_feats_dim[0]
-    hparams['state/edge_attr_dim'] = 1  # TODO: write in a more general way
-    hparams['cuts_embedding/cuts_only'] = True
-    hparams['cuts_embedding/aggr'] = 'mean'  # 'mean' | 'add'
-    hparams['cuts_selector/factorization'] = 'fg'
-    hparams['channels'] = args.emb_dim
+    hparams['state_x_c_channels'] = train_dataset.data.x_c.shape[-1]
+    hparams['state_x_v_channels'] = train_dataset.data.x_v.shape[-1]
+    hparams['state_x_a_channels'] = train_dataset.data.x_a.shape[-1]
+    hparams['state_edge_attr_dim'] = 1  # TODO: write in a more general way
+
     model = CutSelectionModel(hparams=hparams)
     model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -157,17 +142,28 @@ def main():
     test_curve = []
     train_curve = []
 
+    writer = tb.SummaryWriter(log_dir=args.logdir)
+
     for epoch in range(1, args.epochs + 1):
-        print("=====Epoch {}".format(epoch))
-        print('Training...')
+        # print("=====Epoch {}".format(epoch))
+        # print('Training...')
         train(model, device, train_loader, optimizer)
 
-        print('Evaluating...')
+        # print('Evaluating...')
         train_perf = eval(model, device, train_loader, evaluator)
         valid_perf = eval(model, device, valid_loader, evaluator)
         test_perf = eval(model, device, test_loader, evaluator)
 
-        print({'Train': train_perf, 'Validation': valid_perf, 'Test': test_perf})
+        print("Epoch {}".format(epoch),
+              '\t| Train: ', ['{}: {:.3f}'.format(k, v) for k, v in train_perf.items()],
+              '\t| Validation: ', ['{}: {:.3f}'.format(k, v) for k, v in valid_perf.items()],
+              '\t| Test: ', ['{}: {:.3f}'.format(k, v) for k, v in test_perf.items()])
+
+        tb_scalars = {f'{k}/{s}': v
+                      for s, perf in zip(['Train', 'Validation', 'Test'], [train_perf, valid_perf, test_perf])
+                      for k, v in perf.items()}
+        for k, v in tb_scalars.items():
+            writer.add_scalar(k, v, epoch)
 
         train_curve.append(train_perf['acc'])
         valid_curve.append(valid_perf['acc'])
@@ -180,6 +176,10 @@ def main():
     print('Best validation score: {}'.format(valid_curve[best_val_epoch]))
     print('Test score: {}'.format(test_curve[best_val_epoch]))
 
+    writer.add_hparams(hparam_dict=hparams,
+                       metric_dict={'best_valid': valid_curve[best_val_epoch],
+                                    'test_score': test_curve[best_val_epoch],
+                                    'best_train': best_train})
     if not args.filename == '':
         torch.save({'Val': valid_curve[best_val_epoch], 'Test': test_curve[best_val_epoch],
                     'Train': train_curve[best_val_epoch], 'BestTrain': best_train}, args.filename)
