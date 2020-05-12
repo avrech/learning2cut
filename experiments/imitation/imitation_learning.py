@@ -1,16 +1,16 @@
 # copied from ogb repository
 
 from experiments.imitation.cutting_planes_dataset import CuttingPlanesDataset
-
+import os
 import torch
 from torch_geometric.data import DataLoader
 import torch.optim as optim
 import argparse
 import numpy as np
-
 from experiments.imitation.evaluator import Evaluator
 from gnn.models import CutSelectionModel
 import torch.utils.tensorboard as tb
+
 criterion = torch.nn.BCELoss()
 
 
@@ -32,7 +32,7 @@ def train(model, device, loader, optimizer):
             optimizer.step()
 
 
-def eval(model, device, loader, evaluator):
+def evaluate(model, device, loader, evaluator):
     model.eval()
     y_true = []
     y_pred = []
@@ -55,11 +55,6 @@ def eval(model, device, loader, evaluator):
     input_dict = {"y_true": y_true, "y_pred": y_pred}
 
     return evaluator.eval(input_dict)
-
-
-# def add_zeros(data):
-#     data.x = torch.zeros(data.num_nodes, dtype=torch.long)
-#     return data
 
 
 def main():
@@ -86,7 +81,6 @@ def main():
     parser.add_argument('--filename', type=str, default="",
                         help='filename to output result (default: )')
 
-
     # cutting-planes stuff
     parser.add_argument('--logdir', type=str, default='results/test',
                         help='path to results root')
@@ -107,25 +101,19 @@ def main():
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
     ### automatic dataloading and splitting
-
-    # load dataset
     dataset = CuttingPlanesDataset(args.datadir, savefile=False)
-
-    # loader = DataLoader(dataset, batchsize=args.batch_size, follow_batch=['x_s', 'x_t'])
-
     dataset = dataset.shuffle()
     one_tenth_length = int(len(dataset) * 0.1)
     train_dataset = dataset[:one_tenth_length * 8]
     val_dataset = dataset[one_tenth_length * 8:one_tenth_length * 9]
     test_dataset = dataset[one_tenth_length * 9:]
     print(f'Train-set: {len(train_dataset)}, Validation-set: {len(val_dataset)}, Test-set: {len(test_dataset)}')
-
-    ### automatic evaluator. takes dataset name as input
-    evaluator = Evaluator(args.dataset)
-
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, follow_batch=['x_c', 'x_v', 'x_a'])
     valid_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_c', 'x_v', 'x_a'])
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, follow_batch=['x_c', 'x_v', 'x_a'])
+
+    # automatic evaluator. takes dataset name as input
+    evaluator = Evaluator(args.dataset)
 
     # model
     hparams = vars(args)
@@ -150,9 +138,9 @@ def main():
         train(model, device, train_loader, optimizer)
 
         # print('Evaluating...')
-        train_perf = eval(model, device, train_loader, evaluator)
-        valid_perf = eval(model, device, valid_loader, evaluator)
-        test_perf = eval(model, device, test_loader, evaluator)
+        train_perf = evaluate(model, device, train_loader, evaluator)
+        valid_perf = evaluate(model, device, valid_loader, evaluator)
+        test_perf = evaluate(model, device, test_loader, evaluator)
 
         print("Epoch {}".format(epoch),
               '\t| Train: ', ['{}: {:.3f}'.format(k, v) for k, v in train_perf.items()],
@@ -182,75 +170,10 @@ def main():
                                     'best_train': best_train})
     if not args.filename == '':
         torch.save({'Val': valid_curve[best_val_epoch], 'Test': test_curve[best_val_epoch],
-                    'Train': train_curve[best_val_epoch], 'BestTrain': best_train}, args.filename)
+                    'Train': train_curve[best_val_epoch], 'BestTrain': best_train},
+                   os.path.join(args.logdir, args.filename))
 
 
 if __name__ == "__main__":
     main()
 
-
-
-
-
-
-
-# from torch_geometric.data import DataLoader
-# batch_size= 512
-# train_loader = DataLoader(train_dataset, batch_size=batch_size)
-# val_loader = DataLoader(val_dataset, batch_size=batch_size)
-# test_loader = DataLoader(test_dataset, batch_size=batch_size)
-#
-#
-# device = torch.device('cuda')
-# model = Net().to(device)
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-# crit = torch.nn.BCELoss()
-#
-#
-# def train():
-#     model.train()
-#
-#     loss_all = 0
-#     for data in train_loader:
-#         data = data.to(device)
-#         optimizer.zero_grad()
-#         output = model(data)
-#
-#         label = data.y.to(device)
-#         loss = crit(output, label)
-#         loss.backward()
-#         loss_all += data.num_graphs * loss.item()
-#         optimizer.step()
-#     return loss_all / len(train_dataset)
-#
-#
-#
-#
-# def evaluate(loader):
-#     model.eval()
-#
-#     predictions = []
-#     labels = []
-#
-#     with torch.no_grad():
-#         for data in loader:
-#             data = data.to(device)
-#             pred = model(data).detach().cpu().numpy()
-#
-#             label = data.y.detach().cpu().numpy()
-#             predictions.append(pred)
-#             labels.append(label)
-#
-#     predictions = np.hstack(predictions)
-#     labels = np.hstack(labels)
-#
-#     return roc_auc_score(labels, predictions)
-#
-#
-# for epoch in range(1, 200):
-#     loss = train()
-#     train_acc = evaluate(train_loader)
-#     val_acc = evaluate(val_loader)
-#     test_acc = evaluate(test_loader)
-#     print('Epoch: {:03d}, Loss: {:.5f}, Train Auc: {:.5f}, Val Auc: {:.5f}, Test Auc: {:.5f}'.
-#           format(epoch, loss, train_acc, val_acc, test_acc))

@@ -1,4 +1,3 @@
-import torch_geometric as tg
 import torch
 import numpy as np
 from torch_geometric.data.data import Data
@@ -31,6 +30,7 @@ class PairTripartiteAndCliqueData(Data):
                  edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
                  edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
                  y=None,  # cuts clique graph node labels  - the action whether to apply the cut or not.
+                 r=None,
                  # meta-data needed for processing the bipartite graph
                  n_c_nodes=None,
                  n_v_nodes=None,
@@ -51,6 +51,7 @@ class PairTripartiteAndCliqueData(Data):
         self.edge_index_a2a = edge_index_a2a
         self.edge_attr_a2a = edge_attr_a2a
         self.y = y
+        self.r = r
         self.n_c_nodes = n_c_nodes
         self.n_v_nodes = n_v_nodes
         self.n_a_nodes = n_a_nodes
@@ -70,13 +71,15 @@ class PairTripartiteAndCliqueData(Data):
             return super(PairTripartiteAndCliqueData, self).__inc__(key, value)
 
 
-def get_gnn_data(scip_state, scip_action=None):
+def get_gnn_data(scip_state, action=None, reward=None, scip_next_state=None):
     """
     Creates a torch_geometric.data.Data object from SCIP state
-    produced by scip.Model.getState(format='tensor')
-    :param scip_state: scip.getState(format='tensor')
-    :param scip_action: numpy array of size ? containing 0-1.
-    :return: torch_geometric.data.Data
+    produced by scip.Model.getState(state_format='tensor')
+    :param scip_state: scip.getState(state_format='tensor')
+    :param action: np.ndarray
+    :param reward: np.ndarray
+    :param scip_next_state: scip.getState(state_format='tensor')
+    :return: PairTripartiteAndCliqueData
     """
     x_c = torch.from_numpy(scip_state['C'])
     x_v = torch.from_numpy(scip_state['V'])
@@ -92,8 +95,6 @@ def get_gnn_data(scip_state, scip_action=None):
     cuts_nzrcols = scip_state['cut_nzrcoef']['colidxs']
     cuts_orthogonality = scip_state['cuts_orthogonality']
     stats = torch.tensor([v for v in scip_state['stats'].values()], dtype=torch.float32).view(1, -1)
-    if scip_action is not None:
-        assert len(scip_action) == n_a_nodes
 
     # Combine the constraint, variable and cut nodes into a single graph:
     # The edge attributes will be the nzrcoef of the constraint/cut.
@@ -116,11 +117,16 @@ def get_gnn_data(scip_state, scip_action=None):
     n_a2a_edges = edge_index_a2a.shape[1]
 
     # for imitation learning, store scip_action as cut labels in y,
-    # for reinforcement learning store zeros
-    if scip_action is not None:
-        y = torch.tensor(list(scip_action.values()), dtype=torch.float32)
+    if action is not None:
+        y = torch.from_numpy(action, dtype=torch.float32)
+        assert len(y) == n_a_nodes
     else:
-        y = torch.zeros(size=(n_a_nodes, ), dtype=torch.float32)
+        y = None
+    if reward is not None:
+        r = torch.from_numpy(reward, dtype=torch.float32)
+        assert len(r) == n_a_nodes
+    else:
+        r = None
 
     # create the pair-tripartite-and-clique-data object consist of both the LP tripartite graph
     # and the cuts clique graph
@@ -141,6 +147,7 @@ def get_gnn_data(scip_state, scip_action=None):
         edge_index_a2a=edge_index_a2a,
         edge_attr_a2a=edge_attr_a2a,
         y=y,
+        r=r,
         n_c_nodes=n_c_nodes,
         n_v_nodes=n_v_nodes,
         n_a_nodes=n_a_nodes,

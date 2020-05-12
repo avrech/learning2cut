@@ -3,7 +3,7 @@ sweep:
   # INSTANCE PARAMETERS
   graph_idx:
     search: grid_range
-    range: 3
+    range: 1
   scip_seed:
     search: grid
     values: [52]  #[46, 52] #223, 100] #, 521] #, 46, 52] #, 14, 176, 80, 174, 198]
@@ -60,3 +60,5 @@ constants:
   maxcuts: 100           # default
 #  maxcutsroot: 2000       # default
 
+  # SAMPLER PARAMETERS
+  sample_format: 'sa'

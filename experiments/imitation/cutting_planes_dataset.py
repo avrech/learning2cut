@@ -47,7 +47,7 @@ class CuttingPlanesDataset(InMemoryDataset):
                 with open(os.path.join(self.root, rawfile), 'rb') as f:
                     state_action_list = pickle.load(f)
                 for s, a in state_action_list:
-                    gnn_data = get_gnn_data(s, scip_action=a)
+                    gnn_data = get_gnn_data(s, action=a)
                     data_list.append(gnn_data)
                     self.num_examples += 1
                 self.num_instances += 1
