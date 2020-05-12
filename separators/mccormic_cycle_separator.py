@@ -8,6 +8,7 @@ from utils.functions import dijkstra
 import operator
 import pickle
 
+
 class MccormicCycleSeparator(Sepa):
     def __init__(self, G, x, y, name='MLCycles',
                  hparams={}
@@ -31,7 +32,7 @@ class MccormicCycleSeparator(Sepa):
         self.cuts_budget = hparams.get('cuts_budget', 2000)
 
         self.chordless_only = hparams.get('chordless_only', False)
-
+        self.simple_cycle_only = hparams.get('simple_cycle_only', False)
         self._dijkstra_edge_list = None
 
         # policy
@@ -199,11 +200,13 @@ class MccormicCycleSeparator(Sepa):
                                     self.cuts_budget - self.model.getNCutsApplied()])
 
         for runs, i in enumerate(most_infeasible_nodes):
-            cost, path = dijkstra(self._dijkstra_edge_list, (i, 1), (i, 2))
-            if cost < 1 and (not self.chordless_only or self.is_chordless(path)):
+            cost, closed_walk = dijkstra(self._dijkstra_edge_list, (i, 1), (i, 2))
+            if cost < 1 \
+                    and (not self.chordless_only or self.is_chordless(closed_walk)) \
+                    and (not self.simple_cycle_only or self.is_simple_cycle(closed_walk)):
                 cycle_edges, F, C_minus_F = [], [], []
-                for idx, (i, i_side) in enumerate(path[:-1]):
-                    j, j_side = path[idx + 1]
+                for idx, (i, i_side) in enumerate(closed_walk[:-1]):
+                    j, j_side = closed_walk[idx + 1]
                     e = (i, j) if i < j else (j, i)
                     cycle_edges.append(e)
                     if i_side != j_side:
@@ -359,15 +362,23 @@ class MccormicCycleSeparator(Sepa):
         model.releaseRow(cut)
         return {"result": result}
 
-    def is_chordless(self, path):
+    def is_chordless(self, closed_walk):
         """
         Check if any non-adjacent pair of nodes in the cycle are connected directly in the graph.
-        :param path: a list of edges ((from, _), (to, _)), forming a simple cycle.
+        :param closed_walk: a list of edges ((from, _), (to, _)), forming a simple cycle.
         :return: True if chordless, otherwise False.
         """
-        cycle_nodes = [e[0] for e in path[:-1]]
-        cycle = nx.subgraph(self.G, cycle_nodes)
-        return nx.is_chordal(cycle)
+        subset = [i for i, _ in closed_walk[:-1]]
+        subgraph = nx.subgraph(self.G, subset)
+        return nx.is_chordal(subgraph)
+
+    def is_simple_cycle(self, closed_walk):
+        path = [i for i, _ in closed_walk[:-1]]
+        # subgraph = nx.subgraph(self.G, path)
+        # return nx.is_simple_path()
+        # return True iff each node in the path appears exactly once.
+        # equivalent to iff each node in closed_walk is visited exactly once.
+        return len(set(path)) == len(path)
 
     def update_cut_selection_policy(self, config={}):
         """
