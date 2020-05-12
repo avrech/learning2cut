@@ -11,28 +11,89 @@ def dijkstra(edges, s, t):
     :param t: target node
     :return: cost, path if any, otherwise Inf
     """
+    # adjacency dictionary,
+    # for each node l, store a list of its neighbors (r) and their distances (c) from l
     g = defaultdict(list)
     for l, r, c in edges:
         g[l].append((c, r))
 
-    q, seen, mins = [(0, s, [])], set(), {s: 0}
+    q = [(0, s, [])]  # priority queue, prioritizing according to distances from s
+    visited = set()      # visited nodes
+    mindist = {s: 0}     # min distances from s
+
     while q:
         cost, v1, path = heappop(q)
-        if v1 not in seen:
-            seen.add(v1)
+        if v1 not in visited:
+            visited.add(v1)
             # path.append(v1)
             path = [v1] + path
             if v1 == t:
                 return cost, path
 
             for c, v2 in g.get(v1, ()):
-                if v2 in seen:
+                if v2 in visited:
                     continue
-                prev = mins.get(v2, None)
+                prev = mindist.get(v2, None)
                 next = cost + c
                 if prev is None or next < prev:
-                    mins[v2] = next
+                    mindist[v2] = next
                     heappush(q, (next, v2, path))
+
+    return float("inf"), []
+
+
+def dijkstra_best_shortest_path(edges, s, t):
+    """
+    Find the shortest path from node s to t in graph G.
+    :param edges: a list of tuples (i, j, w), where (i,j) is an undirected edge, and w is its weight
+    :param s: source node
+    :param t: target node
+    :return: cost, path if any, otherwise Inf
+    """
+    # adjacency dictionary,
+    # for each node l, store a list of its neighbors (r) and their distances (c) from l
+    g = defaultdict(list)
+    for l, r, c in edges:
+        g[l].append((c, r))
+
+    # priority queue:
+    # structure: (cost, pathlen, node, path)
+    # where: cost - the sum of edge weights of the path from s
+    #        pathlen - path length (number of edges from s)
+    #        node - node identifier (could be a tuple)
+    #        path - a list of the nodes on the path from s to node
+    # the heap "should" sort the elements in q according to the tuple elements.
+    # so first will come the node with the smaller cost,
+    # an if there are two nodes with the same cost, we will prefer the closest one
+    # in terms of path length.
+    q = [(0, 0, s, [])]
+    visited = set()      # visited nodes
+    mincosts = {s: 0}     # min distances from s
+    pathlens = {s: 0}
+    while q:
+        v1_cost, v1_pathlen, v1, path = heappop(q)
+        if v1 not in visited:
+            visited.add(v1)
+            # path.append(v1)
+            path = [v1] + path
+            if v1 == t:
+                return v1_cost, path
+
+            # relax the costs of v1 neighbors
+            for c, v2 in g.get(v1, ()):
+                if v2 in visited:
+                    continue
+                v2_cur_cost = mincosts.get(v2, None)
+                v2_new_cost = v1_cost + c
+                v2_cur_pathlen = pathlens.get(v2, None)
+                v2_new_pathlen = v1_pathlen + 1
+                # if the path to v2 via v1 is cheaper,
+                # or even if it is equal cost, but shorter in terms of pathlen,
+                # then update v2
+                if v2_cur_cost is None or v2_new_cost < v2_cur_cost or (v2_new_cost == v2_cur_cost and v2_new_pathlen < v2_cur_pathlen):
+                    mincosts[v2] = v2_new_cost
+                    pathlens[v2] = v2_new_pathlen
+                    heappush(q, (v2_new_cost, v2_new_pathlen, v2, path))
 
     return float("inf"), []
 

@@ -4,7 +4,7 @@ import networkx as nx
 from pyscipopt import SCIP_RESULT
 import numpy as np
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
-from utils.functions import dijkstra
+from utils.functions import dijkstra, dijkstra_best_shortest_path
 import operator
 import pickle
 
@@ -202,6 +202,13 @@ class MccormickCycleSeparator(Sepa):
 
         for runs, i in enumerate(most_infeasible_nodes):
             cost, closed_walk = dijkstra(self._dijkstra_edge_list, (i, 1), (i, 2))
+            # test:
+            cost2, closed_walk2 = dijkstra_best_shortest_path(self._dijkstra_edge_list, (i, 1), (i, 2))
+            assert cost == cost2
+            assert len(closed_walk2) <= len(closed_walk)
+            if len(closed_walk2) < len(closed_walk):
+                print(f'cost1={cost}, pathlen1={len(closed_walk)}, cost2={cost2}, pathlen2={len(closed_walk2)}')
+
             if cost < 1 \
                     and (not self.chordless_only or self.is_chordless(closed_walk)) \
                     and (not self.simple_cycle_only or self.is_simple_cycle(closed_walk)):
