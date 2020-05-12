@@ -9,7 +9,7 @@ import operator
 import pickle
 
 
-class MccormicCycleSeparator(Sepa):
+class MccormickCycleSeparator(Sepa):
     def __init__(self, G, x, y, name='MLCycles',
                  hparams={}
                  ):
@@ -31,8 +31,10 @@ class MccormicCycleSeparator(Sepa):
         self.criterion = hparams.get('criterion', 'most_violated_cycle')
         self.cuts_budget = hparams.get('cuts_budget', 2000)
 
+        # cycle separation routine
         self.chordless_only = hparams.get('chordless_only', False)
         self.simple_cycle_only = hparams.get('simple_cycle_only', False)
+        self.dijkstra_constant = hparams.get('dijkstra_constant', 0)
         self._dijkstra_edge_list = None
 
         # policy
@@ -175,14 +177,14 @@ class MccormicCycleSeparator(Sepa):
             xj = self.model.getSolVal(None, self.x[j])
             wij = self.model.getSolVal(None, self.y[(i, j)])
             e_in_cut = xi + xj - 2*wij
-            edge_list += [((i, 1), (j, 1), e_in_cut),
-                          ((i, 2), (j, 2), e_in_cut),
-                          ((i, 1), (j, 2), 1 - e_in_cut),
-                          ((i, 2), (j, 1), 1 - e_in_cut),
-                          ((j, 1), (i, 1), e_in_cut),
-                          ((j, 2), (i, 2), e_in_cut),
-                          ((j, 1), (i, 2), 1 - e_in_cut),
-                          ((j, 2), (i, 1), 1 - e_in_cut)]
+            edge_list += [((i, 1), (j, 1), e_in_cut + self.dijkstra_constant),
+                          ((i, 2), (j, 2), e_in_cut + self.dijkstra_constant),
+                          ((i, 1), (j, 2), 1 - e_in_cut + self.dijkstra_constant),
+                          ((i, 2), (j, 1), 1 - e_in_cut + self.dijkstra_constant),
+                          ((j, 1), (i, 1), e_in_cut + self.dijkstra_constant),
+                          ((j, 2), (i, 2), e_in_cut + self.dijkstra_constant),
+                          ((j, 1), (i, 2), 1 - e_in_cut + self.dijkstra_constant),
+                          ((j, 2), (i, 1), 1 - e_in_cut + self.dijkstra_constant)]
 
         self._dijkstra_edge_list = edge_list
 
@@ -439,7 +441,7 @@ if __name__ == "__main__":
                                      ]
                }
 
-    ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
+    ci_cut = MccormickCycleSeparator(G=G, x=x, y=y, hparams=hparams)
     model.includeSepa(ci_cut, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
                       freq=1)

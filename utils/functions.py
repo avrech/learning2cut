@@ -2,6 +2,7 @@ from heapq import heappop, heappush
 from collections import defaultdict
 import networkx as nx
 
+
 def dijkstra(edges, s, t):
     """
     Find the shortest path from node s to t in graph G.

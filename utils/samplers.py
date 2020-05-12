@@ -165,7 +165,7 @@ class SepaSampler(Sepa):
 
 def testSepaSampler():
     import sys
-    from separators.mccormic_cycle_separator import MccormicCycleSeparator
+    from separators.mccormick_cycle_separator import MccormickCycleSeparator
     if '--mixed-debug' in sys.argv:
         import ptvsd
 
@@ -189,7 +189,7 @@ def testSepaSampler():
                'policy': 'default'
                }
 
-    cycle_sepa = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
+    cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, hparams=hparams)
     model.includeSepa(cycle_sepa, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                       priority=1000000,
                       freq=1)

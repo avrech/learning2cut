@@ -4,7 +4,7 @@ import pickle
 import os
 import numpy as np
 from utils.scip_models import maxcut_mccormic_model
-from separators.mccormic_cycle_separator import MccormicCycleSeparator
+from separators.mccormick_cycle_separator import MccormickCycleSeparator
 
 def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60):
     """
@@ -54,7 +54,7 @@ def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60):
                            'max_per_round': -1,
                            'criterion': 'most_violated_cycle',
                            'cuts_budget': 1000000}
-                ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
+                ci_cut = MccormickCycleSeparator(G=G, x=x, y=y, hparams=hparams)
                 model.includeSepa(ci_cut, "MLCycles",
                                   "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                                   priority=1000000,
@@ -106,7 +106,7 @@ def annotate_data(datadir, time_limit=600):
                    'max_per_round': 1,
                    'criterion': 'most_violated_cycle',
                    'cuts_budget': 1000000}
-        ci_cut = MccormicCycleSeparator(G=G, x=x, y=y, hparams=hparams)
+        ci_cut = MccormickCycleSeparator(G=G, x=x, y=y, hparams=hparams)
         model.includeSepa(ci_cut, "MLCycles",
                           "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                           priority=1000000,

@@ -18,7 +18,7 @@ The metric optimized is the dualbound integral w.r.t the number of lp iterations
 """
 from ray import tune
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
-from separators.mccormic_cycle_separator import MccormicCycleSeparator
+from separators.mccormick_cycle_separator import MccormickCycleSeparator
 import pickle
 import os
 from tqdm import tqdm
@@ -68,7 +68,7 @@ def experiment(config):
     scip_seed = config['scip_seed']
     model, x, y = maxcut_mccormic_model(G, use_cuts=False)
 
-    sepa = MccormicCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
+    sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
 
     model.includeSepa(sepa, 'MLCycles',
                       "Generate cycle inequalities for the MaxCut McCormic formulation",

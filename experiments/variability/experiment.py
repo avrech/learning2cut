@@ -15,7 +15,7 @@ and a csv file summarizing the statistics in a table (useful for latex).
 """
 from ray import tune
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
-from separators.mccormic_cycle_separator import MccormicCycleSeparator
+from separators.mccormick_cycle_separator import MccormickCycleSeparator
 import pickle
 import os
 
@@ -45,7 +45,7 @@ def experiment(config):
 
     scip_seed = config['scip_seed']
     model, x, y = maxcut_mccormic_model(G)
-    sepa = MccormicCycleSeparator(G=G, x=x, y=y, hparams=config)
+    sepa = MccormickCycleSeparator(G=G, x=x, y=y, hparams=config)
 
     if config['use_cycle_cuts']:
         model.includeSepa(sepa, 'McCycles',
