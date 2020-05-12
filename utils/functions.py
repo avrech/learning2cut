@@ -1,6 +1,6 @@
 from heapq import heappop, heappush
 from collections import defaultdict
-
+import networkx as nx
 
 def dijkstra(edges, s, t):
     """
@@ -35,3 +35,14 @@ def dijkstra(edges, s, t):
 
     return float("inf"), []
 
+
+def verify_maxcut_sol(model, x, G):
+    edge_weights = nx.get_edge_attributes(G, 'weight')
+    sol = {i: model.getVal(x[i]) for i in x.keys()}
+    for v in sol.values():
+        assert v == 0 or v == 1
+    cut = 0
+    for i, j in G.edges:
+        if sol[i] != sol[j]:
+            cut += edge_weights[(i, j)]
+    return cut
