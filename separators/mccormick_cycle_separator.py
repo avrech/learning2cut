@@ -34,7 +34,6 @@ class MccormickCycleSeparator(Sepa):
         # cycle separation routine
         self.chordless_only = hparams.get('chordless_only', False)
         self.simple_cycle_only = hparams.get('simple_cycle_only', False)
-        self.dijkstra_constant = hparams.get('dijkstra_constant', 0)
         self._dijkstra_edge_list = None
 
         # policy
@@ -177,14 +176,14 @@ class MccormickCycleSeparator(Sepa):
             xj = self.model.getSolVal(None, self.x[j])
             wij = self.model.getSolVal(None, self.y[(i, j)])
             e_in_cut = xi + xj - 2*wij
-            edge_list += [((i, 1), (j, 1), e_in_cut + self.dijkstra_constant),
-                          ((i, 2), (j, 2), e_in_cut + self.dijkstra_constant),
-                          ((i, 1), (j, 2), 1 - e_in_cut + self.dijkstra_constant),
-                          ((i, 2), (j, 1), 1 - e_in_cut + self.dijkstra_constant),
-                          ((j, 1), (i, 1), e_in_cut + self.dijkstra_constant),
-                          ((j, 2), (i, 2), e_in_cut + self.dijkstra_constant),
-                          ((j, 1), (i, 2), 1 - e_in_cut + self.dijkstra_constant),
-                          ((j, 2), (i, 1), 1 - e_in_cut + self.dijkstra_constant)]
+            edge_list += [((i, 1), (j, 1), e_in_cut),
+                          ((i, 2), (j, 2), e_in_cut),
+                          ((i, 1), (j, 2), 1 - e_in_cut),
+                          ((i, 2), (j, 1), 1 - e_in_cut),
+                          ((j, 1), (i, 1), e_in_cut),
+                          ((j, 2), (i, 2), e_in_cut),
+                          ((j, 1), (i, 2), 1 - e_in_cut),
+                          ((j, 2), (i, 1), 1 - e_in_cut)]
 
         self._dijkstra_edge_list = edge_list
 
