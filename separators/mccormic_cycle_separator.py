@@ -58,6 +58,7 @@ class MccormicCycleSeparator(Sepa):
         self._lp_iterations_probing = 0
         self._lp_rounds_probing = 0
         self.time_spent = 0
+        self.record = hparams.get('record', False)
         self.stats = {
             'cycle_ncuts': [],
             'cycle_ncuts_applied': [],
@@ -182,7 +183,7 @@ class MccormicCycleSeparator(Sepa):
                           ((j, 1), (i, 2), 1 - e_in_cut),
                           ((j, 2), (i, 1), 1 - e_in_cut)]
 
-            self._dijkstra_edge_list = edge_list
+        self._dijkstra_edge_list = edge_list
 
     def find_violated_cycles(self, x):
         # sort the variables according to most infeasibility:
@@ -270,7 +271,6 @@ class MccormicCycleSeparator(Sepa):
             strongest = np.argsort(new_dualbound)
             return np.array(violated_cycles)[strongest[:num_cycles_to_add]]
 
-
     def add_cut(self, violated_cycle, probing=False):
         result = SCIP_RESULT.DIDNOTRUN
         model = self.model
@@ -289,24 +289,55 @@ class MccormicCycleSeparator(Sepa):
 
         cutrhs = len(F) - 1
         name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
-        cut = model.createEmptyRowSepa(self, name, lhs=0, rhs=cutrhs,
+        cut = model.createEmptyRowSepa(self, name, rhs=cutrhs,
                                        local=self.local,
                                        removable=self.removable)
         model.cacheRowExtensions(cut)
         x = self.x
-        w = self.y
+        y = self.y
 
+        # # TODO: !!! BUG !!!
+        # # cycle inequlity should be:
+        # # \sum_{e \in F} x_e - \sum_{e \in C\F} x_e <= |F|-1
+        # # in the following we missed counting each variable appearances in the inequality
+        # # overriding its coefficient each iteration, instead increaing/decreasing
+        # # its coefficient
+        # for e in F:
+        #     i, j = e
+        #     model.addVarToRow(cut, x[i], 1)
+        #     model.addVarToRow(cut, x[j], 1)
+        #     model.addVarToRow(cut, w[e], -2)
+        #
+        # for e in C_minus_F:
+        #     i, j = e
+        #     model.addVarToRow(cut, x[i], -1)
+        #     model.addVarToRow(cut, x[j], -1)
+        #     model.addVarToRow(cut, w[e], 2)
+
+        # correct cycle inequality:
+        x_coef = {i: 0 for e in cycle_edges for i in e}
+        y_coef = {e: 0 for e in cycle_edges}
+
+        # compute variable coefficients
         for e in F:
             i, j = e
-            model.addVarToRow(cut, x[i], 1)
-            model.addVarToRow(cut, x[j], 1)
-            model.addVarToRow(cut, w[e], -2)
+            x_coef[i] += 1
+            x_coef[j] += 1
+            y_coef[e] -= 2
 
         for e in C_minus_F:
             i, j = e
-            model.addVarToRow(cut, x[i], -1)
-            model.addVarToRow(cut, x[j], -1)
-            model.addVarToRow(cut, w[e], 2)
+            x_coef[i] -= 1
+            x_coef[j] -= 1
+            y_coef[e] += 2
+
+        # now add the variables and correct coefficients to cut.
+        for i, c in x_coef.items():
+            if c != 0:
+                model.addVarToRow(cut, x[i], c)
+        for e, c in y_coef.items():
+            if c != 0:
+                model.addVarToRow(cut, y[e], c)
 
         if cut.getNNonz() == 0:
             assert model.isFeasNegative(cutrhs)
