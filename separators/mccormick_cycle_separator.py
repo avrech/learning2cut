@@ -201,13 +201,13 @@ class MccormickCycleSeparator(Sepa):
                                     self.cuts_budget - self.model.getNCutsApplied()])
 
         for runs, i in enumerate(most_infeasible_nodes):
-            cost, closed_walk = dijkstra(self._dijkstra_edge_list, (i, 1), (i, 2))
-            # test:
-            cost2, closed_walk2 = dijkstra_best_shortest_path(self._dijkstra_edge_list, (i, 1), (i, 2))
+            cost, closed_walk = dijkstra_best_shortest_path(self._dijkstra_edge_list, (i, 1), (i, 2))
+            # verification test:
+            cost2, closed_walk2 = dijkstra(self._dijkstra_edge_list, (i, 1), (i, 2))
             assert cost == cost2
-            assert len(closed_walk2) <= len(closed_walk)
-            if len(closed_walk2) < len(closed_walk):
-                print(f'cost1={cost}, pathlen1={len(closed_walk)}, cost2={cost2}, pathlen2={len(closed_walk2)}')
+            assert len(closed_walk) <= len(closed_walk2)
+            # if len(closed_walk) < len(closed_walk2):
+            #     print(f'cost-new={cost}, pathlen-new={len(closed_walk)}, cost-old={cost2}, pathlen-old={len(closed_walk2)}')
 
             if cost < 1 \
                     and (not self.chordless_only or self.is_chordless(closed_walk)) \
