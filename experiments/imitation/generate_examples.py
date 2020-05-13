@@ -122,7 +122,7 @@ if __name__ == '__main__':
                         help='path to generate/read data')
     parser.add_argument('--graphidx', type=str, default='data',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='cutoff_config.yaml',
+    parser.add_argument('--configfile', type=str, default='experiment_config.yaml',
                         help='path to generate/read data')
     parser.add_argument('--ntasks-per-node', type=int, default=40,
                         help='Graham - 32, Niagara - 40')
@@ -131,7 +131,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    with open('cutoff_config.yaml') as f:
+    with open('experiment_config.yaml') as f:
         sweep_config = yaml.load(f, Loader=yaml.FullLoader)
     config = sweep_config['constants']
     for k, v in sweep_config['sweep'].items():

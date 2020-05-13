@@ -3,7 +3,7 @@ sweep:
   # INSTANCE PARAMETERS
   graph_idx:
     search: grid_range
-    range: 1 #30
+    range: 10
   scip_seed:
     search: grid
     values: [52]  #[46, 52] #223, 100] #, 521] #, 46, 52] #, 14, 176, 80, 174, 198]
@@ -26,24 +26,22 @@ sweep:
     values: [2000]
   graph_size:
     search: grid
-    values: [15] #[20, 30, 50, 70]
+    values: [20, 30, 50]
   barabasi_albert_m:
     search: grid
-    values: [7] #[5, 10]
+    values: [10]
   max_cuts_node:
     search: grid
-    values: [10]
+    values: [10, 40]
   max_cuts_root:
     search: grid
-    values: [10]
+    values: [10, 40]
   max_cuts_applied_node:
     search: grid
-    values: [10]
+    values: [10, 40]
   max_cuts_applied_root:
     search: grid
-    values: [10]
-
-
+    values: [10, 40]
 
 
 # SPECIFY HERE OTHER PARAMETERS TO OVERRIDE DEFAULTS
@@ -70,6 +68,7 @@ constants:
   chordless_only: False
   simple_cycle_only: True
   record: True
+  debug_cutoff: True
   # SCIP SEPARATING PARAMETERS
 #  objparalfac: 0.1       # default
 #  dircutoffdistfac: 0.5  # default

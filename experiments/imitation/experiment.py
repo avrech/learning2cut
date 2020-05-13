@@ -110,7 +110,7 @@ if __name__ == '__main__':
         os.makedirs(logdir)
     with open(os.path.join(os.path.dirname(os.path.dirname(logdir)), 'checkpoint.pkl'), 'wb') as f:
         pickle.dump([], f)
-    with open('cutoff_config.yaml') as f:
+    with open('experiment_config.yaml') as f:
         sweep_config = yaml.load(f, Loader=yaml.FullLoader)
     config = sweep_config['constants']
     for k, v in sweep_config['sweep'].items():

@@ -98,15 +98,10 @@ class MccormickCycleSeparator(Sepa):
             self.debug_cutoff_stats = {}
             self.cutoff_occured = False
             self.tight_cuts = []
-            self.recent_tight_cuts = []
 
     def sepaexeclp(self):
         if self.debug_cutoff and not self.cutoff_occured:
             self.catch_cutoff()
-
-        if self.debug_cutoff and not self.cutoff_occured:
-            self.tight_cuts += self.recent_tight_cuts
-            self.recent_tight_cuts = []
 
         if self.model.getNCutsApplied() - self._cuts_applied_probing >= self.cuts_budget:
             # terminate
@@ -340,7 +335,7 @@ class MccormickCycleSeparator(Sepa):
 
         cutrhs = len(F) - 1
         name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
-        cut = model.createEmptyRowSepa(self, name, rhs=cutrhs,
+        cut = model.createEmptyRowSepa(self, name, rhs=cutrhs, lhs=-len(C_minus_F),
                                        local=self.local,
                                        removable=self.removable)
         model.cacheRowExtensions(cut)
@@ -350,6 +345,16 @@ class MccormickCycleSeparator(Sepa):
         # # TODO: !!! BUG !!!
         # # cycle inequlity should be:
         # # \sum_{e \in F} x_e - \sum_{e \in C\F} x_e <= |F|-1
+        # x_e == x_ij == x_i + x_j - 2y_ij
+        # \sum_{ij \in F} (x_i + x_j - 2y_ij) - \sum_{ij \in C\F} (x_i + x_j - 2y_ij) <= |F|-1
+        """
+        x1, x2, x3, y12, y13, y23
+        x_e = 1 for all e in {12, 23, 13}
+        F = {e12}, C\F = {13, 23}
+        (x1 +x2 -2y12) - [ (x1 +x3 -2y13) + (x2 +x3 -2y23) ] <= |F| - 1
+        0 <= x1 - x1 + x2 -x2 -2x3 -2y12 + 2y13 + 2y23 <= 0
+        -2x3 -2y12 + 2y13 + 2y23 == 0 
+        """
         # # in the following we missed counting each variable appearances in the inequality
         # # overriding its coefficient each iteration, instead increaing/decreasing
         # # its coefficient
@@ -366,10 +371,11 @@ class MccormickCycleSeparator(Sepa):
         #     model.addVarToRow(cut, w[e], 2)
 
         # correct cycle inequality:
+
+        # compute variable coefficients
         x_coef = {i: 0 for e in cycle_edges for i in e}
         y_coef = {e: 0 for e in cycle_edges}
 
-        # compute variable coefficients
         for e in F:
             i, j = e
             x_coef[i] += 1
@@ -381,6 +387,13 @@ class MccormickCycleSeparator(Sepa):
             x_coef[i] -= 1
             x_coef[j] -= 1
             y_coef[e] += 2
+        # print('optimal')
+        # print([f'x{k}={v}' for k, v in self.x_opt.items()])
+        # print([f'y{k}={v}' for k, v in self.y_opt.items()])
+        # print('cut')
+        # print([f'x{k}={v}' for k, v in x_coef.items()], end='')
+        # print([f'y{k}={v}' for k, v in y_coef.items()], end='')
+        # print('<= ', cutrhs)
 
         # check if inequality is valid with respect to the optimal solution found
         if self.debug_cutoff and not self.is_valid_inequality(x_coef, y_coef, cutrhs):
@@ -429,6 +442,7 @@ class MccormickCycleSeparator(Sepa):
         for ij, c_ij in y_coef.items():
             cutlhs += c_ij * self.y_opt[ij]
         cutoff = cutlhs > cutrhs
+
         if cutoff:
             print('found invalid inequality')
             self.debug_invalid_cut_stats['violation'] = cutlhs - cutrhs
