@@ -18,7 +18,7 @@ The metric optimized is the dualbound integral w.r.t the number of lp iterations
 """
 from ray import tune
 from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
-from separators.mccormic_cycle_separator import MccormicCycleSeparator
+from separators.mccormick_cycle_separator import MccormickCycleSeparator
 from utils.samplers import SepaSampler
 import pickle
 import os
@@ -42,10 +42,15 @@ def experiment(config):
     with open(filepath, 'rb') as f:
         G = pickle.load(f)
 
+    # # debug:
+    # import networkx as nx
+    # G = nx.complete_graph(15)
+    # nx.set_edge_attributes(G, 1, 'weight')
     scip_seed = config['scip_seed']
+    # model, x, y = maxcut_mccormic_model(G, use_cuts=False)
     model, x, y = maxcut_mccormic_model(G, use_cuts=False)
 
-    sepa = MccormicCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
+    sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
 
     model.includeSepa(sepa, 'MLCycles',
                       "Generate cycle inequalities for the MaxCut McCormic formulation",
@@ -74,8 +79,8 @@ def experiment(config):
     model.setRealParam('limits/time', config['time_limit_sec'])
 
     # set termination condition - exit after root node finishes
-    model.setLongintParam('limits/nodes', 1)
-    model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever.
+    # model.setLongintParam('limits/nodes', 1)
+    # model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever.
     # run optimizer
     model.optimize()
     # save the episode state-action pairs to a file
@@ -105,7 +110,7 @@ if __name__ == '__main__':
         os.makedirs(logdir)
     with open(os.path.join(os.path.dirname(os.path.dirname(logdir)), 'checkpoint.pkl'), 'wb') as f:
         pickle.dump([], f)
-    with open('datagen_config.yaml') as f:
+    with open('cutoff_config.yaml') as f:
         sweep_config = yaml.load(f, Loader=yaml.FullLoader)
     config = sweep_config['constants']
     for k, v in sweep_config['sweep'].items():

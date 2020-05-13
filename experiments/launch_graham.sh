@@ -20,5 +20,5 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 # run the experiment
 
-srun python run_experiment.py --experiment imitation --configfile imitation/datagen_config.yaml --logdir imitation/results/test --datadir imitation/data --mp mp
+srun python run_experiment.py --experiment imitation --configfile imitation/cutoff_config.yaml --logdir imitation/results/test --datadir imitation/data --mp mp
 # srun python run_adaptive_policy_experiment.py

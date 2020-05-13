@@ -23,7 +23,7 @@ sweep:
     values: [0.1]
   maxcutsroot:
     search: grid
-    values: [2000]
+    values: [5] #[2000]
 
 
 
@@ -47,17 +47,20 @@ constants:
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
   max_per_round: -1
   criterion: random
-  max_per_root: 2000000
+  max_per_root: 100 #2000000
+  max_per_node: 40
   forcecut: False
-
+  chordless_only: True
+  simple_cycle_only: True
+  
   # SCIP SEPARATING PARAMETERS
 #  objparalfac: 0.1       # default
 #  dircutoffdistfac: 0.5  # default
 #  efficacyfac: 1         # default
 #  intsupportfac: 0.1     # default
-  maxrounds: -1          # default
+  maxrounds: -1           # default
   maxroundsroot: -1       # default
-  maxcuts: 100           # default
+  maxcuts: 100            # default
 #  maxcutsroot: 2000       # default
 
   # SAMPLER PARAMETERS
