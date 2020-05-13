@@ -37,8 +37,8 @@ with open(args.configfile) as f:
 if not os.path.exists(args.logdir):
     os.makedirs(args.logdir)
 
-datadirs = generate_data(sweep_config, args.datadir,
-                         solve_maxcut=True, time_limit=20*60, use_cycles=False)
+datadir = generate_data(sweep_config, args.datadir,
+                        solve_maxcut=True, time_limit=20*60, use_cycles=False)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
@@ -52,7 +52,7 @@ for hp, config in sweep_config['sweep'].items():
 
 # add the sweep_config and data_abspath as constant parameters for global experiment management
 tune_search_space['sweep_config'] = tune.grid_search([sweep_config])
-tune_search_space['datadirs'] = tune.grid_search([datadirs])
+tune_search_space['datadir'] = tune.grid_search([datadir])
 
 # initialize global tracker for all experiments
 track.init()
@@ -85,7 +85,7 @@ elif args.mp == 'mp':
     for combination in products:
         cfg = {k: v for k, v in zip(sweep_keys, combination)}
         cfg['sweep_config'] = sweep_config
-        cfg['datadirs'] = datadirs
+        cfg['datadirs'] = datadir
         configs.append(cfg)
 
     # time_limit_minutes = max(int(np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)

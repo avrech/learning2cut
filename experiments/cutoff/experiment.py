@@ -37,7 +37,7 @@ def experiment(config):
 
     # read graph
     graph_idx = config['graph_idx']
-    datadir = config['datadirs'][config['graph_size']][config['barabasi_albert_m']][config['weights']][config['dataset_generation_seed']]
+    datadir = config['datadir'][config['graph_size']][config['barabasi_albert_m']][config['weights']][config['dataset_generation_seed']]
     filepath = os.path.join(datadir, f"graph_idx_{graph_idx}.pkl")
 
     with open(filepath, 'rb') as f:
@@ -76,7 +76,10 @@ def experiment(config):
     # model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever.
     # run optimizer
     model.optimize()
-
+    with open(os.path.join(logdir, 'experiment_results.pkl'), 'wb') as f:
+        pickle.dump(
+            (sepa.stats, sepa.debug_cutoff_stats, sepa.debug_invalid_cut_stats), f
+        )
     print('expeiment finished')
 
     return 0
@@ -86,7 +89,7 @@ if __name__ == '__main__':
     import argparse
     from ray.tune import track
     import yaml
-    from experiments.cut_root.data_generator import generate_data
+    from utils.maxcut import generate_data
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results/test',
@@ -100,8 +103,6 @@ if __name__ == '__main__':
     logdir = tune.track.trial_dir()
     if not os.path.exists(logdir):
         os.makedirs(logdir)
-    with open(os.path.join(os.path.dirname(os.path.dirname(logdir)), 'checkpoint.pkl'), 'wb') as f:
-        pickle.dump([], f)
     with open('experiment_config.yaml') as f:
         sweep_config = yaml.load(f, Loader=yaml.FullLoader)
     config = sweep_config['constants']
@@ -110,7 +111,7 @@ if __name__ == '__main__':
             config[k] = 0
         else:
             config[k] = v['values'][0]
-    data_abspath = generate_data(sweep_config, 'data', solve_maxcut=True, time_limit=600)
+    datadir = generate_data(sweep_config, 'data', solve_maxcut=True, time_limit=600, mp=None)
     config['sweep_config'] = sweep_config
-    config['data_abspath'] = data_abspath
+    config['datadir'] = datadir
     experiment(config)

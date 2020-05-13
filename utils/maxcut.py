@@ -7,6 +7,8 @@ from utils.scip_models import maxcut_mccormic_model
 from separators.mccormick_cycle_separator import MccormickCycleSeparator
 from ray import tune
 from ray.tune import track
+from itertools import product
+from multiprocessing import Pool
 
 
 def run_solver(config):
@@ -50,7 +52,7 @@ def run_solver(config):
         pickle.dump(G, f)
 
 
-def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60, use_cycles=True):
+def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60, use_cycles=False, mp='ray'):
     """
     Generate networkx.barabasi_albert_graph(n,m,seed) according to the values
     specified in sweep_config, and set edge weights as well.
@@ -120,16 +122,29 @@ def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60, use
                                 with open(filepath, 'wb') as f:
                                     pickle.dump(G, f)
     if solve_maxcut:
-        # run solver in parallel and solve all graphs
-        tune_search_space = {'config': tune.grid_search(configs)}
-        track.init()
-        analysis = tune.run(run_solver,
-                            config=tune_search_space,
-                            resources_per_trial={'cpu': 1, 'gpu': 0},
-                            local_dir='tmpdir',
-                            trial_name_creator=None,
-                            max_failures=1  # TODO learn how to recover from checkpoints
-                            )
+        if mp == 'ray':
+            # run solver in parallel and solve all graphs
+            tune_search_space = {'config': tune.grid_search(configs)}
+            track.init()
+            analysis = tune.run(run_solver,
+                                config=tune_search_space,
+                                resources_per_trial={'cpu': 1, 'gpu': 0},
+                                local_dir='tmpdir',
+                                trial_name_creator=None,
+                                max_failures=1  # TODO learn how to recover from checkpoints
+                                )
+        elif mp == 'mp':
+
+            with Pool() as p:
+                res = p.map_async(run_solver, configs)
+                res.wait()
+                print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
+        else:
+            print('solving graphs sequentially')
+            for cfg in configs:
+                run_solver({'config': cfg})
+            print('finished')
+
     return paths
 
 

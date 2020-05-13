@@ -93,14 +93,20 @@ class MccormickCycleSeparator(Sepa):
             self.y_opt = nx.get_edge_attributes(G, 'y')
             cut_opt = nx.get_edge_attributes(G, 'cut')
             w = nx.get_edge_attributes(G, 'weight')
-            self.opt_obj = sum([w[e] for e, is_cut in cut_opt.keys() if is_cut])
+            self.opt_obj = sum([w[e] for e, is_cut in cut_opt.items() if is_cut])
             self.debug_invalid_cut_stats = {}
             self.debug_cutoff_stats = {}
             self.cutoff_occured = False
+            self.tight_cuts = []
+            self.recent_tight_cuts = []
 
     def sepaexeclp(self):
-        if not self.cutoff_occured:
+        if self.debug_cutoff and not self.cutoff_occured:
             self.catch_cutoff()
+
+        if self.debug_cutoff and not self.cutoff_occured:
+            self.tight_cuts += self.recent_tight_cuts
+            self.recent_tight_cuts = []
 
         if self.model.getNCutsApplied() - self._cuts_applied_probing >= self.cuts_budget:
             # terminate
