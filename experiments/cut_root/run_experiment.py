@@ -3,7 +3,6 @@ Launch multiple experiment configurations in parallel on distributed resources.
 Requires a folder in ./ containing experiment.py, data_generator,py and config_fixed_max_rounds.yaml
 See example in ./variability
 """
-from importlib import import_module
 from ray import tune
 from ray.tune import track
 from argparse import ArgumentParser
@@ -11,15 +10,16 @@ import numpy as np
 import yaml
 from datetime import datetime
 import os
+from utils.maxcut import generate_data
+from experiments.cut_root.experiment import experiment as experiment_func
+
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--experiment', type=str, default='cut_root',
-                    help='experiment dir')
-parser.add_argument('--configfile', type=str, default='cut_root/experts_config.yaml',
+parser.add_argument('--configfile', type=str, default='experts_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--logdir', type=str, default='cut_root/results/maxcutsapplied2000/' + NOW,
+parser.add_argument('--logdir', type=str, default='results/maxcutsapplied2000/' + NOW,
                     help='path to results root')
-parser.add_argument('--datadir', type=str, default='cut_root/data',
+parser.add_argument('--datadir', type=str, default='data',
                     help='path to generate/read data')
 parser.add_argument('--solvegraphs', action='store_true',
                     help='whether to solve the graphs to optimality when generating data or not.')
@@ -35,8 +35,8 @@ with open(args.configfile) as f:
 # dataset generation
 if not os.path.exists(args.logdir):
     os.makedirs(args.logdir)
-data_generator = import_module('experiments.' + args.experiment + '.data_generator')
-data_abspath = data_generator.generate_data(sweep_config, args.datadir, solve_maxcut=args.solvegraphs, time_limit=600)
+
+data_abspath = generate_data(sweep_config, args.datadir, solve_maxcut=args.solvegraphs, time_limit=1200, use_cycles=False)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
@@ -53,12 +53,12 @@ tune_search_space['sweep_config'] = tune.grid_search([sweep_config])
 tune_search_space['data_abspath'] = tune.grid_search([data_abspath])
 
 # initialize global tracker for all experiments
-experiment = import_module('experiments.' + args.experiment + '.experiment')
+
 track.init()
 
 # run experiment
 if args.mp == 'ray':
-    analysis = tune.run(experiment.experiment,
+    analysis = tune.run(experiment_func,
                         config=tune_search_space,
                         resources_per_trial={'cpu': 1, 'gpu': 0},
                         local_dir=args.logdir,
@@ -69,7 +69,7 @@ if args.mp == 'ray':
 elif args.mp == 'mp':
     from itertools import product
     from multiprocessing import Pool
-    from experiments.imitation.experiment import experiment as func
+
     # fix some hparams ranges according to taskid:
     search_space_size = np.prod([d['range'] if k =='graph_idx' else len(d['values']) for k, d in sweep_config['sweep'].items()])
     sweep_keys = list(sweep_config['sweep'].keys())
@@ -90,7 +90,7 @@ elif args.mp == 'mp':
     # time_limit_minutes = max(int(np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)
 
     with Pool() as p:
-        res = p.map_async(func, configs)
+        res = p.map_async(experiment_func, configs)
         res.wait()
         print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
 
