@@ -17,4 +17,4 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 module load python
 source $HOME/server_bashrc
 source $HOME/venv/bin/activate
-srun python run_experiment.py --logdir $SCRATCH/cutoff/results --configfile cutoff_config.yaml --datadir $SCRATCH/cutoff/data --mp ray
+srun python run_experiment.py --logdir $SCRATCH/cutoff/results --configfile experiment_config.yaml --datadir $SCRATCH/cutoff/data --mp ray

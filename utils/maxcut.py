@@ -9,6 +9,47 @@ from ray import tune
 from ray.tune import track
 
 
+def run_solver(config):
+    config = config['config']
+    G = config['G']
+    filepath = config['filepath']
+    use_cycles = config['use_cycles']
+    time_limit = config['time_limit']
+
+    model, x, y = maxcut_mccormic_model(G)
+    # model.setRealParam('limits/time', 1000 * 1)
+    """ Define a controller and appropriate callback to add user's cuts """
+    hparams = {'max_per_root': 500,
+               'max_per_node': 100,
+               'max_per_round': -1,
+               'criterion': 'most_violated_cycle',
+               'cuts_budget': 1000000}
+    if use_cycles:
+        ci_cut = MccormickCycleSeparator(G=G, x=x, y=y, hparams=hparams)
+        model.includeSepa(ci_cut, "MLCycles",
+                          "Generate cycle inequalities for MaxCut using McCormic variables exchange",
+                          priority=1000000,
+                          freq=1)
+    model.setRealParam('limits/time', time_limit)
+    model.optimize()
+    x_values = {}
+    y_values = {}
+    sol = model.getBestSol()
+    for i in G.nodes:
+        x_values[i] = model.getSolVal(sol, x[i])
+    for ij in G.edges:
+        y_values[ij] = model.getSolVal(sol, y[ij])
+    if model.getGap() > 0:
+        print('WARNING: graph no.{} not solved!')
+    cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
+    nx.set_edge_attributes(G, cut, name='cut')
+    # store the solver solution
+    nx.set_edge_attributes(G, y_values, name='y')
+    nx.set_node_attributes(G, x_values, name='x')
+    with open(filepath, 'wb') as f:
+        pickle.dump(G, f)
+
+
 def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60, use_cycles=True):
     """
     Generate networkx.barabasi_albert_graph(n,m,seed) according to the values
@@ -92,42 +133,3 @@ def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60, use
     return paths
 
 
-def run_solver(config):
-    config = config['config']
-    G = config['G']
-    filepath = config['filepath']
-    use_cycles = config['use_cycles']
-    time_limit = config['time_limit']
-
-    model, x, y = maxcut_mccormic_model(G)
-    # model.setRealParam('limits/time', 1000 * 1)
-    """ Define a controller and appropriate callback to add user's cuts """
-    hparams = {'max_per_root': 500,
-               'max_per_node': 100,
-               'max_per_round': -1,
-               'criterion': 'most_violated_cycle',
-               'cuts_budget': 1000000}
-    if use_cycles:
-        ci_cut = MccormickCycleSeparator(G=G, x=x, y=y, hparams=hparams)
-        model.includeSepa(ci_cut, "MLCycles",
-                          "Generate cycle inequalities for MaxCut using McCormic variables exchange",
-                          priority=1000000,
-                          freq=1)
-    model.setRealParam('limits/time', time_limit)
-    model.optimize()
-    x_values = {}
-    y_values = {}
-    sol = model.getBestSol()
-    for i in G.nodes:
-        x_values[i] = model.getSolVal(sol, x[i])
-    for ij in G.edges:
-        y_values[ij] = model.getSolVal(sol, y[ij])
-    if model.getGap() > 0:
-        print('WARNING: graph no.{} not solved!')
-    cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
-    nx.set_edge_attributes(G, cut, name='cut')
-    # store the solver solution
-    nx.set_edge_attributes(G, y, name='y')
-    nx.set_node_attributes(G, x, name='x')
-    with open(filepath, 'wb') as f:
-        pickle.dump(G, f)

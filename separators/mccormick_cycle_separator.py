@@ -30,6 +30,10 @@ class MccormickCycleSeparator(Sepa):
         self.max_per_root = hparams.get('max_per_root', 100)
         self.criterion = hparams.get('criterion', 'most_violated_cycle')
         self.cuts_budget = hparams.get('cuts_budget', 2000)
+        self.max_cuts_node = hparams.get('max_cuts_node', 100)
+        self.max_cuts_root = hparams.get('max_cuts_root', 100)
+        self.max_cuts_applied_node = hparams.get('max_cuts_applied_node', 100)
+        self.max_cuts_applied_root = hparams.get('max_cuts_applied_root', 100)
 
         # cycle separation routine
         self.chordless_only = hparams.get('chordless_only', False)
@@ -62,9 +66,8 @@ class MccormickCycleSeparator(Sepa):
         self.time_spent = 0
         self.record = hparams.get('record', False)
         self.stats = {
-            'cycle_ncuts': [],
-            'cycle_ncuts_applied': [],
-            'total_ncuts_applied': [],
+            'ncuts': [],
+            'ncuts_applied': [],
             'cycles_sepa_time': [],
             'solving_time': [],
             'processed_nodes': [],
@@ -76,11 +79,29 @@ class MccormickCycleSeparator(Sepa):
         self._n_lp_rounds = 0
         self._sepa_cnt = 0
         self._separation_efficiency = 0
-        self._ncuts_at_cur_node = 0
+        self.ncuts_at_cur_node = 0
+        self.ncuts_applied_at_cur_node = 0
+        self.ncuts_applied_at_entering_cur_node = 0
         self._cur_node = 0  # invalid. root node index is 1
         self.finished = False
 
+        # debug cutoff events
+        self.debug_cutoff = hparams.get('debug_cutoff', False)
+        if self.debug_cutoff:
+            # restore the optimal solution from G:
+            self.x_opt = nx.get_node_attributes(G, 'x')
+            self.y_opt = nx.get_edge_attributes(G, 'y')
+            cut_opt = nx.get_edge_attributes(G, 'cut')
+            w = nx.get_edge_attributes(G, 'weight')
+            self.opt_obj = sum([w[e] for e, is_cut in cut_opt.keys() if is_cut])
+            self.debug_invalid_cut_stats = {}
+            self.debug_cutoff_stats = {}
+            self.cutoff_occured = False
+
     def sepaexeclp(self):
+        if not self.cutoff_occured:
+            self.catch_cutoff()
+
         if self.model.getNCutsApplied() - self._cuts_applied_probing >= self.cuts_budget:
             # terminate
             self.finish_experiment()
@@ -112,9 +133,8 @@ class MccormickCycleSeparator(Sepa):
         # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
         # if self._round_cnt > 0:
         cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
-        self.stats['cycle_ncuts'].append(cycle_cuts - self._cuts_probing)
-        self.stats['cycle_ncuts_applied'].append(cycle_cuts_applied - self._cuts_applied_probing)
-        self.stats['total_ncuts_applied'].append(self.model.getNCutsApplied())
+        self.stats['ncuts'].append(self.model.getNCuts() - self._cuts_probing)
+        self.stats['ncuts_applied'].append(self.model.getNCutsApplied() - self._cuts_applied_probing)
         self.stats['cycles_sepa_time'].append(self.time_spent)
         self.stats['solving_time'].append(self.model.getSolvingTime())
         self.stats['processed_nodes'].append(self.model.getNNodes())
@@ -126,12 +146,23 @@ class MccormickCycleSeparator(Sepa):
     def separate(self):
         # if exceeded limit of cuts per node ,then exit and branch or whatever else.
         cur_node = self.model.getCurrentNode().getNumber()
+        self.ncuts_applied_at_cur_node = self.model.getNCutsApplied() - self.ncuts_applied_at_entering_cur_node
         if cur_node != self._cur_node:
             self._cur_node = cur_node
-            self._ncuts_at_cur_node = 0
+            self.ncuts_at_cur_node = 0
+            self.ncuts_applied_at_cur_node = 0
+            self.ncuts_applied_at_entering_cur_node = self.model.getNCutsApplied()
+
         max_cycles = self.max_per_root if cur_node == 1 else self.max_per_node
-        if self._ncuts_at_cur_node >= max_cycles:
-            print('Reached max_per_node cycles. DIDNOTRUN occured! node {}'.format(cur_node))
+        max_cuts = self.max_cuts_root if cur_node == 1 else self.max_cuts_node
+        max_cuts_applied = self.max_cuts_applied_root if cur_node == 1 else self.max_cuts_applied_node
+
+        if self.ncuts_at_cur_node >= max_cuts:
+            print('Reached max number of cuts added at node. DIDNOTRUN occured! node {}'.format(cur_node))
+            return {"result": SCIP_RESULT.DIDNOTRUN}
+
+        if self.ncuts_applied_at_cur_node >= max_cuts_applied:
+            print('Reached max number of cuts applied at node. DIDNOTRUN occured! node {}'.format(cur_node))
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
         x = np.zeros(self.G.number_of_nodes())
@@ -148,13 +179,16 @@ class MccormickCycleSeparator(Sepa):
         violated_cycles = self.find_violated_cycles(x)
         cut_found = False
         for cycle in violated_cycles:
-            if self._ncuts_at_cur_node < max_cycles:
+            if self.ncuts_at_cur_node < max_cycles:
                 result = self.add_cut(cycle)
                 if result['result'] == SCIP_RESULT.CUTOFF:
                     print('CUTOFF')
                     return result
+                elif result == 'invalid_inequality':
+                    print('skipped invalid inequality')
+                    continue
                 self.ncuts += 1
-                self._ncuts_at_cur_node += 1
+                self.ncuts_at_cur_node += 1
                 cut_found = True
 
         if cut_found:
@@ -197,7 +231,7 @@ class MccormickCycleSeparator(Sepa):
         max_cycles = self.max_per_root if self.model.getCurrentNode().getNumber() == 1 else self.max_per_node
         num_cycles_to_add = self.max_per_round if self.max_per_round > 0 else self.G.number_of_nodes()
         num_cycles_to_add = np.min([num_cycles_to_add,
-                                    max_cycles - self._ncuts_at_cur_node,
+                                    max_cycles - self.ncuts_at_cur_node,
                                     self.cuts_budget - self.model.getNCutsApplied()])
 
         for runs, i in enumerate(most_infeasible_nodes):
@@ -342,6 +376,11 @@ class MccormickCycleSeparator(Sepa):
             x_coef[j] -= 1
             y_coef[e] += 2
 
+        # check if inequality is valid with respect to the optimal solution found
+        if self.debug_cutoff and not self.is_valid_inequality(x_coef, y_coef, cutrhs):
+            result = SCIP_RESULT.DIDNOTRUN
+            return 'invalid_inequality'
+
         # now add the variables and correct coefficients to cut.
         for i, c in x_coef.items():
             if c != 0:
@@ -369,6 +408,54 @@ class MccormickCycleSeparator(Sepa):
                 result = SCIP_RESULT.SEPARATED
         model.releaseRow(cut)
         return {"result": result}
+
+    def is_valid_inequality(self, x_coef, y_coef, cutrhs):
+        """
+        Check if the single cut is cutting off the optimal solution found without cycle inequalities
+        :param x_coef:
+        :param y_coef:
+        :param cutrhs:
+        :return:
+        """
+        cutlhs = 0
+        for i, c_i in x_coef.items():
+            cutlhs += c_i * self.x_opt[i]
+        for ij, c_ij in y_coef.items():
+            cutlhs += c_ij * self.y_opt[ij]
+        cutoff = cutlhs > cutrhs
+        if cutoff:
+            print('found invalid inequality')
+            self.debug_invalid_cut_stats['violation'] = cutlhs - cutrhs
+            self.debug_invalid_cut_stats['dualbound'] = self.model.getDualbound()
+            self.debug_invalid_cut_stats['primalbound'] = self.model.getPrimalbound()
+            self.debug_invalid_cut_stats['lp_round'] = self.model.getNLPs()
+            self.debug_invalid_cut_stats['ncuts'] = self.model.getNCuts() - self._cuts_probing
+            self.debug_invalid_cut_stats['ncuts_applied'] = self.model.getNCutsApplied() - self._cuts_applied_probing
+            self.debug_invalid_cut_stats['solving_time'] = self.model.getSolvingTime()
+            self.debug_invalid_cut_stats['processed_nodes'] = self.model.getNNodes()
+            self.debug_invalid_cut_stats['gap'] = self.model.getGap()
+            self.debug_invalid_cut_stats['lp_rounds'] = self.model.getNLPs() - self._lp_rounds_probing
+            self.debug_invalid_cut_stats['lp_iterations'] = self.model.getNLPIterations() - self._lp_iterations_probing
+            self.debug_invalid_cut_stats['ncuts_applied_before_cutoff'] = self.ncuts_applied_at_cur_node
+        return not cutoff
+
+    def catch_cutoff(self):
+        cur_dualbound = self.model.getDualbound()
+        if cur_dualbound < self.opt_obj:
+            print('Catched cutoff event')
+            self.cutoff_occured = True
+            self.debug_cutoff_stats['violation'] = cur_dualbound - self.opt_obj
+            self.debug_cutoff_stats['dualbound'] = self.model.getDualbound()
+            self.debug_cutoff_stats['primalbound'] = self.model.getPrimalbound()
+            self.debug_cutoff_stats['lp_round'] = self.model.getNLPs()
+            self.debug_cutoff_stats['ncuts'] = self.model.getNCuts() - self._cuts_probing
+            self.debug_cutoff_stats['ncuts_applied'] = self.model.getNCutsApplied() - self._cuts_applied_probing
+            self.debug_cutoff_stats['solving_time'] = self.model.getSolvingTime()
+            self.debug_cutoff_stats['processed_nodes'] = self.model.getNNodes()
+            self.debug_cutoff_stats['gap'] = self.model.getGap()
+            self.debug_cutoff_stats['lp_rounds'] = self.model.getNLPs() - self._lp_rounds_probing
+            self.debug_cutoff_stats['lp_iterations'] = self.model.getNLPIterations() - self._lp_iterations_probing
+            self.debug_cutoff_stats['ncuts_applied_when_cutoff'] = self.ncuts_applied_at_cur_node
 
     def is_chordless(self, closed_walk):
         """
