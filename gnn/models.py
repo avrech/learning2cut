@@ -291,6 +291,96 @@ class CutsSelector(torch.nn.Module):
         return y, probs
 
 
+class Qhead(torch.nn.Module):
+    def __init__(self, channels, edge_attr_dim, hparams={}):
+        super(Qhead, self).__init__()
+        self.channels = channels
+        self.edge_attr_dim = edge_attr_dim
+        self.factorization_arch = hparams.get('factorization_arch', 'FGConv')
+        self.factorization_aggr = hparams.get('factorization_aggr', 'mean')
+        # TODO: support more factorizations, e.g. GCNConv, GATConv, etc.
+        # In addition, support sequential selection
+        self.f = {
+            'FGConv': FGConv(channels, edge_attr_dim, aggr=self.factorization_aggr),
+            'GraphUNet': GraphUNet(channels, channels, channels, depth=3)
+        }.get(self.factorization_arch, 'FGConv')
+        self.q = Lin(channels, 2)  # Q-values for adding a cut or not
+
+    def forward(self, x_a, edge_index_a2a, edge_attr_a2a, batch=None):
+        """
+        Assuming a PairTripartiteAndClique (or Batch) object, d,
+        produced by utils.data.get_gnn_data,
+        this module works on the cuts clique graph of d.
+        The module applies some factorization function on the clique graph,
+        and then applies a classifier to select cuts.
+        The module inputs are as follows
+        :param x_a: d.x_a (the updated cut features from CutsEmbedding)
+        :param edge_index_a2a: d.edge_index_a2a (instance-wise cuts clique graph connectivity)
+        :param edge_attr_a2a: d.edge_attr_a2a (intra-cuts orthogonality)
+        :return:
+        """
+        # apply factorization module
+        x_a = self.f(x_a, edge_index_a2a, edge_attr_a2a, batch)
+
+        # approximate the q value of each action
+        q_a = self.q(x_a)
+        return q_a
+
+
+class Qnet(torch.nn.Module):
+    def __init__(self, hparams={}):
+        super(Qnet, self).__init__()
+        self.hparams = hparams
+        assert hparams['cuts_embedding_layers'] == 1, "Not implemented"
+
+        # cuts embedding
+        self.cuts_embedding = CutsEmbedding(
+            x_v_channels=hparams['state_x_v_channels'],             # mandatory - derived from state features
+            x_c_channels=hparams['state_x_c_channels'],             # mandatory - derived from state features
+            x_a_channels=hparams['state_x_a_channels'],             # mandatory - derived from state features
+            edge_attr_dim=hparams['state_edge_attr_dim'],           # mandatory - derived from state features
+            emb_dim=hparams.get('emb_dim', 32),                     # default
+            aggr=hparams.get('cuts_embedding_aggr', 'mean')         # default
+        )
+
+        # cut selector
+        self.q_head = Qhead(
+            channels=hparams.get('emb_dim', 32),                    # default
+            edge_attr_dim=hparams['state_edge_attr_dim'],           # this is the intra cuts orthogonalities
+            hparams=hparams
+        )
+
+    def forward(self,
+                x_c,
+                x_v,
+                x_a,
+                edge_index_c2v,
+                edge_index_a2v,
+                edge_attr_c2v,
+                edge_attr_a2v,
+                edge_index_a2a,
+                edge_attr_a2a,
+                x_a_batch
+                ):
+        """
+        :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
+                 torch.Tensor([x.shape[0], out_channels]) otherwise
+        """
+        cuts_embedding = self.cuts_embedding(x_c=x_c,
+                                             x_v=x_v,
+                                             x_a=x_a,
+                                             edge_index_c2v=edge_index_c2v,
+                                             edge_index_a2v=edge_index_a2v,
+                                             edge_attr_c2v=edge_attr_c2v,
+                                             edge_attr_a2v=edge_attr_a2v)
+
+        q_a = self.q_head(x_a=cuts_embedding,
+                          edge_index_a2a=edge_index_a2a,
+                          edge_attr_a2a=edge_attr_a2a,
+                          batch=x_a_batch)
+        return q_a
+
+
 class CutSelectionModel(torch.nn.Module):
     def __init__(self, hparams={}):
         super(CutSelectionModel, self).__init__()
@@ -332,6 +422,9 @@ class CutSelectionModel(torch.nn.Module):
                                       edge_attr_a2a=state.edge_attr_a2a,
                                       batch=state.x_a_batch)
         return y, probs
+
+
+
 
 
 class GraphUNet(torch.nn.Module):
