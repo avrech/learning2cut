@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch_geometric.data.batch import Batch
+from torch_scatter import scatter_mean, scatter_max
 
 
 class ReplayMemory(object):
@@ -69,8 +70,11 @@ class DQN(Sepa):
         self.optimizer = optim.Adam(self.policy_net.parameters())
         self.steps_done = 0
 
-
-
+        # value aggregation method:
+        if hparams.get('value_aggr', 'mean') == 'max':
+            self.aggr_func = scatter_max
+        elif hparams.get('value_aggr', 'mean') == 'mean':
+            self.aggr_func = scatter_mean
 
         # data list
         self.data_list = []
@@ -137,7 +141,6 @@ class DQN(Sepa):
         #                                    if s is not None])
 
         action_batch = batch.a
-        reward_batch = batch.r
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
@@ -160,21 +163,42 @@ class DQN(Sepa):
         # on the "older" target_net; selecting their best reward with max(1)[0].
         # This is merged based on the mask, such that we'll have either the expected
         # state value or 0 in case the state was terminal.
-        # The value of a state is computed as in BQN paper
-        next_state_values = torch.zeros(BATCH_SIZE, device=device)
-        next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
-        # Compute the expected Q values
-        expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+        # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
+        # next-state action-wise values
+        next_state_action_wise_values = self.target_net(
+            x_c=batch.ns_x_c,
+            x_v=batch.ns_x_v,
+            x_a=batch.ns_x_a,
+            edge_index_c2v=batch.ns_edge_index_c2v,
+            edge_index_a2v=batch.ns_edge_index_a2v,
+            edge_attr_c2v=batch.ns_edge_attr_c2v,
+            edge_attr_a2v=batch.ns_edge_attr_a2v,
+            edge_index_a2a=batch.ns_edge_index_a2a,
+            edge_attr_a2a=batch.ns_edge_attr_a2a,
+            x_a_batch=batch.ns_x_a_batch
+        ).max(1)[0].detach()
+        # aggregate the action-wise values using mean or max,
+        # and generate for each graph in the batch a single value
+        next_state_values = self.aggr_func(next_state_action_wise_values, batch.ns_x_a_batch, dim=0, dim_size=self.batch_size)
+        # override with zeros the values of terminal states which are garbage
+        next_state_values[batch.ns_terminal] = 0
+        # scatter the next state values graph-wise to update all action-wise rewards
+        next_state_values.scatter_(dim=0, index=batch.x_a_batch, src=next_state_values)
+
+        # now compute the expected Q values for each action separately
+        reward_batch = batch.r
+        expected_state_action_values = (next_state_values * self.gamma) + reward_batch
 
         # Compute Huber loss
         loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
 
         # Optimize the model
-        optimizer.zero_grad()
+        self.optimizer.zero_grad()
         loss.backward()
-        for param in policy_net.parameters():
+        for param in self.policy_net.parameters():
             param.grad.data.clamp_(-1, 1)
-        optimizer.step()
+        self.optimizer.step()
 
     def sepaexeclp(self):
         self.sample()
