@@ -36,7 +36,7 @@ def generate_dataset(config):
     if not os.path.isdir(dataset_dir):
         os.makedirs(dataset_dir)
 
-    for graph_idx in tqdm(range(worker_ngraphs), desc=f'worker {workerid} generate graphs'):
+    for graph_idx in range(worker_ngraphs):
         filepath = os.path.join(dataset_dir, f"graph_{workerid}_{graph_idx}.pkl")
         if not os.path.exists(filepath):
             # generate random graph
@@ -110,7 +110,7 @@ def generate_dataset(config):
                 baseline = {'optimal_value': model.getObjective().getValue()}
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, baseline), f)
-
+            print('saved graph to ', filepath)
 
 
 if __name__ == '__main__':
@@ -124,7 +124,7 @@ if __name__ == '__main__':
                         help='path to config file')
     parser.add_argument('--workerid', type=int, default=0,
                         help='worker id')
-    parser.add_argument('--nworkers', type=int, default=32,
+    parser.add_argument('--nworkers', type=int, default=1,
                         help='total number of workers')
     args = parser.parse_args()
 
