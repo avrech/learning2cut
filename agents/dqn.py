@@ -13,8 +13,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch_geometric.data.batch import Batch
 from torch_scatter import scatter_mean, scatter_max
-from utils.scip_models import maxcut_mccormic_model
 from torch.utils.tensorboard import SummaryWriter
+from torch_geometric.data import DataLoader
 
 class ReplayMemory(object):
     """
@@ -52,7 +52,9 @@ class DQN(Sepa):
         # DQN stuff
         self.memory = ReplayMemory(hparams.get('memory_capacity', 10))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.batch_size = hparams.get('batch_size', 2)
+        self.batch_size = hparams.get('batch_size', 64)
+        self.mini_batch_size = hparams.get('mini_batch_size', 8)
+        self.n_sgd_epochs = hparams.get('n_sgd_epochs', 10)
         self.gamma = hparams.get('gamma', 0.999)
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
@@ -112,6 +114,7 @@ class DQN(Sepa):
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'dualbound_integral': [], 'gap_integral': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
         self.best_perf = {'easy': -1000000, 'medium': -1000000, 'hard': -1000000}
+        self.loss_moving_avg = 0
 
     # done
     def init_episode(self, G, x, y, baseline=None, dataset_key='train_set'):
@@ -162,73 +165,82 @@ class DQN(Sepa):
             return
         transitions = self.memory.sample(self.batch_size)
         # todo consider all features to parse correctly
-        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'nx_c', 'nx_v', 'nx_a']).to(self.device)
+        loader = DataLoader(
+            transitions,
+            batch_size=self.mini_batch_size,
+            shuffle=True,
+            follow_batch=['x_c', 'x_v', 'x_a', 'nx_c', 'nx_v', 'nx_a']
+        ).to(self.device)
+        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'nx_c', 'nx_v', 'nx_a']).to(self.device)
+        for epoch in range(self.n_sgd_epochs):
+            for batch in loader:
+                action_batch = batch.a
 
-        action_batch = batch.a
+                # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+                # columns of actions taken. These are the actions which would've been taken
+                # for each batch state according to policy_net
+                state_action_values = self.policy_net(
+                    x_c=batch.x_c,
+                    x_v=batch.x_v,
+                    x_a=batch.x_a,
+                    edge_index_c2v=batch.edge_index_c2v,
+                    edge_index_a2v=batch.edge_index_a2v,
+                    edge_attr_c2v=batch.edge_attr_c2v,
+                    edge_attr_a2v=batch.edge_attr_a2v,
+                    edge_index_a2a=batch.edge_index_a2a,
+                    edge_attr_a2a=batch.edge_attr_a2a,
+                    x_a_batch=batch.x_a_batch
+                ).gather(1, action_batch)
 
-        # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
-        # columns of actions taken. These are the actions which would've been taken
-        # for each batch state according to policy_net
-        state_action_values = self.policy_net(
-            x_c=batch.x_c,
-            x_v=batch.x_v,
-            x_a=batch.x_a,
-            edge_index_c2v=batch.edge_index_c2v,
-            edge_index_a2v=batch.edge_index_a2v,
-            edge_attr_c2v=batch.edge_attr_c2v,
-            edge_attr_a2v=batch.edge_attr_a2v,
-            edge_index_a2a=batch.edge_index_a2a,
-            edge_attr_a2a=batch.edge_attr_a2a,
-            x_a_batch=batch.x_a_batch
-        ).gather(1, action_batch)
+                # Compute V(s_{t+1}) for all next states.
+                # Expected values of actions for non_terminal_next_states are computed based
+                # on the "older" target_net; selecting their best reward with max(1)[0].
+                # This is merged based on the mask, such that we'll have either the expected
+                # state value or 0 in case the state was terminal.
+                # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
+                # next-state action-wise values
+                next_state_action_wise_values = self.target_net(
+                    x_c=batch.ns_x_c,
+                    x_v=batch.ns_x_v,
+                    x_a=batch.ns_x_a,
+                    edge_index_c2v=batch.ns_edge_index_c2v,
+                    edge_index_a2v=batch.ns_edge_index_a2v,
+                    edge_attr_c2v=batch.ns_edge_attr_c2v,
+                    edge_attr_a2v=batch.ns_edge_attr_a2v,
+                    edge_index_a2a=batch.ns_edge_index_a2a,
+                    edge_attr_a2a=batch.ns_edge_attr_a2a,
+                    x_a_batch=batch.ns_x_a_batch
+                ).max(1)[0].detach()
+                # aggregate the action-wise values using mean or max,
+                # and generate for each graph in the batch a single value
+                next_state_values = self.aggr_func(next_state_action_wise_values,   # source vector
+                                                   batch.ns_x_a_batch,              # target index of each element in source
+                                                   dim=0,                           # scattering dimension
+                                                   dim_size=self.batch_size)        # output tensor size in dim after scattering
+                # override with zeros the values of terminal states which are zero by convention
+                next_state_values[batch.ns_terminal] = 0
+                # scatter the next state values graph-wise to update all action-wise rewards
+                next_state_values.scatter_(dim=0, index=batch.x_a_batch, src=next_state_values)
 
-        # Compute V(s_{t+1}) for all next states.
-        # Expected values of actions for non_terminal_next_states are computed based
-        # on the "older" target_net; selecting their best reward with max(1)[0].
-        # This is merged based on the mask, such that we'll have either the expected
-        # state value or 0 in case the state was terminal.
-        # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
-        # next-state action-wise values
-        next_state_action_wise_values = self.target_net(
-            x_c=batch.ns_x_c,
-            x_v=batch.ns_x_v,
-            x_a=batch.ns_x_a,
-            edge_index_c2v=batch.ns_edge_index_c2v,
-            edge_index_a2v=batch.ns_edge_index_a2v,
-            edge_attr_c2v=batch.ns_edge_attr_c2v,
-            edge_attr_a2v=batch.ns_edge_attr_a2v,
-            edge_index_a2a=batch.ns_edge_index_a2a,
-            edge_attr_a2a=batch.ns_edge_attr_a2a,
-            x_a_batch=batch.ns_x_a_batch
-        ).max(1)[0].detach()
-        # aggregate the action-wise values using mean or max,
-        # and generate for each graph in the batch a single value
-        next_state_values = self.aggr_func(next_state_action_wise_values,   # source vector
-                                           batch.ns_x_a_batch,              # target index of each element in source
-                                           dim=0,                           # scattering dimension
-                                           dim_size=self.batch_size)        # output tensor size in dim after scattering
-        # override with zeros the values of terminal states which are zero by convention
-        next_state_values[batch.ns_terminal] = 0
-        # scatter the next state values graph-wise to update all action-wise rewards
-        next_state_values.scatter_(dim=0, index=batch.x_a_batch, src=next_state_values)
+                # now compute the expected Q values for each action separately
+                reward_batch = batch.r
+                expected_state_action_values = (next_state_values * self.gamma) + reward_batch
 
-        # now compute the expected Q values for each action separately
-        reward_batch = batch.r
-        expected_state_action_values = (next_state_values * self.gamma) + reward_batch
+                # Compute Huber loss
+                loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+                self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.mean()
 
-        # Compute Huber loss
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-
-        # Optimize the model
-        self.optimizer.zero_grad()
-        loss.backward()
-        for param in self.policy_net.parameters():
-            param.grad.data.clamp_(-1, 1)
-        self.optimizer.step()
+                # Optimize the model
+                self.optimizer.zero_grad()
+                loss.backward()
+                for param in self.policy_net.parameters():
+                    param.grad.data.clamp_(-1, 1)
+                self.optimizer.step()
 
         # Update the target network, copying all weights and biases in DQN
         if self.i_episode % self.target_update == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
+
 
     # done
     def do_dqn_step(self):
@@ -478,7 +490,10 @@ class DQN(Sepa):
                                    global_step=self.i_episode,
                                    walltime=time() - self.start_time + self.walltime_offset)
             self.tmp_stats_buffer[k] = []
-
+        # log the average loss of the last training session
+        self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
+                               global_step=self.i_episode,
+                               walltime=time() - self.start_time + self.walltime_offset)
     # done
     def save_checkpoint(self, filepath=None):
         torch.save({
@@ -488,7 +503,8 @@ class DQN(Sepa):
             'steps_done': self.steps_done,
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
-            'best_perf': self.best_perf
+            'best_perf': self.best_perf,
+            'loss_moving_avg': self.loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
 
     def save_if_best(self):
@@ -510,13 +526,8 @@ class DQN(Sepa):
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
         self.best_perf = checkpoint['best_perf']
+        self.loss_moving_avg = checkpoint['loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
         self.optimizer.to(self.device)
 
-
-def testDQN():
-    pass
-
-if __name__ == '__main__':
-    testDQN()

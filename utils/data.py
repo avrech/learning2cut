@@ -4,6 +4,201 @@ from torch_geometric.data.data import Data
 from torch_geometric.utils import dense_to_sparse
 
 
+class Transition(Data):
+    """
+    Hold (s,a,r,s') in one data object to make batching easier
+    """
+    def __init__(self,
+                 # state
+                 x_c=None,  # tripartite graph features       - LP state
+                 x_v=None,
+                 x_a=None,
+                 edge_index_c2v=None,  # bipartite graph edge_index     - LP nonzero indices
+                 edge_attr_c2v=None,  # bipartite graph edge weights   - LP nonzero coefficients
+                 edge_index_a2v=None,
+                 edge_attr_a2v=None,
+                 edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
+                 edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
+                 stats=None,
+                 # action
+                 a=None,  # cuts clique graph node labels  - the action whether to apply the cut or not.
+                 # reward
+                 r=None,
+                 # next_state
+                 ns_x_c=None,  # tripartite graph features       - LP state
+                 ns_x_v=None,
+                 ns_x_a=None,
+                 ns_edge_index_c2v=None,  # bipartite graph edge_index     - LP nonzero indices
+                 ns_edge_attr_c2v=None,  # bipartite graph edge weights   - LP nonzero coefficients
+                 ns_edge_index_a2v=None,
+                 ns_edge_attr_a2v=None,
+                 ns_edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
+                 ns_edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
+                 ns_stats=None,
+                 ns_terminal=None
+                 ):
+        super(Transition, self).__init__()
+        self.x_c = x_c
+        self.x_v = x_v
+        self.x_a = x_a
+        self.edge_index_c2v = edge_index_c2v
+        self.edge_attr_c2v = edge_attr_c2v
+        self.edge_index_a2v = edge_index_a2v
+        self.edge_attr_a2v = edge_attr_a2v
+        self.edge_index_a2a = edge_index_a2a
+        self.edge_attr_a2a = edge_attr_a2a
+        self.stats = stats
+        self.a = a
+        self.r = r
+        self.ns_x_c = ns_x_c
+        self.ns_x_v = ns_x_v
+        self.ns_x_a = ns_x_a
+        self.ns_edge_index_c2v = ns_edge_index_c2v
+        self.ns_edge_attr_c2v = ns_edge_attr_c2v
+        self.ns_edge_index_a2v = ns_edge_index_a2v
+        self.ns_edge_attr_a2v = ns_edge_attr_a2v
+        self.ns_edge_index_a2a = ns_edge_index_a2a
+        self.ns_edge_attr_a2a = ns_edge_attr_a2a
+        self.ns_stats = ns_stats
+        self.ns_terminal = ns_terminal
+
+    def __inc__(self, key, value):
+        if key == 'edge_index_c2v':
+            return torch.tensor([[self.x_c.size(0)], [self.x_v.size(0)]])
+        if key == 'edge_index_a2v':
+            return torch.tensor([[self.x_a.size(0)], [self.x_v.size(0)]])
+        if key == 'edge_index_a2a':
+            return self.x_a.size(0)
+        if key == 'ns_edge_index_c2v':
+            return torch.tensor([[self.ns_x_c.size(0)], [self.ns_x_v.size(0)]])
+        if key == 'ns_edge_index_a2v':
+            return torch.tensor([[self.ns_x_a.size(0)], [self.ns_x_v.size(0)]])
+        if key == 'ns_edge_index_a2a':
+            return self.ns_x_a.size(0)
+        else:
+            return super(Transition, self).__inc__(key, value)
+
+
+def get_transition(scip_state, action, reward, scip_next_state=None):
+    """
+    Creates a torch_geometric.data.Data object from SCIP state
+    produced by scip.Model.getState(state_format='tensor')
+    :param scip_state: scip.getState(state_format='tensor')
+    :param action: np.ndarray
+    :param reward: np.ndarray
+    :param scip_next_state: scip.getState(state_format='tensor')
+    :return: Transition
+    """
+    x_c = torch.from_numpy(scip_state['C'])
+    x_v = torch.from_numpy(scip_state['V'])
+    x_a = torch.from_numpy(scip_state['A'])
+    nzrcoef = scip_state['nzrcoef']['vals']
+    nzrrows = scip_state['nzrcoef']['rowidxs']
+    nzrcols = scip_state['nzrcoef']['colidxs']
+    cuts_nzrcoef = scip_state['cut_nzrcoef']['vals']
+    cuts_nzrrows = scip_state['cut_nzrcoef']['rowidxs']
+    cuts_nzrcols = scip_state['cut_nzrcoef']['colidxs']
+    cuts_orthogonality = scip_state['cuts_orthogonality']
+    stats = torch.tensor([v for v in scip_state['stats'].values()], dtype=torch.float32).view(1, -1)
+
+    # Combine the constraint, variable and cut nodes into a single graph:
+    # The edge attributes will be the nzrcoef of the constraint/cut.
+    # Edges are directed, to be able to distinguish between C and A to V.
+    # In this way the data object is a proper torch_geometric Data object,
+    # so we can use all torch_geometric utilities.
+
+    # edge_index:
+    edge_index_c2v = torch.from_numpy(np.vstack([nzrrows, nzrcols])).long()
+    edge_index_a2v = torch.from_numpy(np.vstack([cuts_nzrrows, cuts_nzrcols])).long()
+    edge_attr_c2v = torch.from_numpy(nzrcoef).unsqueeze(dim=1)
+    edge_attr_a2v = torch.from_numpy(cuts_nzrcoef).unsqueeze(dim=1)
+
+    # build the clique graph the candidate cuts:
+    edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality))
+    edge_attr_a2a.unsqueeze_(dim=1)
+
+    a = torch.from_numpy(action, dtype=torch.float32)
+    assert a.shape[0] == x_a.shape[0]  # n_a_nodes
+    r = torch.from_numpy(reward, dtype=torch.float32)
+    assert r.shape[0] == x_a.shape[0]  # n_a_nodes
+
+    # proceses the next state:
+    if scip_next_state is not None:
+        # non terminal state
+        ns_x_c = torch.from_numpy(scip_next_state['C'])
+        ns_x_v = torch.from_numpy(scip_next_state['V'])
+        ns_x_a = torch.from_numpy(scip_next_state['A'])
+        ns_nzrcoef = scip_next_state['nzrcoef']['vals']
+        ns_nzrrows = scip_next_state['nzrcoef']['rowidxs']
+        ns_nzrcols = scip_next_state['nzrcoef']['colidxs']
+        ns_cuts_nzrcoef = scip_next_state['cut_nzrcoef']['vals']
+        ns_cuts_nzrrows = scip_next_state['cut_nzrcoef']['rowidxs']
+        ns_cuts_nzrcols = scip_next_state['cut_nzrcoef']['colidxs']
+        ns_cuts_orthogonality = scip_next_state['cuts_orthogonality']
+        ns_stats = torch.tensor([v for v in scip_next_state['stats'].values()], dtype=torch.float32).view(1, -1)
+
+        # edge_index:
+        ns_edge_index_c2v = torch.from_numpy(np.vstack([ns_nzrrows, ns_nzrcols])).long()
+        ns_edge_index_a2v = torch.from_numpy(np.vstack([ns_cuts_nzrrows, ns_cuts_nzrcols])).long()
+        ns_edge_attr_c2v = torch.from_numpy(ns_nzrcoef).unsqueeze(dim=1)
+        ns_edge_attr_a2v = torch.from_numpy(ns_cuts_nzrcoef).unsqueeze(dim=1)
+
+        # build the clique graph the candidate cuts:
+        ns_edge_index_a2a, ns_edge_attr_a2a = dense_to_sparse(torch.from_numpy(ns_cuts_orthogonality))
+        ns_edge_attr_a2a.unsqueeze_(dim=1)
+
+        ns_terminal = torch.tensor([0], dtype=torch.bool)
+    else:
+        # build a redundant graph with empty features, only
+        # to allow batching with all other transitions.
+        ns_x_c = torch.zeros(size=(1, x_c.shape[1]))  # single node with zero features
+        ns_x_v = torch.zeros(size=(1, x_v.shape[1]))  # single node with zero features
+        ns_x_a = torch.zeros(size=(1, x_a.shape[1]))  # single node with zero features
+        ns_edge_index_c2v = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
+        ns_edge_attr_c2v = torch.zeros(size=(1,), dtype=torch.float32)  # null attributes
+        ns_edge_index_a2v = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
+        ns_edge_attr_a2v = torch.zeros(size=(1,), dtype=torch.float32)  # null attributes
+        ns_edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
+        ns_edge_attr_a2a = torch.zeros(size=(1,), dtype=torch.float32)  # null attributes
+        ns_stats = torch.zeros_like(stats)
+        ns_terminal = torch.tensor([1], dtype=torch.bool)
+
+    # create the pair-tripartite-and-clique-data object consist of both the LP tripartite graph
+    # and the cuts clique graph
+    # NOTE: in order to process Transition in mini batches,
+    # follow the example in https://pytorch-geometric.readthedocs.io/en/latest/notes/batching.html
+    # and do:
+    # data_list = [data_1, data_2, ... data_n]
+    # loader = DataLoader(data_list, batch_size=<whatever>, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+
+    data = Transition(
+        x_c=x_c,
+        x_v=x_v,
+        x_a=x_a,
+        edge_index_c2v=edge_index_c2v,
+        edge_attr_c2v=edge_attr_c2v,
+        edge_index_a2v=edge_index_a2v,
+        edge_attr_a2v=edge_attr_a2v,
+        edge_index_a2a=edge_index_a2a,
+        edge_attr_a2a=edge_attr_a2a,
+        stats=stats,
+        a=a,
+        r=r,
+        ns_x_c=ns_x_c,
+        ns_x_v=ns_x_v,
+        ns_x_a=ns_x_a,
+        ns_edge_index_c2v=ns_edge_index_c2v,
+        ns_edge_attr_c2v=ns_edge_attr_c2v,
+        ns_edge_index_a2v=ns_edge_index_a2v,
+        ns_edge_attr_a2v=ns_edge_attr_a2v,
+        ns_edge_index_a2a=ns_edge_index_a2a,
+        ns_edge_attr_a2a=ns_edge_attr_a2a,
+        ns_stats=ns_stats,
+        ns_terminal=ns_terminal
+    )
+    return data
+
+
 class PairTripartiteAndCliqueData(Data):
     """
     Hold two graphs in one data object as described in
