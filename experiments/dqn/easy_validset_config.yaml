@@ -1,0 +1,10 @@
+ngraphs: 10
+scip_seed: 52
+barabasi_albert_m: 10
+weights: normal  # uniform01 | normal | ones
+graph_type: barabasi-albert
+dataset_generation_seed: 36
+graph_size: 25
+dataset: easy_validset
+time_limit_sec: 600
+solver: gurobi

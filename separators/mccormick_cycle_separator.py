@@ -25,15 +25,15 @@ class MccormickCycleSeparator(Sepa):
         self.removable = hparams.get('removable', True)
         self.forcecut = hparams.get('forcecut', False)
 
-        self.max_per_node = hparams.get('max_per_node', 5)
+        self.max_per_node = hparams.get('max_per_node', 100000000)
         self.max_per_round = hparams.get('max_per_round', -1)  # -1 means unlimited
-        self.max_per_root = hparams.get('max_per_root', 100)
+        self.max_per_root = hparams.get('max_per_root', 100000000)
         self.criterion = hparams.get('criterion', 'most_violated_cycle')
-        self.cuts_budget = hparams.get('cuts_budget', 2000)
-        self.max_cuts_node = hparams.get('max_cuts_node', 100)
-        self.max_cuts_root = hparams.get('max_cuts_root', 100)
-        self.max_cuts_applied_node = hparams.get('max_cuts_applied_node', 100)
-        self.max_cuts_applied_root = hparams.get('max_cuts_applied_root', 100)
+        self.cuts_budget = hparams.get('cuts_budget', 100000000)
+        self.max_cuts_node = hparams.get('max_cuts_node', 100000000)
+        self.max_cuts_root = hparams.get('max_cuts_root', 100000000)
+        self.max_cuts_applied_node = hparams.get('max_cuts_applied_node', 100000000)
+        self.max_cuts_applied_root = hparams.get('max_cuts_applied_root', 100000000)
 
         # cycle separation routine
         self.chordless_only = hparams.get('chordless_only', False)
@@ -98,6 +98,7 @@ class MccormickCycleSeparator(Sepa):
             self.debug_cutoff_stats = {}
             self.cutoff_occured = False
             self.tight_cuts = []
+
 
     def sepaexeclp(self):
         if self.debug_cutoff and not self.cutoff_occured:
