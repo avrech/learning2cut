@@ -114,7 +114,7 @@ class SepaSampler(Sepa):
     def sample(self):
         t0 = time()
         self.update_stats()
-        cur_state = self.model.getState(state_format='tensor', return_cut_names=True, query_rows=self.prev_action)
+        cur_state = self.model.getState(state_format='tensor', get_available_cuts=True, query=self.prev_action)
         # compute the reward as the dual bound integral vs. LP iterations
 
         if self.prev_action is not None:

@@ -1,7 +1,7 @@
 import networkx as nx
 from pyscipopt import quicksum
 import pyscipopt as scip
-
+from collections import OrderedDict
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
                           use_presolve=True, use_heuristics=True, use_cuts=True, use_propagation=True):
@@ -47,8 +47,8 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
 
     # create SCIP model:
     model = scip.Model(model_name)
-    x = {i: model.addVar(name='{}'.format(i), obj=x_coef[i], vtype='B') for i in V}
-    y = {ij: model.addVar(name='{}'.format(ij), obj=y_coef[ij], vtype='C') for ij in E}
+    x = OrderedDict([(i, model.addVar(name='{}'.format(i), obj=x_coef[i], vtype='B')) for i in V])
+    y = OrderedDict([(ij, model.addVar(name='{}'.format(ij), obj=y_coef[ij], vtype='C')) for ij in E])
 
     """ McCormic Inequalities """
     for ij in E:
