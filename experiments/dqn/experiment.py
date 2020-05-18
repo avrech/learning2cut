@@ -67,6 +67,8 @@ def experiment(config):
             model.setIntParam('randomization/permutationseed', config.get('scip_seed'))
             model.setIntParam('randomization/randomseedshift', config.get('scip_seed'))
 
+        # model.hideOutput()
+
         # gong! run episode
         model.optimize()
 
@@ -119,6 +121,8 @@ if __name__ == '__main__':
     parser.add_argument('--logdir', type=str, default='results',
                         help='path to results root')
     parser.add_argument('--datadir', type=str, default='data/dqn',
+                        help='path to generate/read data')
+    parser.add_argument('--resume_training', action='store_true',
                         help='path to generate/read data')
 
     args = parser.parse_args()

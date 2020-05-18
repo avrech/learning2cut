@@ -6,3 +6,7 @@ nstep_learning: 1
 debug: False
 lp_iterations_limit: 100000
 reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
+log_interval: 1
+checkpoint_interval: 2
+backprop_interval: 1
+use_gpu: False

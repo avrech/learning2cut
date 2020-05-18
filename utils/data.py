@@ -122,13 +122,13 @@ def get_transition(scip_state, action=None, reward=None, scip_next_state=None):
         assert a.shape[0] == x_a.shape[0]  # n_a_nodes
     else:
         # don't care
-        a = torch.zeros(size=(x_a.shape[0],), dtype=torch.long)
+        a = torch.zeros(size=(x_a.shape[0], ), dtype=torch.long)
     if reward is not None:
         r = torch.from_numpy(reward).float()
         assert r.shape[0] == x_a.shape[0]  # n_a_nodes
     else:
         # don't care
-        r = torch.zeros(size=(x_a.shape[0],), dtype=torch.long)
+        r = torch.zeros(size=(x_a.shape[0], ), dtype=torch.long)
 
     # proceses the next state:
     if scip_next_state is not None:
@@ -163,11 +163,11 @@ def get_transition(scip_state, action=None, reward=None, scip_next_state=None):
         ns_x_v = torch.zeros(size=(1, x_v.shape[1]))  # single node with zero features
         ns_x_a = torch.zeros(size=(1, x_a.shape[1]))  # single node with zero features
         ns_edge_index_c2v = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
-        ns_edge_attr_c2v = torch.zeros(size=(1,), dtype=torch.float32)  # null attributes
+        ns_edge_attr_c2v = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
         ns_edge_index_a2v = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
-        ns_edge_attr_a2v = torch.zeros(size=(1,), dtype=torch.float32)  # null attributes
+        ns_edge_attr_a2v = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
         ns_edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
-        ns_edge_attr_a2a = torch.zeros(size=(1,), dtype=torch.float32)  # null attributes
+        ns_edge_attr_a2a = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
         ns_stats = torch.zeros_like(stats)
         ns_terminal = torch.tensor([1], dtype=torch.bool)
 

@@ -51,7 +51,7 @@ class DQN(Sepa):
 
         # DQN stuff
         self.memory = ReplayMemory(hparams.get('memory_capacity', 1000000))
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() and hparams.get('use_gpu', False) else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.mini_batch_size = hparams.get('mini_batch_size', 8)
         self.n_sgd_epochs = hparams.get('n_sgd_epochs', 10)
@@ -222,8 +222,8 @@ class DQN(Sepa):
                     edge_index_a2a=batch.edge_index_a2a,
                     edge_attr_a2a=batch.edge_attr_a2a,
                     x_a_batch=batch.x_a_batch
-                ).gather(1, action_batch)
-
+                )
+                state_action_values = state_action_values.gather(1, action_batch.unsqueeze(1))
                 # Compute V(s_{t+1}) for all next states.
                 # Expected values of actions for non_terminal_next_states are computed based
                 # on the "older" target_net; selecting their best reward with max(1)[0].
@@ -248,19 +248,19 @@ class DQN(Sepa):
                 next_state_values = self.aggr_func(next_state_action_wise_values,   # source vector
                                                    batch.ns_x_a_batch,              # target index of each element in source
                                                    dim=0,                           # scattering dimension
-                                                   dim_size=self.batch_size)        # output tensor size in dim after scattering
+                                                   dim_size=self.mini_batch_size)   # output tensor size in dim after scattering
                 # override with zeros the values of terminal states which are zero by convention
                 next_state_values[batch.ns_terminal] = 0
                 # scatter the next state values graph-wise to update all action-wise rewards
-                next_state_values.scatter_(dim=0, index=batch.x_a_batch, src=next_state_values)
+                next_state_values = next_state_values[batch.x_a_batch]
 
                 # now compute the expected Q values for each action separately
                 reward_batch = batch.r
-                expected_state_action_values = (next_state_values * self.gamma) + reward_batch
+                expected_state_action_values = (next_state_values * self.gamma ** self.nstep_learning) + reward_batch
 
                 # Compute Huber loss
                 loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-                self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.mean()
+                self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
 
                 # Optimize the model
                 self.optimizer.zero_grad()
@@ -300,7 +300,7 @@ class DQN(Sepa):
         if self.prev_action is not None:
             # assert that all the selected cuts were actually applied
             # otherwise, there is either a bug or a cut safety/feasibility issue.
-            assert all(self.prev_action['selected'] == self.prev_action['applied'])
+            assert (self.prev_action['selected'] == self.prev_action['applied']).all()
 
         # finish with the previos step:
         self._update_episode_stats(current_round_ncuts=available_cuts['ncuts'])
@@ -321,7 +321,9 @@ class DQN(Sepa):
             action = self._select_action(cur_state).detach().cpu().numpy().astype(np.int32)
             available_cuts['selected'] = action
             # force SCIP to take the selected cuts in action and discard the others
-            self.model.forceCuts(action)
+            if sum(action) > 0:
+                # need to do it onlt if there are selected actions
+                self.model.forceCuts(action)
             # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
             # in order to prevent it from adding more or less cuts
             self.model.setIntParam('separating/maxcuts', int(sum(action)))
@@ -475,8 +477,12 @@ class DQN(Sepa):
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
+            # pad objective_area with zeros only for avoiding overflow
+            max_index = np.max(indices)
+            objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
             # take sliding windows of width n_step from objective_area
             # with minus because we want to minimize the area under the curve
+
             n_step_rewards = - objective_area[indices]
             # compute returns
             # R[t] = - ( r[t] + gamma*r[t+1] + ... + gamma^(n-1)r[t+n-1] )
@@ -528,17 +534,21 @@ class DQN(Sepa):
         """
         if save_best:
             self._save_if_best()
-
+        print(f'Episode {self.i_episode} \t| ', end='')
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
+            print('{}: {:.4f} \t| '.format(k, avg), end='')
             self.writer.add_scalar(k + '/' + self.dataset, avg,
                                    global_step=self.i_episode,
                                    walltime=time() - self.start_time + self.walltime_offset)
             self.tmp_stats_buffer[k] = []
         # log the average loss of the last training session
+        print('Training Loss: {:.4f} \t| '.format(self.loss_moving_avg), end='')
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
                                global_step=self.i_episode,
                                walltime=time() - self.start_time + self.walltime_offset)
+        print(f'Step: {self.steps_done} \t|', end='')
+        print(f'Time: {time() - self.start_time + self.walltime_offset}')
 
     # done
     def save_checkpoint(self, filepath=None):
@@ -552,6 +562,7 @@ class DQN(Sepa):
             'best_perf': self.best_perf,
             'loss_moving_avg': self.loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
+        print('Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
 
     # done
     def _save_if_best(self):
@@ -577,4 +588,4 @@ class DQN(Sepa):
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
         self.optimizer.to(self.device)
-
+        print('Loaded checkpoint from: ', self.checkpoint_filepath)
