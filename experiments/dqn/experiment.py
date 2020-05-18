@@ -11,12 +11,12 @@ import torch
 from agents.dqn import DQN
 
 
-def experiment(config):
+def experiment(hparams):
     # read datasets
     dataset_paths = {}
     datasets = {}
     for dataset in ['trainset', 'easy_validset', 'medium_validset', 'hard_validset', 'easy_testset', 'medium_testset', 'hard_testset']:
-        dataset_paths[dataset] = os.path.join(config['datadir'], dataset, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(config[dataset]['graph_size'], config[dataset]['barabasi_albert_m'], config[dataset]['weights'], config[dataset]['dataset_generation_seed']))
+        dataset_paths[dataset] = os.path.join(hparams['datadir'], dataset, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(hparams[dataset]['graph_size'], hparams[dataset]['barabasi_albert_m'], hparams[dataset]['weights'], hparams[dataset]['dataset_generation_seed']))
         # read all graphs with their baselines from disk
         datasets[dataset] = []
         for filename in os.listdir(dataset_paths[dataset]):
@@ -28,10 +28,10 @@ def experiment(config):
     graph_indices = torch.randperm(len(trainset))
 
     # dqn agent
-    dqn_agent = DQN(hparams=config)
+    dqn_agent = DQN(hparams=hparams)
     dqn_agent.train()
 
-    if config.get('resume_training', False):
+    if hparams.get('resume_training', False):
         dqn_agent.load_checkpoint()
 
     def execute_episode(G, baseline, dataset='trainset'):
@@ -39,10 +39,10 @@ def experiment(config):
         model, x, y = maxcut_mccormic_model(G, use_cuts=False)  # disable default cuts
 
         # set the appropriate lp_iterations_limit
-        config['lp_iterations_limit'] = config[dataset]['lp_iterations_limit']
+        hparams['lp_iterations_limit'] = hparams[dataset]['lp_iterations_limit']
 
         # include cycle inequalities separator with high priority
-        cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
+        cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
         model.includeSepa(cycle_sepa, 'MLCycles',
                           "Generate cycle inequalities for the MaxCut McCormic formulation",
                           priority=1000000, freq=1)
@@ -62,10 +62,10 @@ def experiment(config):
         model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
         # set up randomization
-        if config.get('scip_seed', None) is not None:
+        if hparams.get('scip_seed', None) is not None:
             model.setBoolParam('randomization/permutevars', True)
-            model.setIntParam('randomization/permutationseed', config.get('scip_seed'))
-            model.setIntParam('randomization/randomseedshift', config.get('scip_seed'))
+            model.setIntParam('randomization/permutationseed', hparams.get('scip_seed'))
+            model.setIntParam('randomization/randomseedshift', hparams.get('scip_seed'))
 
         # model.hideOutput()
 
@@ -75,23 +75,23 @@ def experiment(config):
         # once episode is done
         dqn_agent.finish_episode()
 
-    for i_episode in range(dqn_agent.i_episode+1, config['num_episodes']):
+    for i_episode in range(dqn_agent.i_episode+1, hparams['num_episodes']):
         # sample graph randomly
         graph_idx = graph_indices[i_episode % len(graph_indices)]
         G, baseline = trainset[graph_idx]
 
         execute_episode(G, baseline)
 
-        if i_episode % config.get('backprop_interval', 10) == 0:
+        if i_episode % hparams.get('backprop_interval', 10) == 0:
             dqn_agent.optimize_model()
 
-        if i_episode % config.get('target_update_interval', 1000) == 0:
+        if i_episode % hparams.get('target_update_interval', 1000) == 0:
             dqn_agent.update_target()
 
-        if i_episode % config.get('log_interval', 100) == 0:
+        if i_episode % hparams.get('log_interval', 100) == 0:
             dqn_agent.log_stats()
 
-        if i_episode % config.get('test_interval', 1000) == 0:
+        if i_episode % hparams.get('test_interval', 1000) == 0:
             # evaluate the model on the validation and test sets
             dqn_agent.eval()
             for dataset, instances in validation_sets.items():
@@ -104,7 +104,7 @@ def experiment(config):
                 dqn_agent.log_stats()
             dqn_agent.train()
 
-        if i_episode % config.get('checkpoint_interval', 100) == 0:
+        if i_episode % hparams.get('checkpoint_interval', 100) == 0:
             dqn_agent.save_checkpoint()
 
         if i_episode % len(graph_indices) == 0:
@@ -130,10 +130,10 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
     with open('experiment_config.yaml') as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+        hparams = yaml.load(f, Loader=yaml.FullLoader)
     for k, v in vars(args).items():
-        config[k] = v
+        hparams[k] = v
     for dataset in ['trainset', 'easy_validset', 'medium_validset', 'hard_validset', 'easy_testset', 'medium_testset', 'hard_testset']:
         with open(f'{dataset}_config.yaml') as f:
-            config[dataset] = yaml.load(f, Loader=yaml.FullLoader)
-    experiment(config)
+            hparams[dataset] = yaml.load(f, Loader=yaml.FullLoader)
+    experiment(hparams)
