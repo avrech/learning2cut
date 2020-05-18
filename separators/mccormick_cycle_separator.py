@@ -76,7 +76,7 @@ class MccormickCycleSeparator(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
-        self._n_lp_rounds = 0
+        self.nseparounds = 0
         self._sepa_cnt = 0
         self._separation_efficiency = 0
         self.ncuts_at_cur_node = 0
@@ -101,6 +101,14 @@ class MccormickCycleSeparator(Sepa):
 
 
     def sepaexeclp(self):
+        if self.hparams.get('debug', False):
+            print('cycle separator')
+
+        # reset solver maxcuts and maxcutsroot
+        # because dqn_agent can set it to a low number
+        if self.hparams.get('reset_maxcuts_every_round', False):
+            self.model.setIntParam('separating/maxcuts', 100000)
+            self.model.setIntParam('separating/maxcutsroot', 100000)
         if self.debug_cutoff and not self.cutoff_occured:
             self.catch_cutoff()
 
@@ -109,9 +117,15 @@ class MccormickCycleSeparator(Sepa):
             self.finish_experiment()
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
+        lp_iterations_limit = self.hparams.get('lp_iterations_limit', None)
+        if lp_iterations_limit is not None and self.model.getNLPIterations() >= lp_iterations_limit:
+            # terminate
+            self.finish_experiment()
+            return {"result": SCIP_RESULT.DIDNOTRUN}
+
         self.update_stats()
 
-        if self.policy == 'adaptive' and self._n_lp_rounds % self.policy_update_freq == 0:
+        if self.policy == 'adaptive' and self.nseparounds % self.policy_update_freq == 0:
             config = self.starting_policies.pop(0) if len(self.starting_policies) > 0 else {}
             self.update_cut_selection_policy(config=config)
 
@@ -119,7 +133,7 @@ class MccormickCycleSeparator(Sepa):
         result = self.separate()
         t_left = time() - t0
         self.time_spent += t_left
-        self._n_lp_rounds += 1
+        self.nseparounds += 1
         return result
 
     def finish_experiment(self):

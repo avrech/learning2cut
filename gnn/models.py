@@ -331,22 +331,22 @@ class Qnet(torch.nn.Module):
     def __init__(self, hparams={}):
         super(Qnet, self).__init__()
         self.hparams = hparams
-        assert hparams['cuts_embedding_layers'] == 1, "Not implemented"
+        assert hparams.get('cuts_embedding_layers', 1) == 1, "Not implemented"
 
         # cuts embedding
         self.cuts_embedding = CutsEmbedding(
-            x_v_channels=hparams['state_x_v_channels'],             # mandatory - derived from state features
-            x_c_channels=hparams['state_x_c_channels'],             # mandatory - derived from state features
-            x_a_channels=hparams['state_x_a_channels'],             # mandatory - derived from state features
-            edge_attr_dim=hparams['state_edge_attr_dim'],           # mandatory - derived from state features
-            emb_dim=hparams.get('emb_dim', 32),                     # default
-            aggr=hparams.get('cuts_embedding_aggr', 'mean')         # default
+            x_v_channels=hparams.get('state_x_v_channels', 13),   # mandatory - derived from state features
+            x_c_channels=hparams.get('state_x_c_channels', 14),   # mandatory - derived from state features
+            x_a_channels=hparams.get('state_x_a_channels', 16),   # mandatory - derived from state features
+            edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
+            emb_dim=hparams.get('emb_dim', 32),                   # default
+            aggr=hparams.get('cuts_embedding_aggr', 'mean')       # default
         )
 
         # cut selector
         self.q_head = Qhead(
-            channels=hparams.get('emb_dim', 32),                    # default
-            edge_attr_dim=hparams['state_edge_attr_dim'],           # this is the intra cuts orthogonalities
+            channels=hparams.get('emb_dim', 32),                  # default
+            edge_attr_dim=hparams.get('state_edge_attr_dim', 1),         # this is the intra cuts orthogonalities
             hparams=hparams
         )
 
@@ -385,14 +385,14 @@ class CutSelectionModel(torch.nn.Module):
     def __init__(self, hparams={}):
         super(CutSelectionModel, self).__init__()
         self.hparams = hparams
-        assert hparams['cuts_embedding_layers'] == 1, "Not implemented"
+        assert hparams.get('cuts_embedding_layers', 1) == 1, "Not implemented"
 
         # cuts embedding
         self.cuts_embedding = CutsEmbedding(
-            x_v_channels=hparams['state_x_v_channels'],             # mandatory - derived from state features
-            x_c_channels=hparams['state_x_c_channels'],             # mandatory - derived from state features
-            x_a_channels=hparams['state_x_a_channels'],             # mandatory - derived from state features
-            edge_attr_dim=hparams['state_edge_attr_dim'],           # mandatory - derived from state features
+            x_v_channels=hparams.get('state_x_v_channels', 13),     # mandatory - derived from state features
+            x_c_channels=hparams.get('state_x_c_channels', 14),     # mandatory - derived from state features
+            x_a_channels=hparams.get('state_x_a_channels', 16),     # mandatory - derived from state features
+            edge_attr_dim=hparams.get('state_edge_attr_dim', 1),    # mandatory - derived from state features
             emb_dim=hparams.get('emb_dim', 32),                     # default
             aggr=hparams.get('cuts_embedding_aggr', 'mean')         # default
         )
@@ -400,7 +400,7 @@ class CutSelectionModel(torch.nn.Module):
         # cut selector
         self.cuts_selector = CutsSelector(
             channels=hparams.get('emb_dim', 32),                    # default
-            edge_attr_dim=hparams['state_edge_attr_dim'],           # this is the intra cuts orthogonalities
+            edge_attr_dim=hparams.get('state_edge_attr_dim', 1),           # this is the intra cuts orthogonalities
             hparams=hparams
         )
 

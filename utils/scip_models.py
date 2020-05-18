@@ -3,6 +3,7 @@ from pyscipopt import quicksum
 import pyscipopt as scip
 from collections import OrderedDict
 
+
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
                           use_presolve=True, use_heuristics=True, use_cuts=True, use_propagation=True):
     r"""
@@ -48,14 +49,14 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
     # create SCIP model:
     model = scip.Model(model_name)
     x = OrderedDict([(i, model.addVar(name='{}'.format(i), obj=x_coef[i], vtype='B')) for i in V])
-    y = OrderedDict([(ij, model.addVar(name='{}'.format(ij), obj=y_coef[ij], vtype='C')) for ij in E])
+    y = OrderedDict([(ij, model.addVar(name='{}'.format(ij), obj=y_coef[ij], vtype='C', lb=0, ub=1)) for ij in E])
 
     """ McCormic Inequalities """
     for ij in E:
         i, j = ij
-        model.addCons(quicksum([x[i], x[j], -y[ij]]) <= 1, name='{}'.format(ij))
-        model.addCons(y[ij] <= x[i], name='{}'.format((ij, i)))
-        model.addCons(y[ij] <= x[j], name='{}'.format((ij, j)))
+        model.addCons(0 <= (quicksum([x[i], x[j], -y[ij]]) <= 1), name='{}'.format(ij))
+        model.addCons(0 <= (x[i] - y[ij] <= 1), name='{}'.format((ij, i)))
+        model.addCons(0 <= (x[j] - y[ij] <= 1), name='{}'.format((ij, j)))
 
     model.setMaximize()
     model.setBoolParam("misc/allowdualreds", 0)

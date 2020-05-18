@@ -8,3 +8,4 @@ graph_size: 100
 dataset: hard_validset
 time_limit_sec: 600
 solver: gurobi
+lp_iterations_limit: 100000

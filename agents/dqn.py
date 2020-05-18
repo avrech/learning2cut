@@ -1,8 +1,7 @@
-from pyscipopt import  Sepa, SCIP_RESULT, SCIP_STAGE
+from pyscipopt import  Sepa, SCIP_RESULT
 from time import time
-import networkx as nx
 import numpy as np
-from utils.data import Transition
+from utils.data import get_transition
 import os
 import math
 import random
@@ -15,6 +14,7 @@ from torch_geometric.data.batch import Batch
 from torch_scatter import scatter_mean, scatter_max
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
+
 
 class ReplayMemory(object):
     """
@@ -50,7 +50,7 @@ class DQN(Sepa):
         self.hparams = hparams
 
         # DQN stuff
-        self.memory = ReplayMemory(hparams.get('memory_capacity', 10))
+        self.memory = ReplayMemory(hparams.get('memory_capacity', 1000000))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.mini_batch_size = hparams.get('mini_batch_size', 8)
@@ -59,7 +59,6 @@ class DQN(Sepa):
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
         self.eps_decay = hparams.get('eps_decay', 200)
-        self.target_update = hparams.get('target_update', 2)
         self.policy_net = Qnet(hparams=hparams).to(self.device)
         self.target_net = Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -70,7 +69,6 @@ class DQN(Sepa):
             self.aggr_func = scatter_max
         elif hparams.get('value_aggr', 'mean') == 'mean':
             self.aggr_func = scatter_mean
-        self.reward_func = hparams.get('reward_func', 'db_integral_credit')
         self.nstep_learning = hparams.get('nstep_learning', 1)
         self.dqn_objective = hparams.get('dqn_objective', 'dualbound_integral')
 
@@ -83,7 +81,6 @@ class DQN(Sepa):
         self.start_time = time()
 
         # file system paths
-        self.datapath = hparams.get('data_abspath', 'data')
         self.logdir = hparams.get('logdir', 'results')
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
 
@@ -105,19 +102,21 @@ class DQN(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
+        self.cut_generator = None
+        self.nseparounds = 0
+        self.dataset = 'trainset'  # or <easy/medium/hard>_<validset/testset>
+        self.finalized = False
 
         # logging
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
-        self.dataset_key = 'train_set'  # or <easy/medium/hard>_<valid_set/test_set>
-        self.log_freq = hparams.get('log_freq', 100)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'dualbound_integral': [], 'gap_integral': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
-        self.best_perf = {'easy': -1000000, 'medium': -1000000, 'hard': -1000000}
+        self.best_perf = {'easy_validset': -1000000, 'medium_validset': -1000000, 'hard_validset': -1000000}
         self.loss_moving_avg = 0
 
     # done
-    def init_episode(self, G, x, y, baseline=None, dataset_key='train_set'):
+    def init_episode(self, G, x, y, cut_generator=None, baseline=None, dataset='trainset'):
         self.G = G
         self.x = x
         self.y = y
@@ -136,28 +135,60 @@ class DQN(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
-        self.dataset_key = dataset_key
+        self.cut_generator = cut_generator
+        self.nseparounds = 0
+        self.dataset = dataset
+        self.finalized = False
 
     # done
-    def select_action(self, state):
+    def _select_action(self, scip_state):
+        # transform scip_state into GNN data type
+        batch = Batch().from_data_list([get_transition(scip_state)],
+                                       follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+
         if self.training:
             # take epsilon-greedy action
             sample = random.random()
             eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
-                            math.exp(-1. * self.steps_done / self.ps_decay)
+                            math.exp(-1. * self.steps_done / self.eps_decay)
             self.steps_done += 1
             if sample > eps_threshold:
                 with torch.no_grad():
                     # t.max(1) will return largest column value of each row.
                     # second column on max result is index of where max element was
                     # found, so we pick action with the larger expected reward.
-                    return self.policy_net(state).max(1)[1]
+                    q_values = self.policy_net(
+                        x_c=batch.x_c,
+                        x_v=batch.x_v,
+                        x_a=batch.x_a,
+                        edge_index_c2v=batch.edge_index_c2v,
+                        edge_index_a2v=batch.edge_index_a2v,
+                        edge_attr_c2v=batch.edge_attr_c2v,
+                        edge_attr_a2v=batch.edge_attr_a2v,
+                        edge_index_a2a=batch.edge_index_a2a,
+                        edge_attr_a2a=batch.edge_attr_a2a,
+                        x_a_batch=batch.x_a_batch
+                    )
+                    return q_values.max(1)[1]
             else:
-                random_action = torch.randint_like(state.a, low=0, high=1, dtype=torch.long)
+                random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.long)
                 return random_action
         else:
             # in test time, take greedy action
-            return self.policy_net(state).max(1)[1]
+            with torch.no_grad():
+                q_values = self.policy_net(
+                    x_c=batch.x_c,
+                    x_v=batch.x_v,
+                    x_a=batch.x_a,
+                    edge_index_c2v=batch.edge_index_c2v,
+                    edge_index_a2v=batch.edge_index_a2v,
+                    edge_attr_c2v=batch.edge_attr_c2v,
+                    edge_attr_a2v=batch.edge_attr_a2v,
+                    edge_index_a2a=batch.edge_index_a2a,
+                    edge_attr_a2a=batch.edge_attr_a2a,
+                    x_a_batch=batch.x_a_batch
+                )
+                return q_values.max(1)[1]
 
     # done
     def optimize_model(self):
@@ -169,11 +200,12 @@ class DQN(Sepa):
             transitions,
             batch_size=self.mini_batch_size,
             shuffle=True,
-            follow_batch=['x_c', 'x_v', 'x_a', 'nx_c', 'nx_v', 'nx_a']
-        ).to(self.device)
+            follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']
+        )
         # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'nx_c', 'nx_v', 'nx_a']).to(self.device)
         for epoch in range(self.n_sgd_epochs):
             for batch in loader:
+                batch = batch.to(self.device)
                 action_batch = batch.a
 
                 # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
@@ -237,13 +269,14 @@ class DQN(Sepa):
                     param.grad.data.clamp_(-1, 1)
                 self.optimizer.step()
 
-        # Update the target network, copying all weights and biases in DQN
-        if self.i_episode % self.target_update == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
+        # don't forget to update target periodically in the outer loop
 
+    def update_target(self):
+        # Update the target network, copying all weights and biases in DQN
+        self.target_net.load_state_dict(self.policy_net.state_dict())
 
     # done
-    def do_dqn_step(self):
+    def _do_dqn_step(self):
         """
         Here is the episode inner loop of DQN.
         This DQN implemention is most vanilla one,
@@ -259,9 +292,6 @@ class DQN(Sepa):
         The priority of calling the DQN separator should be the lowest, so it will be able to
         see all the available cuts.
         """
-        # finish with the previos step:
-        self.update_episode_stats()
-
         # get the current state, a dictionary of available cuts (keyed by their names,
         # and query the statistics related to the previous action (cut activity)
         cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True, query=self.prev_action)
@@ -272,20 +302,39 @@ class DQN(Sepa):
             # otherwise, there is either a bug or a cut safety/feasibility issue.
             assert all(self.prev_action['selected'] == self.prev_action['applied'])
 
-        # select an action
-        action = self.select_action(cur_state).detach().cpu().numpy().astype(np.int32)
-        available_cuts['selected'] = action
-        # and force SCIP to take the selected cuts in action, and discard the others
-        self.model.forceCuts(action)
+        # finish with the previos step:
+        self._update_episode_stats(current_round_ncuts=available_cuts['ncuts'])
 
-        # SCIP will execute the action,
-        # and return here in the next LP round -
-        # unless the instance is solved and the episode is done.
-        # store the current state and action for
-        # computing later the n-step rewards and the (s,a,r',s') transitions
-        self.state_action_pairs.append((cur_state, available_cuts))
-        self.prev_action = available_cuts
-        self.prev_state = cur_state
+        # if the are no avialable cuts, the solution is probably feasible,
+        # and anyway, the episode is ended since we don't have anything to do.
+        # so in this case we should just jump out,
+        # without storing the current state-action pair,
+        # since the terminal state is not important.
+        # we also mark episode as finalized, to avoid double computations in finish_episode()
+        if available_cuts['ncuts'] == 0:
+            self.finalized = True
+            return
+
+        else:
+
+            # select an action
+            action = self._select_action(cur_state).detach().cpu().numpy().astype(np.int32)
+            available_cuts['selected'] = action
+            # force SCIP to take the selected cuts in action and discard the others
+            self.model.forceCuts(action)
+            # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+            # in order to prevent it from adding more or less cuts
+            self.model.setIntParam('separating/maxcuts', int(sum(action)))
+            self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+
+            # SCIP will execute the action,
+            # and return here in the next LP round -
+            # unless the instance is solved and the episode is done.
+            # store the current state and action for
+            # computing later the n-step rewards and the (s,a,r',s') transitions
+            self.state_action_pairs.append((cur_state, available_cuts))
+            self.prev_action = available_cuts
+            self.prev_state = cur_state
 
     # done
     def finish_episode(self):
@@ -293,44 +342,63 @@ class DQN(Sepa):
         Compute rewards, push transitions into memory
         and log stats
         """
-        # compute by hand the activity of the last action,
-        # because the solver doesn't allow to access the information in SCIP_STAGE.SOLVED
-        ncols = self.model.getNLPcols()
-        ncuts = self.prev_action['ncuts']
-        cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
-        cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
-        cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
-        cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals,(cuts_nnz_rowidxs,cuts_nnz_colidxs)), shape=[ncuts, ncols]).toarray()
-        final_solution = self.model.getBestSol()
-        sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
-        sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
-        sol_vector = np.array(sol_vector)
-        activities = cuts_matrix @ sol_vector - self.prev_action['constants']
-        self.prev_action['activity'] = activities
-        # assume that all the selected actions were actually applied,
-        # although we cannot verify it
-        self.prev_action['applied'] = self.prev_action['selected']
-        # update the rest of statistics needed to compute rewards
-        self.update_episode_stats()
+        # in a case the episode terminated due to node_limit or lp_iterations_limit,
+        # we need to compute by hand the tightness of the last action,
+        # because the solver allowes to access the information only in SCIP_STAGE.SOLVING
+        if not self.finalized:
+            nvars = self.model.getNVars()
+            ncuts = self.prev_action['ncuts']
+            cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
+            cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
+            cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
+            cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)), shape=[ncuts, nvars]).toarray()
+            final_solution = self.model.getBestSol()
+            sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
+            sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
+            sol_vector = np.array(sol_vector)
+            # tightness of all cuts added at the previous round (including the discarded cuts)
+            tightness = self.prev_action['rhss'] - cuts_matrix @ sol_vector
+            # assign tightness penalty only to the selected cuts.
+            self.prev_action['tightness_penalty'] = np.zeros_like(self.prev_action['selected'])
+            self.prev_action['tightness_penalty'][self.prev_action['selected']] = tightness[self.prev_action['selected']]
+            # assume that all the selected actions were actually applied,
+            # although we cannot verify it
+            self.prev_action['applied'] = self.prev_action['selected']
+
+            # update the rest of statistics needed to compute rewards
+            self._update_episode_stats(current_round_ncuts=ncuts)
+
+
         # compute rewards and other stats for the whole episode,
         # and if in training session, push transitions into memory
-        self.compute_rewards_and_stats()
+        self._compute_rewards_and_stats()
         # increase the number of episodes done
         if self.training:
             self.i_episode += 1
 
     # done
     def sepaexeclp(self):
-        self.do_dqn_step()
-        return {"result": SCIP_RESULT.DIDNOTRUN}
+        if self.hparams.get('debug', False):
+            print('dqn')
+
+        # assert proper behavior
+        self.nseparounds += 1
+        if self.cut_generator is not None:
+            assert self.nseparounds == self.cut_generator.nseparounds
+            assert self.nseparounds == self.model.getNLPs()
+
+        if self.model.getNLPIterations() < self.hparams.get('lp_iterations_limit', 100000):
+            self._do_dqn_step()
+        # return {"result": SCIP_RESULT.DIDNOTRUN}
+        return {"result": SCIP_RESULT.DIDNOTFIND}
 
     # done
-    def update_episode_stats(self):
-        # collect statistics at the beginning of each round, starting from the second round.
-        # the statistics are collected before taking any action, and refer to the last round.
-        # NOTE: the last update must be done after the solver terminates optimization,
-        # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
-        self.episode_stats['ncuts'].append(self.model.getNCuts())
+    def _update_episode_stats(self, current_round_ncuts):
+        # collect statistics related to the action taken at the previous round
+        # since getNCuts takes into account the cuts added by the cut generator before
+        # calling the cut selection agent, we need to subtract the current round ncuts from
+        # this value
+        self.episode_stats['ncuts'].append(self.model.getNCuts() - current_round_ncuts)
         self.episode_stats['ncuts_applied'].append(self.model.getNCutsApplied())
         self.episode_stats['solving_time'].append(self.model.getSolvingTime())
         self.episode_stats['processed_nodes'].append(self.model.getNNodes())
@@ -350,7 +418,7 @@ class DQN(Sepa):
         self.policy_net.train()
 
     # done
-    def compute_rewards_and_stats(self):
+    def _compute_rewards_and_stats(self):
         """
         Compute action-wise reward and store (s,a,r,s') transitions in memory
         By the way, compute so metrics for plotting, e.g.
@@ -359,7 +427,7 @@ class DQN(Sepa):
         3. nactive/napplied,
         4. napplied/navailable
         """
-        lp_iterations_limit = self.hparams['lp_iterations_limit']
+        lp_iterations_limit = self.hparams.get('lp_iterations_limit', 100000)
         gap = self.episode_stats['gap']
         dualbound = self.episode_stats['dualbound']
         lp_iterations = self.episode_stats['lp_iterations']
@@ -414,79 +482,56 @@ class DQN(Sepa):
             # R[t] = - ( r[t] + gamma*r[t+1] + ... + gamma^(n-1)r[t+n-1] )
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, state, action, joint_reward in enumerate(zip(self.state_action_pairs, R)):
-                next_state = self.state_action_pairs[step+n_steps] if step+n_steps < n_transitions else None
+            for step, ((state, action), joint_reward) in enumerate(zip(self.state_action_pairs, R)):
+                next_state, _ = self.state_action_pairs[step+n_steps] if step+n_steps < n_transitions else (None, None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
-                # now, assign to each cut its reward according to its activity
-                # |activity| = 0 if the cut is tight, and > 0 otherwise.
+                # now, assign to each cut its reward according to its tightness
+                # tightness == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
                 # so we punish inactive cuts by decreasing their reward to
-                # R * (1 + |activity|)
-                activity = action['activity']
+                # R * (1 + tightness)
+                tightness_penalty = action['tightness_penalty']
                 if self.hparams.get('credit_assignment', True):
-                    credit = 1 + activity
+                    credit = 1 + tightness_penalty
                     reward = joint_reward * credit
 
-                transition = Transition(state, action, reward, next_state)
+                transition = get_transition(state, action['selected'], reward, next_state)
                 self.memory.push(transition)
 
         # compute some stats and store in buffer
         active_applied_ratio = []
         applied_available_ratio = []
         for _, action in self.state_action_pairs:
-            activity = action['activity']
+            tightness_penalty = action['tightness_penalty']
+            # because of numerical errors, we consider as zero |value| < 1e-6
+            approximately_zero = np.abs(tightness_penalty) < 1e-6
+            tightness_penalty[approximately_zero] = 0
+
             applied = action['applied'].astype(np.bool)
-            is_active = activity[applied] == 0
-            active_applied_ratio.append(sum(is_active)/sum(applied))
-            applied_available_ratio.append(sum(applied)/len(applied))
+            is_active = tightness_penalty[applied] == 0
+            active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
+            applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
         # store episode results in tmp_stats_buffer
         self.tmp_stats_buffer['dualbound_integral'].append(sum(dualbound_area))
         self.tmp_stats_buffer['gap_integral'].append(sum(gap_area))
         self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
         self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
-        # todo compute for the whole trajectory
-        # # compute reward
-        # db_improvement = np.abs(self.episode_stats['dualbound'][-1] - self.episode_stats['dualbound'][-2]) * self.db_scale
-        # lp_iterations = (self.episode_stats['lp_iterations'][-1] - self.episode_stats['lp_iterations'][-2]) * self.lpiter_scale
-        # activity = self.prev_action['activity']
-        # if self.reward_func == 'db_improvement':
-        #     return np.full_like(activity, fill_value=db_improvement)
-        #
-        # elif self.reward_func == 'db_integral':
-        #     return np.full_like(activity, fill_value=- db_improvement * lp_iterations)
-        #
-        # elif self.reward_func == 'db_improvement_credit':
-        #     return db_improvement * (1 + activity)
-        #
-        # elif self.reward_func == 'db_integral_credit':
-        #     return db_improvement * lp_iterations * (activity - 1)
-        #
-        # elif self.reward_func == 'db_lpiter_fscore':
-        #     # compute the harmonic average of p=db_improvement and q=1/lp_iterations
-        #     # fscore = p*q/(p+q)
-        #     fscore = db_improvement / (db_improvement * lp_iterations + 1)
-        #     # this fscore will be high iff its both elements will be high,
-        #     # i.e great dual bound improvement in a few lp iterations
-        #     return np.full_like(activity, fill_value=fscore)
-        #
-        # elif self.reward_func == 'db_lpiter_fscore_credit':
-        #     # compute the fscore as above,
-        #     # and assign the credit to the active constraints only.
-        #     fscore = db_improvement / (db_improvement * lp_iterations + 1)
-        #     return fscore * (1 + activity)
 
     # done
-    def log_stats(self):
+    def log_stats(self, save_best=False):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
         This function should be called periodically during training,
         and at the end of every evaluation session - <valid/test>_set_<easy/medium/hard>
         """
+        if save_best:
+            self._save_if_best()
+
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
-            self.writer.add_scalar(k + '/' + self.dataset_key, avg,
+            self.writer.add_scalar(k + '/' + self.dataset, avg,
                                    global_step=self.i_episode,
                                    walltime=time() - self.start_time + self.walltime_offset)
             self.tmp_stats_buffer[k] = []
@@ -494,6 +539,7 @@ class DQN(Sepa):
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
                                global_step=self.i_episode,
                                walltime=time() - self.start_time + self.walltime_offset)
+
     # done
     def save_checkpoint(self, filepath=None):
         torch.save({
@@ -507,14 +553,15 @@ class DQN(Sepa):
             'loss_moving_avg': self.loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
 
-    def save_if_best(self):
+    # done
+    def _save_if_best(self):
         """Save the model if show the best performance on the validation set.
         The performance is the -(dualbound/gap integral),
         according to the DQN objective"""
         perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
-        if perf > self.best_perf[self.dataset_key]:
-            self.best_perf[self.dataset_key] = perf
-            self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_key}_checkpoint.pt'))
+        if perf > self.best_perf[self.dataset]:
+            self.best_perf[self.dataset] = perf
+            self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset}_checkpoint.pt'))
 
     # done
     def load_checkpoint(self):

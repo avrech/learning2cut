@@ -79,7 +79,7 @@ class Transition(Data):
             return super(Transition, self).__inc__(key, value)
 
 
-def get_transition(scip_state, action, reward, scip_next_state=None):
+def get_transition(scip_state, action=None, reward=None, scip_next_state=None):
     """
     Creates a torch_geometric.data.Data object from SCIP state
     produced by scip.Model.getState(state_format='tensor')
@@ -117,10 +117,18 @@ def get_transition(scip_state, action, reward, scip_next_state=None):
     edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality))
     edge_attr_a2a.unsqueeze_(dim=1)
 
-    a = torch.from_numpy(action, dtype=torch.float32)
-    assert a.shape[0] == x_a.shape[0]  # n_a_nodes
-    r = torch.from_numpy(reward, dtype=torch.float32)
-    assert r.shape[0] == x_a.shape[0]  # n_a_nodes
+    if action is not None:
+        a = torch.from_numpy(action).long()
+        assert a.shape[0] == x_a.shape[0]  # n_a_nodes
+    else:
+        # don't care
+        a = torch.zeros(size=(x_a.shape[0],), dtype=torch.long)
+    if reward is not None:
+        r = torch.from_numpy(reward).float()
+        assert r.shape[0] == x_a.shape[0]  # n_a_nodes
+    else:
+        # don't care
+        r = torch.zeros(size=(x_a.shape[0],), dtype=torch.long)
 
     # proceses the next state:
     if scip_next_state is not None:
