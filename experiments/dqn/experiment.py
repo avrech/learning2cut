@@ -160,9 +160,11 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results',
-                        help='path to results root')
+                        help='path to save results')
     parser.add_argument('--datadir', type=str, default='data/dqn',
                         help='path to generate/read data')
+    parser.add_argument('--configfile', type=str, default='experiment_config',
+                        help='general experiment settings')
     parser.add_argument('--resume-training', action='store_true',
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',

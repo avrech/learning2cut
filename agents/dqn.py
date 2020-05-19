@@ -589,6 +589,9 @@ class DQN(Sepa):
 
     # done
     def load_checkpoint(self):
+        if not os.path.exists(self.checkpoint_filepath):
+            print('No checkpoint file founded!')
+            return
         checkpoint = torch.load(self.checkpoint_filepath)
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
@@ -600,5 +603,4 @@ class DQN(Sepa):
         self.loss_moving_avg = checkpoint['loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
-        self.optimizer
         print('Loaded checkpoint from: ', self.checkpoint_filepath)
