@@ -92,14 +92,16 @@ def experiment(hparams):
         if i_episode % hparams.get('log_freq', 100) == 0:
             dqn_agent.log_stats()
 
-        if i_episode % hparams.get('test_freq', 1000) == 0:
+        if i_episode % hparams.get('eval_freq', 1000) == 0:
             # evaluate the model on the validation and test sets
             dqn_agent.eval()
             for dataset, instances in validation_sets.items():
+                print('Evaluating ', dataset)
                 for G, baseline in instances:
                     execute_episode(G, baseline, dataset)
                 dqn_agent.log_stats(save_best=True)
             for dataset, instances in test_sets.items():
+                print('Evaluating ', dataset)
                 for G, baseline in instances:
                     execute_episode(G, baseline, dataset)
                 dqn_agent.log_stats()

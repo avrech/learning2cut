@@ -7,5 +7,5 @@ dataset_generation_seed: 36
 graph_size: 25
 dataset: easy_testset
 time_limit_sec: 600
-solver: gurobi
-lp_iterations_limit: 5000
+solver: scip
+save_all_stats: True

@@ -12,7 +12,6 @@ from separators.mccormick_cycle_separator import MccormickCycleSeparator
 import pickle
 import os
 import numpy as np
-from tqdm import tqdm
 import networkx as nx
 
 
@@ -20,6 +19,8 @@ def generate_dataset(config):
     ngraphs = config['ngraphs']
     nworkers = config['nworkers']
     workerid = config['workerid']
+    save_all_stats = config.get('save_all_stats', False)
+
     if config['workerid'] == config['nworkers'] - 1:
         worker_ngraphs = int(ngraphs - (nworkers-1)*np.floor(ngraphs / nworkers))
     else:
@@ -52,49 +53,98 @@ def generate_dataset(config):
                 w = {e: np.random.normal() for e in G.edges}
             nx.set_edge_attributes(G, w, name='weight')
 
-            # create a scip model
             if config['solver'] == 'scip':
-                model, x, y = maxcut_mccormic_model(G)
-                model.setRealParam('limits/time', config['time_limit_sec'])
                 sepa_hparams = {
-                    'max_per_root': 500,
-                    'max_per_node': 100,
+                    'max_per_root': 1000000,
+                    'max_per_node': 1000000,
                     'max_per_round': -1,
                     'cuts_budget': 1000000,
-                    'max_cuts_applied_node': 20,
-                    'max_cuts_applied_root': 20,
+                    'max_cuts_applied_node': 1000000,
+                    'max_cuts_applied_root': 1000000,
                     'record': True,
                 }
-                sepa = MccormickCycleSeparator(G=G, x=x, y=y, hparams=sepa_hparams)
-                model.includeSepa(sepa, "MLCycles",
+                # solve with B&C and the default cut selection
+                bnc_model, x, y = maxcut_mccormic_model(G, use_general_cuts=False)
+                bnc_sepa = MccormickCycleSeparator(G=G, x=x, y=y, hparams=sepa_hparams)
+                bnc_model.includeSepa(bnc_sepa, "MLCycles",
                                   "Generate cycle inequalities for MaxCut using McCormic variables exchange",
                                   priority=1000000,
                                   freq=1)
+                # set randomization seed
 
-                model.optimize()
-                sepa.finish_experiment()
+                if config.get('scip_seed', None) is not None:
+                    bnc_model.setBoolParam('randomization/permutevars', True)
+                    bnc_model.setIntParam('randomization/permutationseed', config.get('scip_seed'))
+                    bnc_model.setIntParam('randomization/randomseedshift', config.get('scip_seed'))
+                bnc_model.setRealParam('limits/time', config['time_limit_sec'])
+                bnc_model.optimize()
+                bnc_sepa.finish_experiment()
+
+                # now solve without branching
+                rootonly_model, rootonly_x, rootonly_y = maxcut_mccormic_model(G, use_general_cuts=False)
+                rootonly_sepa = MccormickCycleSeparator(G=G, x=rootonly_x, y=rootonly_y, hparams=sepa_hparams)
+                rootonly_model.includeSepa(
+                    rootonly_sepa, "MLCycles",
+                    "Generate cycle inequalities for MaxCut using McCormic variables exchange",
+                    priority=1000000,
+                    freq=1
+                )
+                rootonly_model.setRealParam('limits/time', config['time_limit_sec'])
+                rootonly_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+                rootonly_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+
+                # set up randomization
+                if config.get('scip_seed', None) is not None:
+                    rootonly_model.setBoolParam('randomization/permutevars', True)
+                    rootonly_model.setIntParam('randomization/permutationseed', config.get('scip_seed'))
+                    rootonly_model.setIntParam('randomization/randomseedshift', config.get('scip_seed'))
+
+                rootonly_model.optimize()
+                rootonly_sepa.finish_experiment()
+
+                # compute evaluation metrics
+                optimal_value = bnc_model.getObjVal()
+                optimal_gap = bnc_model.getGap()
+                bnc_lp_iterations = bnc_sepa.stats['lp_iterations']
+                bnc_dualbound = bnc_sepa.stats['dualbound']
+                bnc_gap = bnc_sepa.stats['gap']
+                rootonly_dualbound = rootonly_sepa.stats['dualbound']
+                rootonly_gap = rootonly_sepa.stats['gap']
+                rootonly_lp_iterations = rootonly_sepa.stats['lp_iterations']
+                lp_iterations_common_support = max(rootonly_lp_iterations[-1], bnc_lp_iterations[-1])
 
                 x_values = {}
                 y_values = {}
-                sol = model.getBestSol()
+                sol = bnc_model.getBestSol()
                 for i in G.nodes:
-                    x_values[i] = model.getSolVal(sol, x[i])
+                    x_values[i] = bnc_model.getSolVal(sol, x[i])
                 for e in G.edges:
-                    y_values[e] = model.getSolVal(sol, y[e])
-                if model.getGap() > 0:
-                    print('WARNING: graph no.{} not solved!')
+                    y_values[e] = bnc_model.getSolVal(sol, y[e])
+
+                if bnc_model.getGap() > 0:
+                    print('WARNING: {} not solved to optimality!'.format(filepath))
+                    is_optimal = False
+                else:
+                    is_optimal = True
+
                 cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
                 nx.set_edge_attributes(G, cut, name='cut')
                 nx.set_edge_attributes(G, y_values, name='y')
                 nx.set_node_attributes(G, x_values, name='x')
-                baseline = {'optimal_value': model.getObjVal()}
+                baseline = {'optimal_value': optimal_value,
+                            'is_optimal': is_optimal,
+                            'lp_iterations_common_support': lp_iterations_common_support
+                            }
+                if save_all_stats:
+                    baseline['bnc_stats'] = bnc_sepa.stats
+                    baseline['rootonly_stats'] = rootonly_sepa.stats
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, baseline), f)
 
             if config['solver'] == 'gurobi':
                 from utils.gurobi_models import maxcut_mccormic_model as gurobi_model
-                model, x, y = gurobi_model(G)
-                model.optimize()
+                bnc_model, x, y = gurobi_model(G)
+                bnc_model.optimize()
                 x_values = {}
                 y_values = {}
 
@@ -107,7 +157,7 @@ def generate_dataset(config):
                 nx.set_edge_attributes(G, cut, name='cut')
                 nx.set_edge_attributes(G, y_values, name='y')
                 nx.set_node_attributes(G, x_values, name='x')
-                baseline = {'optimal_value': model.getObjective().getValue()}
+                baseline = {'optimal_value': bnc_model.getObjective().getValue()}
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, baseline), f)
             print('saved graph to ', filepath)
@@ -130,12 +180,7 @@ if __name__ == '__main__':
 
     with open(args.configfile) as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
-    # config = dataset_config['constants']
-    # for k, v in dataset_config['sweep'].items():
-    #     if k == 'graph_idx':
-    #         config[k] = args.graphidx
-    #     else:
-    #         config[k] = v['values'][0]
+
     for k, v in vars(args).items():
         config[k] = v
 

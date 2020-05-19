@@ -6,6 +6,6 @@ graph_type: barabasi-albert
 dataset_generation_seed: 36
 graph_size: 100
 dataset: hard_testset
-time_limit_sec: 600
-solver: gurobi
-lp_iterations_limit: 100000
+time_limit_sec: 3600
+solver: scip
+save_all_stats: True

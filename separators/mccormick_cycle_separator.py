@@ -117,8 +117,8 @@ class MccormickCycleSeparator(Sepa):
             self.finish_experiment()
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
-        lp_iterations_limit = self.hparams.get('lp_iterations_limit', None)
-        if lp_iterations_limit is not None and self.model.getNLPIterations() >= lp_iterations_limit:
+        lp_iterations_limit = self.hparams.get('lp_iterations_limit', -1)
+        if lp_iterations_limit > 0 and self.model.getNLPIterations() >= lp_iterations_limit:
             # terminate
             self.finish_experiment()
             return {"result": SCIP_RESULT.DIDNOTRUN}
@@ -211,7 +211,8 @@ class MccormickCycleSeparator(Sepa):
             self._sepa_cnt += 1
             return {"result": SCIP_RESULT.SEPARATED}
         else:
-            print("Cut not found!")
+            if self.hparams.get('debug', False):
+                print("Cut not found!")
             return {"result": SCIP_RESULT.DIDNOTFIND}
 
     def update_dijkstra_edge_list(self):

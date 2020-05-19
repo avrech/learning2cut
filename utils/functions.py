@@ -1,6 +1,7 @@
 from heapq import heappop, heappush
 from collections import defaultdict
 import networkx as nx
+import numpy as np
 
 
 def dijkstra(edges, s, t):
@@ -108,3 +109,48 @@ def verify_maxcut_sol(model, x, G):
         if sol[i] != sol[j]:
             cut += edge_weights[(i, j)]
     return cut
+
+
+def get_normalized_areas(t, ft, t_support=None, reference=0):
+    """
+    Compute the area under f(t) vs. t on t_support
+    :param t: lp_iterations
+    :param ft: dualbound (or gap)
+    :param t_support:
+    :param reference: optimal dualbound (or 0 for gap integral)
+    :return: array of length = len(t) -1 , containing the area under the normalized curve
+    for each interval in t,
+    using 1st order interpolation to approximate ft between each adjacent points in t.
+    """
+
+    # if t[-1] < t_support, extend t to t_support
+    # and extend ft with a constant value ft[-1]
+    extended = False
+    t_support = t[-1] if t_support is None else t_support
+
+    if t[-1] < t_support:
+        ft.append(ft[-1])
+        t.append(t_support)
+        extended = True
+    ft = np.array(ft)
+    t = np.array(t)
+
+    # normalize ft to [0,1] according to the reference value,
+    # such that it will start from 1 and end at zero (if optimal).
+    # if ft is increasing function, we flip it to be decreasing.
+    ft = np.abs(ft - reference) / np.abs(ft[0])
+
+    # normalize t to [0,1]
+    t = t / t_support
+
+    # compute the area under the curve using first order interpolation
+    ft_diff = ft[1:] - ft[:-1]
+    t_diff = t[1:] - t[:-1]
+    ft_areas = t_diff * (ft[:-1] + ft_diff / 2)
+    if extended:
+        # add the extension area to the last transition area
+        ft_areas[-2] += ft_areas[-1]
+        # truncate the extension, and leave n-areas for the n-transition done
+        ft_areas = ft_areas[:-1]
+
+    return ft_areas

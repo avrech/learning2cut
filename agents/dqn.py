@@ -79,6 +79,8 @@ class DQN(Sepa):
         self.checkpoint_freq = hparams.get('checkpoint_freq', 100)
         self.walltime_offset = 0
         self.start_time = time()
+        self.last_time_sec = self.walltime_offset
+
 
         # file system paths
         self.logdir = hparams.get('logdir', 'results')
@@ -478,9 +480,10 @@ class DQN(Sepa):
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
-            # pad objective_area with zeros only for avoiding overflow
+            # in case of n_steps > 1, pad objective_area with zeros only for avoiding overflow
             max_index = np.max(indices)
-            objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
+            if max_index >= len(objective_area):
+                objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
             # take sliding windows of width n_step from objective_area
             # with minus because we want to minimize the area under the curve
 
@@ -537,21 +540,29 @@ class DQN(Sepa):
         """
         if save_best:
             self._save_if_best()
+        cur_time_sec = time() - self.start_time + self.walltime_offset
         print(f'Episode {self.i_episode} \t| ', end='')
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
             print('{}: {:.4f} \t| '.format(k, avg), end='')
             self.writer.add_scalar(k + '/' + self.dataset, avg,
                                    global_step=self.i_episode,
-                                   walltime=time() - self.start_time + self.walltime_offset)
+                                   walltime=cur_time_sec)
             self.tmp_stats_buffer[k] = []
         # log the average loss of the last training session
-        print('Training Loss: {:.4f} \t| '.format(self.loss_moving_avg), end='')
+        print('Loss: {:.4f} \t| '.format(self.loss_moving_avg), end='')
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
                                global_step=self.i_episode,
-                               walltime=time() - self.start_time + self.walltime_offset)
-        print(f'Step: {self.steps_done} \t|', end='')
-        print(f'Time: {time() - self.start_time + self.walltime_offset}')
+                               walltime=cur_time_sec)
+        print(f'Step: {self.steps_done} \t| ', end='')
+
+        d = int(np.floor(cur_time_sec/(3600*24)))
+        h = int(np.floor(cur_time_sec/3600) - 24*d)
+        m = int(np.floor(cur_time_sec/60) - 60*(24*d + h))
+        s = int(cur_time_sec) % 60
+        print('Iteration Time: {:.1f}[sec]\t| '.format(cur_time_sec - self.last_time_sec), end='')
+        print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
+        self.last_time_sec = cur_time_sec
 
     # done
     def save_checkpoint(self, filepath=None):
