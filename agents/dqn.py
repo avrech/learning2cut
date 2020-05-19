@@ -105,7 +105,6 @@ class DQN(Sepa):
         self.cut_generator = None
         self.nseparounds = 0
         self.dataset = 'trainset'  # or <easy/medium/hard>_<validset/testset>
-        self.finalized = False
 
         # logging
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
@@ -138,7 +137,6 @@ class DQN(Sepa):
         self.cut_generator = cut_generator
         self.nseparounds = 0
         self.dataset = dataset
-        self.finalized = False
 
     # done
     def _select_action(self, scip_state):
@@ -310,24 +308,23 @@ class DQN(Sepa):
         # so in this case we should just jump out,
         # without storing the current state-action pair,
         # since the terminal state is not important.
-        # we also mark episode as finalized, to avoid double computations in finish_episode()
-        if available_cuts['ncuts'] == 0:
-            self.finalized = True
-            return
-
-        else:
+        if available_cuts['ncuts'] > 0:
 
             # select an action
-            action = self._select_action(cur_state).detach().cpu().numpy().astype(np.int32)
+            action = self._select_action(cur_state).detach().cpu().numpy().astype(np.bool)
             available_cuts['selected'] = action
             # force SCIP to take the selected cuts in action and discard the others
             if sum(action) > 0:
                 # need to do it onlt if there are selected actions
                 self.model.forceCuts(action)
-            # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
-            # in order to prevent it from adding more or less cuts
-            self.model.setIntParam('separating/maxcuts', int(sum(action)))
-            self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+                # in order to prevent it from adding more or less cuts
+                self.model.setIntParam('separating/maxcuts', int(sum(action)))
+                self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+            else:
+                # TODO we need somehow to tell scip to stop cutting, without breaking the system. 
+                # flush the separation storage
+                self.model.clearCuts()
 
             # SCIP will execute the action,
             # and return here in the next LP round -
@@ -344,10 +341,14 @@ class DQN(Sepa):
         Compute rewards, push transitions into memory
         and log stats
         """
-        # in a case the episode terminated due to node_limit or lp_iterations_limit,
-        # we need to compute by hand the tightness of the last action,
+        # SCIP can terminate an episode (due to, say, node_limit or lp_iterations_limit)
+        # after executing the LP without calling DQN.
+        # In this case we need to compute by hand the tightness of the last action taken,
         # because the solver allowes to access the information only in SCIP_STAGE.SOLVING
-        if not self.finalized:
+        if self.cut_generator is not None:
+            assert self.nseparounds == self.cut_generator.nseparounds
+
+        if self.prev_action.get('tightness_penalty', None) is None:
             nvars = self.model.getNVars()
             ncuts = self.prev_action['ncuts']
             cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
@@ -361,7 +362,7 @@ class DQN(Sepa):
             # tightness of all cuts added at the previous round (including the discarded cuts)
             tightness = self.prev_action['rhss'] - cuts_matrix @ sol_vector
             # assign tightness penalty only to the selected cuts.
-            self.prev_action['tightness_penalty'] = np.zeros_like(self.prev_action['selected'])
+            self.prev_action['tightness_penalty'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
             self.prev_action['tightness_penalty'][self.prev_action['selected']] = tightness[self.prev_action['selected']]
             # assume that all the selected actions were actually applied,
             # although we cannot verify it
@@ -387,7 +388,7 @@ class DQN(Sepa):
         self.nseparounds += 1
         if self.cut_generator is not None:
             assert self.nseparounds == self.cut_generator.nseparounds
-            assert self.nseparounds == self.model.getNLPs()
+            # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
 
         if self.model.getNLPIterations() < self.hparams.get('lp_iterations_limit', 100000):
             self._do_dqn_step()
@@ -501,6 +502,8 @@ class DQN(Sepa):
                 if self.hparams.get('credit_assignment', True):
                     credit = 1 + tightness_penalty
                     reward = joint_reward * credit
+                else:
+                    reward = joint_reward * np.ones_like(tightness_penalty)
 
                 transition = get_transition(state, action['selected'], reward, next_state)
                 self.memory.push(transition)
@@ -514,7 +517,7 @@ class DQN(Sepa):
             approximately_zero = np.abs(tightness_penalty) < 1e-6
             tightness_penalty[approximately_zero] = 0
 
-            applied = action['applied'].astype(np.bool)
+            applied = action['applied']
             is_active = tightness_penalty[applied] == 0
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
@@ -587,5 +590,5 @@ class DQN(Sepa):
         self.loss_moving_avg = checkpoint['loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
-        self.optimizer.to(self.device)
+        self.optimizer
         print('Loaded checkpoint from: ', self.checkpoint_filepath)

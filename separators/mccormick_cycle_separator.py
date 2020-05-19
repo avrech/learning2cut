@@ -539,7 +539,7 @@ if __name__ == "__main__":
     seed = 223
     G = nx.barabasi_albert_graph(n, m, seed=seed)
     nx.set_edge_attributes(G, {e: np.random.normal() for e in G.edges}, name='weight')
-    model, x, y = maxcut_mccormic_model(G, use_cuts=False)
+    model, x, y = maxcut_mccormic_model(G, use_general_cuts=False)
     # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
     hparams = {'max_per_root': 200000,

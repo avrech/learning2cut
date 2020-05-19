@@ -41,7 +41,7 @@ def generate_examples_from_graph(config):
         G = pickle.load(f)
 
     scip_seed = config['scip_seed']
-    model, x, y = maxcut_mccormic_model(G, use_cuts=False)
+    model, x, y = maxcut_mccormic_model(G, use_general_cuts=False)
 
     sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=config)
 

@@ -5,7 +5,7 @@ from collections import OrderedDict
 
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
-                          use_presolve=True, use_heuristics=True, use_cuts=True, use_propagation=True):
+                          use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True):
     r"""
     Returns MAXCUT model of G assuming edge attributes named 'weight', denoted by `w`.
 
@@ -66,7 +66,7 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
         model.setIntParam("propagating/maxrounds", 0)
         model.setIntParam("propagating/maxroundsroot", 0)
     # turn off some cuts
-    if not use_cuts:
+    if not use_general_cuts:
         model.setIntParam("separating/strongcg/freq", -1)
         model.setIntParam("separating/gomory/freq", -1)
         model.setIntParam("separating/aggregation/freq", -1)

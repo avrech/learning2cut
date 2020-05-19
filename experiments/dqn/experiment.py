@@ -36,7 +36,7 @@ def experiment(hparams):
 
     def execute_episode(G, baseline, dataset='trainset'):
         # create SCIP model for G
-        model, x, y = maxcut_mccormic_model(G, use_cuts=False)  # disable default cuts
+        model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))  # disable default cuts
 
         # set the appropriate lp_iterations_limit
         hparams['lp_iterations_limit'] = hparams[dataset]['lp_iterations_limit']
@@ -67,7 +67,8 @@ def experiment(hparams):
             model.setIntParam('randomization/permutationseed', hparams.get('scip_seed'))
             model.setIntParam('randomization/randomseedshift', hparams.get('scip_seed'))
 
-        # model.hideOutput()
+        if hparams.get('hide_scip_output', True):
+            model.hideOutput()
 
         # gong! run episode
         model.optimize()
@@ -82,16 +83,16 @@ def experiment(hparams):
 
         execute_episode(G, baseline)
 
-        if i_episode % hparams.get('backprop_interval', 10) == 0:
+        if i_episode % hparams.get('backprop_freq', 10) == 0:
             dqn_agent.optimize_model()
 
-        if i_episode % hparams.get('target_update_interval', 1000) == 0:
+        if i_episode % hparams.get('target_update_freq', 1000) == 0:
             dqn_agent.update_target()
 
-        if i_episode % hparams.get('log_interval', 100) == 0:
+        if i_episode % hparams.get('log_freq', 100) == 0:
             dqn_agent.log_stats()
 
-        if i_episode % hparams.get('test_interval', 1000) == 0:
+        if i_episode % hparams.get('test_freq', 1000) == 0:
             # evaluate the model on the validation and test sets
             dqn_agent.eval()
             for dataset, instances in validation_sets.items():
@@ -104,7 +105,7 @@ def experiment(hparams):
                 dqn_agent.log_stats()
             dqn_agent.train()
 
-        if i_episode % hparams.get('checkpoint_interval', 100) == 0:
+        if i_episode % hparams.get('checkpoint_freq', 100) == 0:
             dqn_agent.save_checkpoint()
 
         if i_episode % len(graph_indices) == 0:
@@ -116,16 +117,26 @@ def experiment(hparams):
 if __name__ == '__main__':
     import argparse
     import yaml
-
+    import sys
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results',
                         help='path to results root')
     parser.add_argument('--datadir', type=str, default='data/dqn',
                         help='path to generate/read data')
-    parser.add_argument('--resume_training', action='store_true',
-                        help='path to generate/read data')
-
+    parser.add_argument('--resume-training', action='store_true',
+                        help='set to load the last training status from checkpoint file')
+    parser.add_argument('--mixed-debug', action='store_true',
+                        help='set for mixed python/c debugging')
     args = parser.parse_args()
+    if args.mixed_debug:
+        import ptvsd
+        port = 3000
+        # ptvsd.enable_attach(secret='my_secret', address =('127.0.0.1', port))
+        ptvsd.enable_attach(address=('127.0.0.1', port))
+        ptvsd.wait_for_attach()
+
+
 
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)

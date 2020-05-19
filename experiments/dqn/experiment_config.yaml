@@ -1,12 +1,34 @@
+# DQN TRAINING
 num_episodes: 1000000
 batch_size: 4
 mini_batch_size: 2
 n_sgd_epochs: 2
-nstep_learning: 1
+nstep_learning: 4
+backprop_freq: 1
+target_update_freq: 2
+
+memory_capacity: 100
+value_aggr: mean
+credit_assignment: False
+gamma: 0.99
+eps_start: 0.9
+eps_end: 0.05
+eps_decay: 100000
+
+dqn_objective: dualbound_integral
+
+# GENERAL
 debug: False
-lp_iterations_limit: 100000
-reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
-log_interval: 1
-checkpoint_interval: 2
-backprop_interval: 1
+log_freq: 1
+checkpoint_freq: 100
 use_gpu: False
+test_freq: 1000
+hide_scip_output: False
+
+# SCIP STUFF
+reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
+use_general_cuts: False
+
+# CYCLE INEQUALITIES
+chordless_only: False
+simple_cycle_only: True
