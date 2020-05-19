@@ -91,7 +91,7 @@ def generate_dataset(config):
                 )
                 rootonly_model.setRealParam('limits/time', config['time_limit_sec'])
                 rootonly_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
-                rootonly_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+                # rootonly_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
                 # set up randomization
                 if config.get('scip_seed', None) is not None:
@@ -101,17 +101,6 @@ def generate_dataset(config):
 
                 rootonly_model.optimize()
                 rootonly_sepa.finish_experiment()
-
-                # compute evaluation metrics
-                optimal_value = bnc_model.getObjVal()
-                optimal_gap = bnc_model.getGap()
-                bnc_lp_iterations = bnc_sepa.stats['lp_iterations']
-                bnc_dualbound = bnc_sepa.stats['dualbound']
-                bnc_gap = bnc_sepa.stats['gap']
-                rootonly_dualbound = rootonly_sepa.stats['dualbound']
-                rootonly_gap = rootonly_sepa.stats['gap']
-                rootonly_lp_iterations = rootonly_sepa.stats['lp_iterations']
-                lp_iterations_common_support = max(rootonly_lp_iterations[-1], bnc_lp_iterations[-1])
 
                 x_values = {}
                 y_values = {}
@@ -131,9 +120,9 @@ def generate_dataset(config):
                 nx.set_edge_attributes(G, cut, name='cut')
                 nx.set_edge_attributes(G, y_values, name='y')
                 nx.set_node_attributes(G, x_values, name='x')
-                baseline = {'optimal_value': optimal_value,
+                baseline = {'optimal_value': bnc_model.getObjVal(),
                             'is_optimal': is_optimal,
-                            'lp_iterations_common_support': lp_iterations_common_support
+                            'lp_iterations_limit': rootonly_model.getNLPIterations()
                             }
                 if save_all_stats:
                     baseline['bnc_stats'] = bnc_sepa.stats

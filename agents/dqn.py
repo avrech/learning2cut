@@ -14,6 +14,7 @@ from torch_geometric.data.batch import Batch
 from torch_scatter import scatter_mean, scatter_max
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
+from utils.functions import get_normalized_areas
 
 
 class ReplayMemory(object):
@@ -106,7 +107,8 @@ class DQN(Sepa):
         }
         self.cut_generator = None
         self.nseparounds = 0
-        self.dataset = 'trainset'  # or <easy/medium/hard>_<validset/testset>
+        self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
+        self.lp_iterations_limit = -1
 
         # logging
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
@@ -117,11 +119,11 @@ class DQN(Sepa):
         self.loss_moving_avg = 0
 
     # done
-    def init_episode(self, G, x, y, cut_generator=None, baseline=None, dataset='trainset'):
+    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset'):
         self.G = G
         self.x = x
         self.y = y
-        self.baseline = baseline  # todo, generate baseline where?
+        self.baseline = baseline
         self.action = None
         self.prev_action = None
         self.prev_state = None
@@ -138,7 +140,8 @@ class DQN(Sepa):
         }
         self.cut_generator = cut_generator
         self.nseparounds = 0
-        self.dataset = dataset
+        self.dataset_name = dataset_name
+        self.lp_iterations_limit = lp_iterations_limit
 
     # done
     def _select_action(self, scip_state):
@@ -392,7 +395,7 @@ class DQN(Sepa):
             assert self.nseparounds == self.cut_generator.nseparounds
             # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
 
-        if self.model.getNLPIterations() < self.hparams.get('lp_iterations_limit', 100000):
+        if self.model.getNLPIterations() < self.lp_iterations_limit:
             self._do_dqn_step()
         # return {"result": SCIP_RESULT.DIDNOTRUN}
         return {"result": SCIP_RESULT.DIDNOTFIND}
@@ -432,7 +435,7 @@ class DQN(Sepa):
         3. nactive/napplied,
         4. napplied/navailable
         """
-        lp_iterations_limit = self.hparams.get('lp_iterations_limit', 100000)
+        lp_iterations_limit = self.lp_iterations_limit
         gap = self.episode_stats['gap']
         dualbound = self.episode_stats['dualbound']
         lp_iterations = self.episode_stats['lp_iterations']
@@ -545,7 +548,7 @@ class DQN(Sepa):
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
             print('{}: {:.4f} \t| '.format(k, avg), end='')
-            self.writer.add_scalar(k + '/' + self.dataset, avg,
+            self.writer.add_scalar(k + '/' + self.dataset_name, avg,
                                    global_step=self.i_episode,
                                    walltime=cur_time_sec)
             self.tmp_stats_buffer[k] = []
@@ -584,9 +587,9 @@ class DQN(Sepa):
         The performance is the -(dualbound/gap integral),
         according to the DQN objective"""
         perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
-        if perf > self.best_perf[self.dataset]:
-            self.best_perf[self.dataset] = perf
-            self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset}_checkpoint.pt'))
+        if perf > self.best_perf[self.dataset_name]:
+            self.best_perf[self.dataset_name] = perf
+            self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_name}_checkpoint.pt'))
 
     # done
     def load_checkpoint(self):

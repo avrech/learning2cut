@@ -1,4 +1,4 @@
-from pyscipopt import Sepa
+from pyscipopt import Sepa, SCIP_STAGE
 from time import time
 import networkx as nx
 from pyscipopt import SCIP_RESULT
@@ -169,8 +169,11 @@ class MccormickCycleSeparator(Sepa):
         self.stats['nchordless'].append(self.nchordless)
         self.stats['nsimple'].append(self.nsimple)
         self.stats['ncycles'].append(self.ncycles)
-        self.model.queryRows(self.current_round_cycles)
-        self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
+        if self.model.getStage() == SCIP_STAGE.SOLVING:
+            self.model.queryRows(self.current_round_cycles)
+            self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
+        else:
+            self.stats['nchordless_applied'].append(0)  # pessimistic estimate
 
     def separate(self):
         self.current_round_cycles = {}
@@ -377,7 +380,7 @@ class MccormickCycleSeparator(Sepa):
         model.cacheRowExtensions(cut)
         x = self.x
         y = self.y
-        self.current_round_cycles[name] = {'is_chordless': is_chordless, 'is_simple': is_simple}
+        self.current_round_cycles[name] = {'is_chordless': is_chordless, 'is_simple': is_simple, 'applied': False}
         # # TODO: !!! BUG !!!
         # # cycle inequlity should be:
         # # \sum_{e \in F} x_e - \sum_{e \in C\F} x_e <= |F|-1

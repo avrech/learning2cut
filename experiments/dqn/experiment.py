@@ -9,22 +9,62 @@ import pickle
 import os
 import torch
 from agents.dqn import DQN
+from utils.functions import get_normalized_areas
+import numpy as np
 
 
 def experiment(hparams):
-    # read datasets
+    # datasets and baselines
     dataset_paths = {}
     datasets = {}
     for dataset in ['trainset', 'easy_validset', 'medium_validset', 'hard_validset', 'easy_testset', 'medium_testset', 'hard_testset']:
         dataset_paths[dataset] = os.path.join(hparams['datadir'], dataset, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(hparams[dataset]['graph_size'], hparams[dataset]['barabasi_albert_m'], hparams[dataset]['weights'], hparams[dataset]['dataset_generation_seed']))
+
         # read all graphs with their baselines from disk
-        datasets[dataset] = []
+        # and find the max lp_iterations_limit across all instances
+        datasets[dataset] = {'instances': []}
+        lp_iterations_limit = 0
         for filename in os.listdir(dataset_paths[dataset]):
             with open(os.path.join(dataset_paths[dataset], filename), 'rb') as f:
-                datasets[dataset].append(pickle.load(f))
+                G, baseline = pickle.load(f)
+                if baseline['is_optimal']:
+                    lp_iterations_limit = max(lp_iterations_limit, baseline['lp_iterations_limit'])
+                    datasets[dataset]['instances'].append((G, baseline))
+                else:
+                    print(filename, ' is not solved to optimality')
+        datasets[dataset]['lp_iterations_limit'] = lp_iterations_limit
+
     trainset = datasets['trainset']
     validation_sets = {k: datasets[k] for k in ['easy_validset', 'medium_validset', 'hard_validset']}
     test_sets = {k: datasets[k] for k in ['easy_testset', 'medium_testset', 'hard_testset']}
+
+    # for the validation and test datasets compute some metrics:
+    for dataset in list(validation_sets.values()) + list(test_sets.values()):
+        dualbound_integral_list = []
+        gap_integral_list = []
+        for (_, baseline) in dataset['instances']:
+            optimal_value = baseline['optimal_value']
+            dualbound = baseline['rootonly_stats']['dualbound']
+            gap = baseline['rootonly_stats']['gap']
+            lpiter = baseline['rootonly_stats']['lp_iterations']
+            dualbound_integral = get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value)
+            gap_integral = get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0)
+            baseline['dualbound_integral'] = dualbound_integral
+            baseline['gap_integral'] = gap_integral
+            dualbound_integral_list.append(dualbound_integral)
+            gap_integral_list.append(gap_integral)
+        # compute stats for the whole dataset
+        dualbound_integral_avg = np.mean(dualbound_integral)
+        dualbound_integral_std = np.std(dualbound_integral)
+        gap_integral_avg = np.mean(gap_integral)
+        gap_integral_std = np.std(gap_integral)
+        dataset['stats'] = {}
+        dataset['stats']['dualbound_integral_avg'] = dualbound_integral_avg
+        dataset['stats']['dualbound_integral_std'] = dualbound_integral_std
+        dataset['stats']['gap_integral_avg'] = gap_integral_avg
+        dataset['stats']['gap_integral_std'] = gap_integral_std
+
+    # training
     graph_indices = torch.randperm(len(trainset))
 
     # dqn agent
@@ -34,12 +74,9 @@ def experiment(hparams):
     if hparams.get('resume_training', False):
         dqn_agent.load_checkpoint()
 
-    def execute_episode(G, baseline, dataset='trainset'):
+    def execute_episode(G, baseline, lp_iterations_limit, dataset_name='trainset'):
         # create SCIP model for G
         model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))  # disable default cuts
-
-        # set the appropriate lp_iterations_limit
-        hparams['lp_iterations_limit'] = hparams[dataset]['lp_iterations_limit']
 
         # include cycle inequalities separator with high priority
         cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
@@ -48,7 +85,7 @@ def experiment(hparams):
                           priority=1000000, freq=1)
 
         # reset dqn_agent to start a new episode
-        dqn_agent.init_episode(G, x, y, cut_generator=cycle_sepa, baseline=baseline, dataset=dataset)
+        dqn_agent.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline, dataset_name=dataset_name)
 
         # include dqn_agent, setting lower priority than the cycle inequalities separator
         model.includeSepa(dqn_agent, 'DQN', 'Cut selection agent',
