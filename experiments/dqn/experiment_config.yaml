@@ -1,25 +1,29 @@
 # DQN TRAINING
-num_episodes: 1000000
-batch_size: 4
-mini_batch_size: 2
-n_sgd_epochs: 2
+num_episodes: 2000000
+batch_size: 4096
+mini_batch_size: 1024
+n_sgd_epochs: 4
+lr: 0.001
+weight_decay: 0.0001
 nstep_learning: 1
-backprop_freq: 5
-target_update_freq: 100
-
-memory_capacity: 100
+backprop_freq: 10
+target_update_freq: 1000
 value_aggr: mean
 credit_assignment: True
 gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
-eps_decay: 100000
-
+eps_decay: 200000
+memory_capacity: 200000
 dqn_objective: dualbound_integral
 
-log_freq: 5
-eval_freq: 1000
-checkpoint_freq: 20
+# GNN
+emb_dim: 128
+cuts_embedding_aggr: mean
+
+log_freq: 10
+eval_freq: 100
+checkpoint_freq: 50
 
 # GENERAL
 debug: False

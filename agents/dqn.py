@@ -64,7 +64,7 @@ class DQN(Sepa):
         self.target_net = Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
-        self.optimizer = optim.Adam(self.policy_net.parameters())
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
         # value aggregation method for the target Q values
         if hparams.get('value_aggr', 'mean') == 'max':
             self.aggr_func = scatter_max

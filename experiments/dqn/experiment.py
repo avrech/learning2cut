@@ -47,8 +47,8 @@ def experiment(hparams):
             dualbound = baseline['rootonly_stats']['dualbound']
             gap = baseline['rootonly_stats']['gap']
             lpiter = baseline['rootonly_stats']['lp_iterations']
-            dualbound_integral = get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value)
-            gap_integral = get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0)
+            dualbound_integral = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
+            gap_integral = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
             baseline['dualbound_integral'] = dualbound_integral
             baseline['gap_integral'] = gap_integral
             dualbound_integral_list.append(dualbound_integral)
@@ -116,9 +116,9 @@ def experiment(hparams):
     for i_episode in range(dqn_agent.i_episode+1, hparams['num_episodes']):
         # sample graph randomly
         graph_idx = graph_indices[i_episode % len(graph_indices)]
-        G, baseline = trainset[graph_idx]
+        G, baseline = trainset['instances'][graph_idx]
 
-        execute_episode(G, baseline)
+        execute_episode(G, baseline, trainset['lp_iterations_limit'])
 
         if i_episode % hparams.get('backprop_freq', 10) == 0:
             dqn_agent.optimize_model()
@@ -132,15 +132,15 @@ def experiment(hparams):
         if i_episode % hparams.get('eval_freq', 1000) == 0:
             # evaluate the model on the validation and test sets
             dqn_agent.eval()
-            for dataset, instances in validation_sets.items():
-                print('Evaluating ', dataset)
-                for G, baseline in instances:
-                    execute_episode(G, baseline, dataset)
+            for dataset_name, dataset in validation_sets.items():
+                print('Evaluating ', dataset_name)
+                for G, baseline in dataset['instances']:
+                    execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name)
                 dqn_agent.log_stats(save_best=True)
-            for dataset, instances in test_sets.items():
-                print('Evaluating ', dataset)
-                for G, baseline in instances:
-                    execute_episode(G, baseline, dataset)
+            for dataset_name, dataset in test_sets.items():
+                print('Evaluating ', dataset_name)
+                for G, baseline in dataset['instances']:
+                    execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name)
                 dqn_agent.log_stats()
             dqn_agent.train()
 
