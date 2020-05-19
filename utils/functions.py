@@ -129,8 +129,8 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
     t_support = t[-1] if t_support is None else t_support
 
     if t[-1] < t_support:
-        ft.append(ft[-1])
-        t.append(t_support)
+        ft = ft + [ft[-1]]
+        t = t + [t_support]
         extended = True
     ft = np.array(ft)
     t = np.array(t)
