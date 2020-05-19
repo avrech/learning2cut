@@ -115,6 +115,7 @@ class DQN(Sepa):
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'dualbound_integral': [], 'gap_integral': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
+        self.test_stats_buffer = {'db_int_improvement': [], 'gap_int_improvement': []}
         self.best_perf = {'easy_validset': -1000000, 'medium_validset': -1000000, 'hard_validset': -1000000}
         self.loss_moving_avg = 0
 
@@ -440,40 +441,10 @@ class DQN(Sepa):
         dualbound = self.episode_stats['dualbound']
         lp_iterations = self.episode_stats['lp_iterations']
 
-        # extend the dualbound and lp_iterations to a common support
-        extended = False
-        if lp_iterations[-1] < lp_iterations_limit:
-            gap.append(gap[-1])
-            dualbound.append(dualbound[-1])
-            lp_iterations.append(lp_iterations_limit)
-            extended = True
-        gap = np.array(gap)
-        dualbound = np.array(dualbound)
-        lp_iterations = np.array(lp_iterations)
+        # compute the area under the curve:
+        dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
+        gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
 
-        # normalize the dualbound (according to the optimal_value) to [0,1]
-        # such that it will start from 1 and end at zero (if optimal)
-        dualbound = np.abs(dualbound - self.baseline['optimal_value']) / dualbound[0]
-
-        # normalize the gap to start at 1 and end at zero (if optimal)
-        gap = gap / gap[0]
-
-        # normalize lp_iterations to [0,1]
-        lp_iterations = lp_iterations / lp_iterations_limit
-
-        # compute the area under the curve using first order interpolation
-        gap_diff = gap[1:] - gap[:-1]
-        dualbound_diff = dualbound[1:] - dualbound[:-1]
-        lp_iterations_diff = lp_iterations[1:] - lp_iterations[:-1]
-        gap_area = lp_iterations_diff * (gap[:-1] + gap_diff/2)
-        dualbound_area = lp_iterations_diff * (dualbound[:-1] + dualbound_diff/2)
-        if extended:
-            # add the extension area to the last transition area
-            gap_area[-2] += gap_area[-1]
-            dualbound_area[-2] += dualbound_area[-1]
-            # truncate the extension, and leave n-areas for the n-transition done
-            gap_area = gap_area[:-1]
-            dualbound_area = dualbound_area[:-1]
         objective_area = dualbound_area if self.dqn_objective == 'dualbound_integral' else gap_area
 
         if self.training:
@@ -528,10 +499,16 @@ class DQN(Sepa):
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
         # store episode results in tmp_stats_buffer
-        self.tmp_stats_buffer['dualbound_integral'].append(sum(dualbound_area))
-        self.tmp_stats_buffer['gap_integral'].append(sum(gap_area))
+        dualbound_integral = sum(dualbound_area)
+        gap_integral = sum(gap_area)
+        self.tmp_stats_buffer['dualbound_integral'].append(dualbound_integral)
+        self.tmp_stats_buffer['gap_integral'].append(gap_integral)
         self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
         self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
+        if self.baseline.get('dualbound_integral', None) is not None:
+            # this is evaluation round.
+            self.test_stats_buffer['db_int_improvement'].append(dualbound_integral/self.baseline['dualbound_integral'])
+            self.test_stats_buffer['gap_int_improvement'].append(gap_integral/self.baseline['gap_integral'])
 
     # done
     def log_stats(self, save_best=False):
@@ -547,11 +524,30 @@ class DQN(Sepa):
         print(f'Episode {self.i_episode} \t| ', end='')
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
+            std = np.std(vals)
             print('{}: {:.4f} \t| '.format(k, avg), end='')
             self.writer.add_scalar(k + '/' + self.dataset_name, avg,
                                    global_step=self.i_episode,
                                    walltime=cur_time_sec)
+            self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std,
+                                   global_step=self.i_episode,
+                                   walltime=cur_time_sec)
+
             self.tmp_stats_buffer[k] = []
+
+        if len(self.test_stats_buffer['db_int_improvement']) > 0:
+            for k, vals in self.test_stats_buffer.items():
+                avg = np.mean(vals)
+                std = np.std(vals)
+                print('{}: {:.4f} \t| '.format(k, avg), end='')
+                self.writer.add_scalar(k + '/' + self.dataset_name, avg,
+                                       global_step=self.i_episode,
+                                       walltime=cur_time_sec)
+                self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std,
+                                       global_step=self.i_episode,
+                                       walltime=cur_time_sec)
+                self.test_stats_buffer[k] = []
+
         # log the average loss of the last training session
         print('Loss: {:.4f} \t| '.format(self.loss_moving_avg), end='')
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
