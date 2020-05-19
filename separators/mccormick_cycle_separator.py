@@ -74,8 +74,11 @@ class MccormickCycleSeparator(Sepa):
             'gap': [],
             'lp_rounds': [],
             'lp_iterations': [],
-            'dualbound': []
+            'dualbound': [],
+            'nchordless': [],
+            'ncycles': [],
         }
+        self.current_round_cycles = {}
         self.nseparounds = 0
         self._sepa_cnt = 0
         self._separation_efficiency = 0
@@ -84,6 +87,9 @@ class MccormickCycleSeparator(Sepa):
         self.ncuts_applied_at_entering_cur_node = 0
         self._cur_node = 0  # invalid. root node index is 1
         self.finished = False
+        self.nchordless = 0
+        self.nsimple = 0
+        self.ncycles = 0
 
         # debug cutoff events
         self.debug_cutoff = hparams.get('debug_cutoff', False)
@@ -158,8 +164,12 @@ class MccormickCycleSeparator(Sepa):
         self.stats['lp_rounds'].append(self.model.getNLPs() - self._lp_rounds_probing)
         self.stats['lp_iterations'].append(self.model.getNLPIterations() - self._lp_iterations_probing)
         self.stats['dualbound'].append(self.model.getDualbound())
+        self.stats['nchordless'].append(self.nchordless)
+        self.stats['nsimple'].append(self.nsimple)
+        self.stats['ncycles'].append(self.ncycles)
 
     def separate(self):
+        self.current_round_cycles = {}
         # if exceeded limit of cuts per node ,then exit and branch or whatever else.
         cur_node = self.model.getCurrentNode().getNumber()
         self.ncuts_applied_at_cur_node = self.model.getNCutsApplied() - self.ncuts_applied_at_entering_cur_node
@@ -239,6 +249,11 @@ class MccormickCycleSeparator(Sepa):
         self._dijkstra_edge_list = edge_list
 
     def find_violated_cycles(self, x):
+        # reset counters for the current separation round
+        self.nchordless = 0
+        self.nsimple = 0
+        self.ncycles = 0
+
         # sort the variables according to most infeasibility:
         distance_from_half = np.abs(x - 0.5)
         most_infeasible_nodes = np.argsort(distance_from_half)
@@ -257,6 +272,13 @@ class MccormickCycleSeparator(Sepa):
             if cost < 1 \
                     and (not self.chordless_only or self.is_chordless(closed_walk)) \
                     and (not self.simple_cycle_only or self.is_simple_cycle(closed_walk)):
+
+                is_chordless = self.is_chordless(closed_walk)
+                is_simple = self.is_simple_cycle(closed_walk)
+                self.nchordless += self.is_chordless(closed_walk)
+                self.nsimple += self.is_simple_cycle(closed_walk)
+                self.ncycles += 1
+
                 cycle_edges, F, C_minus_F = [], [], []
                 for idx, (i, i_side) in enumerate(closed_walk[:-1]):
                     j, j_side = closed_walk[idx + 1]
@@ -270,7 +292,7 @@ class MccormickCycleSeparator(Sepa):
                 F.sort(key=operator.itemgetter(0, 1))
                 C_minus_F.sort(key=operator.itemgetter(0, 1))
                 if (tuple(F), tuple(C_minus_F)) not in already_added:
-                    violated_cycles.append((cycle_edges, F, C_minus_F))
+                    violated_cycles.append((cycle_edges, F, C_minus_F, is_chordless, is_simple))
                     costs.append(cost)
                     already_added.add((tuple(F), tuple(C_minus_F)))
 
@@ -341,7 +363,7 @@ class MccormickCycleSeparator(Sepa):
         # and basically do what we do here: cacheRowExtension etc up to releaseRow
 
         # add the cycle variables to the new row
-        cycle_edges, F, C_minus_F = violated_cycle
+        cycle_edges, F, C_minus_F, is_chordless, is_simple = violated_cycle
 
         cutrhs = len(F) - 1
         name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
@@ -351,7 +373,7 @@ class MccormickCycleSeparator(Sepa):
         model.cacheRowExtensions(cut)
         x = self.x
         y = self.y
-
+        self.current_round_cycles[name] = {'is_chordless': is_chordless, 'is_simple': is_simple}
         # # TODO: !!! BUG !!!
         # # cycle inequlity should be:
         # # \sum_{e \in F} x_e - \sum_{e \in C\F} x_e <= |F|-1
