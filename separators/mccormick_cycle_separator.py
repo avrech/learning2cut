@@ -76,7 +76,9 @@ class MccormickCycleSeparator(Sepa):
             'lp_iterations': [],
             'dualbound': [],
             'nchordless': [],
+            'nsimple': [],
             'ncycles': [],
+            'nchordless_applied': [],
         }
         self.current_round_cycles = {}
         self.nseparounds = 0
@@ -129,7 +131,7 @@ class MccormickCycleSeparator(Sepa):
             self.finish_experiment()
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
-        self.update_stats()
+        self.update_stats()  # must be called before self.separate() is called
 
         if self.policy == 'adaptive' and self.nseparounds % self.policy_update_freq == 0:
             config = self.starting_policies.pop(0) if len(self.starting_policies) > 0 else {}
@@ -167,6 +169,8 @@ class MccormickCycleSeparator(Sepa):
         self.stats['nchordless'].append(self.nchordless)
         self.stats['nsimple'].append(self.nsimple)
         self.stats['ncycles'].append(self.ncycles)
+        self.model.queryRows(self.current_round_cycles)
+        self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
 
     def separate(self):
         self.current_round_cycles = {}
