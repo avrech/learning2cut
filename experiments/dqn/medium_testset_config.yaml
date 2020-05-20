@@ -3,7 +3,7 @@ scip_seed: 52
 barabasi_albert_m: 10
 weights: normal  # uniform01 | normal | ones
 graph_type: barabasi-albert
-dataset_generation_seed: 36
+dataset_generation_seed: 223
 graph_size: 50
 dataset: medium_testset
 time_limit_sec: 3600
