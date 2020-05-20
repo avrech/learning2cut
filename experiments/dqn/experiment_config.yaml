@@ -1,7 +1,7 @@
 # DQN TRAINING
 num_episodes: 2000000
-batch_size: 4096
-mini_batch_size: 1024
+batch_size: 1024
+mini_batch_size: 128
 n_sgd_epochs: 4
 lr: 0.001
 weight_decay: 0.0001
