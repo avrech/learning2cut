@@ -13,6 +13,7 @@ import pickle
 import os
 import numpy as np
 import networkx as nx
+from tqdm import tqdm
 
 
 def generate_dataset(config):
@@ -37,7 +38,7 @@ def generate_dataset(config):
     if not os.path.isdir(dataset_dir):
         os.makedirs(dataset_dir)
 
-    for graph_idx in range(worker_ngraphs):
+    for graph_idx in tqdm(range(worker_ngraphs), desc=f'Worker {workerid}'):
         filepath = os.path.join(dataset_dir, f"graph_{workerid}_{graph_idx}.pkl")
         if not os.path.exists(filepath):
             # generate random graph
@@ -77,6 +78,7 @@ def generate_dataset(config):
                     bnc_model.setIntParam('randomization/permutationseed', config.get('scip_seed'))
                     bnc_model.setIntParam('randomization/randomseedshift', config.get('scip_seed'))
                 bnc_model.setRealParam('limits/time', config['time_limit_sec'])
+                bnc_model.hideOutput(quiet=config.get('quiet', False))
                 bnc_model.optimize()
                 bnc_sepa.finish_experiment()
 
@@ -98,7 +100,7 @@ def generate_dataset(config):
                     rootonly_model.setBoolParam('randomization/permutevars', True)
                     rootonly_model.setIntParam('randomization/permutationseed', config.get('scip_seed'))
                     rootonly_model.setIntParam('randomization/randomseedshift', config.get('scip_seed'))
-
+                rootonly_model.hideOutput(quiet=config.get('quiet', False))
                 rootonly_model.optimize()
                 rootonly_sepa.finish_experiment()
 
@@ -149,7 +151,8 @@ def generate_dataset(config):
                 baseline = {'optimal_value': bnc_model.getObjective().getValue()}
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, baseline), f)
-            print('saved graph to ', filepath)
+            if not config.get('quiet', False):
+                print('saved graph to ', filepath)
 
 
 if __name__ == '__main__':
@@ -165,6 +168,10 @@ if __name__ == '__main__':
                         help='worker id')
     parser.add_argument('--nworkers', type=int, default=1,
                         help='total number of workers')
+    parser.add_argument('--mp', action='store_true',
+                        help='use multiprocessing with nworkers')
+    parser.add_argument('--quiet', action='store_true',
+                        help='hide scip solving messages')
     args = parser.parse_args()
 
     with open(args.configfile) as f:
@@ -173,5 +180,20 @@ if __name__ == '__main__':
     for k, v in vars(args).items():
         config[k] = v
 
-    generate_dataset(config)
+    if args.mp:
+        from multiprocessing import Pool
+        configs = []
+        for workerid in range(args.nworkers):
+            cfg = {k: v for k, v in config.items()}
+            cfg['workerid'] = workerid
+            configs.append(cfg)
+
+        with Pool() as p:
+            res = p.map_async(generate_dataset, configs)
+            res.wait()
+            print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
+
+    else:
+        generate_dataset(config)
+    print('finished')
 
