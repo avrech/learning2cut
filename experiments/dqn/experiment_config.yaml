@@ -5,7 +5,7 @@ mini_batch_size: 128
 n_sgd_epochs: 4
 lr: 0.001
 weight_decay: 0.0001
-nstep_learning: 1
+nstep_learning: 4 #1
 backprop_freq: 10
 target_update_freq: 1000
 value_aggr: mean
@@ -21,9 +21,9 @@ dqn_objective: dualbound_integral
 emb_dim: 128
 cuts_embedding_aggr: mean
 
-log_freq: 10
-eval_freq: 100
-checkpoint_freq: 50
+log_freq: 50
+eval_freq: 1000
+checkpoint_freq: 100
 
 # GENERAL
 debug: False
