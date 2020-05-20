@@ -1,8 +1,8 @@
 # DQN TRAINING
 num_episodes: 2000000
-batch_size: 1024
-mini_batch_size: 128
-n_sgd_epochs: 10
+batch_size: 512
+mini_batch_size: 64
+n_sgd_epochs: 4
 lr: 0.001
 weight_decay: 0.0001
 nstep_learning: 1
@@ -14,7 +14,7 @@ gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
 eps_decay: 200000
-memory_capacity: 10000
+memory_capacity: 1000
 dqn_objective: dualbound_integral
 
 # GNN

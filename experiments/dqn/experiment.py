@@ -11,35 +11,36 @@ import torch
 from agents.dqn import DQN
 from utils.functions import get_normalized_areas
 import numpy as np
+from tqdm import tqdm
 
 
 def experiment(hparams):
     # datasets and baselines
     dataset_paths = {}
-    datasets = {}
-    for dataset in ['trainset', 'easy_validset', 'medium_validset', 'hard_validset', 'easy_testset', 'medium_testset', 'hard_testset']:
-        dataset_paths[dataset] = os.path.join(hparams['datadir'], dataset, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(hparams[dataset]['graph_size'], hparams[dataset]['barabasi_albert_m'], hparams[dataset]['weights'], hparams[dataset]['dataset_generation_seed']))
+    datasets = hparams['datasets']
+    for dataset_name, dataset in datasets.items():
+        dataset_config = dataset['config']
+        dataset_paths[dataset_name] = os.path.join(hparams['datadir'], dataset_name, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(dataset_config['graph_size'], dataset_config['barabasi_albert_m'], dataset_config['weights'], dataset_config['dataset_generation_seed']))
 
         # read all graphs with their baselines from disk
         # and find the max lp_iterations_limit across all instances
-        datasets[dataset] = {'instances': []}
+        dataset['instances'] = []
         lp_iterations_limit = 0
-        for filename in os.listdir(dataset_paths[dataset]):
-            with open(os.path.join(dataset_paths[dataset], filename), 'rb') as f:
+        for filename in tqdm(os.listdir(dataset_paths[dataset_name]), desc=f'Loading {dataset_name}'):
+            with open(os.path.join(dataset_paths[dataset_name], filename), 'rb') as f:
                 G, baseline = pickle.load(f)
                 if baseline['is_optimal']:
                     lp_iterations_limit = max(lp_iterations_limit, baseline['lp_iterations_limit'])
-                    datasets[dataset]['instances'].append((G, baseline))
+                    dataset['instances'].append((G, baseline))
                 else:
                     print(filename, ' is not solved to optimality')
-        datasets[dataset]['lp_iterations_limit'] = lp_iterations_limit
-
-    trainset = datasets['trainset']
-    validation_sets = {k: datasets[k] for k in ['easy_validset', 'medium_validset', 'hard_validset']}
-    test_sets = {k: datasets[k] for k in ['easy_testset', 'medium_testset', 'hard_testset']}
+        dataset['lp_iterations_limit'] = lp_iterations_limit
+        dataset['num_instances'] = len(dataset['instances'])
 
     # for the validation and test datasets compute some metrics:
-    for dataset in list(validation_sets.values()) + list(test_sets.values()):
+    for dataset_name, dataset in datasets.items():
+        if dataset_name == 'trainset':
+            continue
         dualbound_integral_list = []
         gap_integral_list = []
         for (_, baseline) in dataset['instances']:
@@ -65,7 +66,8 @@ def experiment(hparams):
         dataset['stats']['gap_integral_std'] = gap_integral_std
 
     # training
-    graph_indices = torch.randperm(len(trainset))
+    trainset = datasets['trainset']
+    graph_indices = torch.randperm(trainset['num_instances'])
 
     # dqn agent
     dqn_agent = DQN(hparams=hparams)
@@ -120,35 +122,32 @@ def experiment(hparams):
 
         execute_episode(G, baseline, trainset['lp_iterations_limit'])
 
-        if i_episode % hparams.get('backprop_freq', 10) == 0:
+        if i_episode % hparams.get('backprop_interval', 10) == 0:
             dqn_agent.optimize_model()
 
-        if i_episode % hparams.get('target_update_freq', 1000) == 0:
+        if i_episode % hparams.get('target_update_interval', 1000) == 0:
             dqn_agent.update_target()
 
-        if i_episode % hparams.get('log_freq', 100) == 0:
+        if i_episode % hparams.get('log_interval', 100) == 0:
             dqn_agent.log_stats()
 
-        if i_episode % hparams.get('eval_freq', 1000) == 0:
-            # evaluate the model on the validation and test sets
-            dqn_agent.eval()
-            for dataset_name, dataset in validation_sets.items():
+        # evaluate the model on the validation and test sets
+        dqn_agent.eval()
+        for dataset_name, dataset in datasets.items():
+            if dataset_name == 'trainset':
+                continue
+            if i_episode % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
                 for G, baseline in dataset['instances']:
                     execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name)
-                dqn_agent.log_stats(save_best=True)
-            for dataset_name, dataset in test_sets.items():
-                print('Evaluating ', dataset_name)
-                for G, baseline in dataset['instances']:
-                    execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name)
-                dqn_agent.log_stats()
-            dqn_agent.train()
+                dqn_agent.log_stats(save_best=(dataset_name[-8:] == 'validset'))
+        dqn_agent.train()
 
-        if i_episode % hparams.get('checkpoint_freq', 100) == 0:
+        if i_episode % hparams.get('checkpoint_interval', 100) == 0:
             dqn_agent.save_checkpoint()
 
         if i_episode % len(graph_indices) == 0:
-            graph_indices = torch.randperm(len(trainset))
+            graph_indices = torch.randperm(trainset['num_instances'])
 
     return 0
 
@@ -156,14 +155,13 @@ def experiment(hparams):
 if __name__ == '__main__':
     import argparse
     import yaml
-    import sys
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results',
                         help='path to save results')
     parser.add_argument('--datadir', type=str, default='data/dqn',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='experiment_config',
+    parser.add_argument('--configfile', type=str, default='experiment_config.yaml',
                         help='general experiment settings')
     parser.add_argument('--resume-training', action='store_true',
                         help='set to load the last training status from checkpoint file')
@@ -177,15 +175,14 @@ if __name__ == '__main__':
         ptvsd.enable_attach(address=('127.0.0.1', port))
         ptvsd.wait_for_attach()
 
-
-
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
-    with open('experiment_config.yaml') as f:
+    with open(args.configfile) as f:
         hparams = yaml.load(f, Loader=yaml.FullLoader)
     for k, v in vars(args).items():
         hparams[k] = v
-    for dataset in ['trainset', 'easy_validset', 'medium_validset', 'hard_validset', 'easy_testset', 'medium_testset', 'hard_testset']:
-        with open(f'{dataset}_config.yaml') as f:
-            hparams[dataset] = yaml.load(f, Loader=yaml.FullLoader)
+    datasets = hparams['datasets']
+    for dataset_name, dataset in datasets.items():
+        with open(f'{dataset_name}_config.yaml') as f:
+            dataset['config'] = yaml.load(f, Loader=yaml.FullLoader)
     experiment(hparams)

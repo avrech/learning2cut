@@ -590,7 +590,7 @@ class DQN(Sepa):
     # done
     def load_checkpoint(self):
         if not os.path.exists(self.checkpoint_filepath):
-            print('No checkpoint file founded!')
+            print('Checkpoint file does not exist! starting from scratch.')
             return
         checkpoint = torch.load(self.checkpoint_filepath)
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
