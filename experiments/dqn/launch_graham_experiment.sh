@@ -2,7 +2,6 @@
 #SBATCH --time=1:00:00
 #SBATCH --account=def-alodi
 #SBATCH --output=dqn0-%j.out
-#SBATCH --ntasks=1
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=1
 #SBATCH --job-name=dqn0-%j
@@ -20,4 +19,4 @@ nvidia-smi
 
 # run the experiment
 
-srun python experiment.py --configfile experiment_config.yaml --logdir $SCRATCH/dqn/results --datadir $SCRATCH/dqn/data --resume-training
+python experiment.py --configfile experiment_config.yaml --logdir $SCRATCH/dqn/results/lr0.001-gamma0.99-nstep1 --datadir $SCRATCH/dqn/data --resume-training
