@@ -14,6 +14,7 @@ import os
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
+from ray import tune
 
 
 def generate_dataset(config):
@@ -168,8 +169,8 @@ if __name__ == '__main__':
                         help='worker id')
     parser.add_argument('--nworkers', type=int, default=1,
                         help='total number of workers')
-    parser.add_argument('--mp', action='store_true',
-                        help='use multiprocessing with nworkers')
+    parser.add_argument('--mp', type=str, default='none',
+                        help='use ray [ray] or multiprocessing [mp] with nworkers')
     parser.add_argument('--quiet', action='store_true',
                         help='hide scip solving messages')
     args = parser.parse_args()
@@ -180,7 +181,7 @@ if __name__ == '__main__':
     for k, v in vars(args).items():
         config[k] = v
 
-    if args.mp:
+    if args.mp == 'mp':
         from multiprocessing import Pool
         configs = []
         for workerid in range(args.nworkers):
@@ -192,6 +193,21 @@ if __name__ == '__main__':
             res = p.map_async(generate_dataset, configs)
             res.wait()
             print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
+
+    elif args.mp == 'ray':
+        from ray.tune import track
+        track.init(experiment_dir=args.datadir)
+        configs = dict()
+        for k, v in config.items():
+            configs[k] = tune.grid_search([v])
+        configs['workerid'] = tune.grid_search(np.arange(args.nworkers))
+        analysis = tune.run(generate_dataset,
+                            config=configs,
+                            resources_per_trial={'cpu': 1, 'gpu': 0},
+                            local_dir=args.datadir,
+                            trial_name_creator=None,
+                            max_failures=1  # TODO learn how to recover from checkpoints
+                            )
 
     else:
         generate_dataset(config)
