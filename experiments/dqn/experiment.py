@@ -70,7 +70,9 @@ def experiment(hparams):
     graph_indices = torch.randperm(trainset['num_instances'])
 
     # dqn agent
-    dqn_agent = DQN(hparams=hparams)
+    dqn_hparams = hparams['dqn_hparams']
+    dqn_hparams['logdir'] = hparams['logdir']
+    dqn_agent = DQN(hparams=dqn_hparams)
     dqn_agent.train()
 
     if hparams.get('resume_training', False):

@@ -77,11 +77,9 @@ class DQN(Sepa):
         self.steps_done = 0
         self.i_episode = 0
         self.training = True
-        self.checkpoint_freq = hparams.get('checkpoint_freq', 100)
         self.walltime_offset = 0
         self.start_time = time()
         self.last_time_sec = self.walltime_offset
-
 
         # file system paths
         self.logdir = hparams.get('logdir', 'results')
