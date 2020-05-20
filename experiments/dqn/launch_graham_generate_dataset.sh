@@ -1,10 +1,7 @@
 #!/bin/bash
 #SBATCH --time=1:00:00
 #SBATCH --account=def-alodi
-#SBATCH --output=dqn0-%j.out
-#SBATCH --ntasks=1
-#SBATCH --mem=32G
-#SBATCH --cpus-per-task=1
+#SBATCH --output=gen-trainset-%j.out
 #SBATCH --job-name=generate_dataset-%j
 #SBATCH --mail-user=avrech@campus.tecnion.ac.il
 #SBATCH --mail-type=BEGIN
@@ -12,11 +9,19 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-type=REQUEUE
 #SBATCH --mail-type=ALL
-
-nvidia-smi
+#SBATCH --mem=0
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=32
 
 # load modules and activate virtualenv
 
-# run the experiment
+#module load python\n')
+#source $HOME/server_bashrc\n')
+#source $HOME/venv/bin/activate\n')
 
-srun python generate_dataset.py --logdir $SCRATCH/dqn/results --datadir $SCRATCH/dqn/data --workerid --nworkers 10
+# generate dataset
+srun python generate_dataset.py --configfile trainset_config.yaml --datadir $SCRATCH/dqn/data --mp --nworkers 32
+
+
+
