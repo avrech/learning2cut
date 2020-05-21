@@ -577,7 +577,8 @@ class DQN(Sepa):
             'best_perf': self.best_perf,
             'loss_moving_avg': self.loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
-        print('Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
+        if self.hparams.get('verbose', 1) > 1:
+            print('Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
 
     # done
     def _save_if_best(self):

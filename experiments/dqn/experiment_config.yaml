@@ -47,6 +47,7 @@ hide_scip_output: True
 num_episodes: 2000000
 log_interval: 20
 checkpoint_interval: 20
+verbose: 1
 
 # SCIP STUFF
 reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
