@@ -52,7 +52,7 @@ class DQN(Sepa):
 
         # DQN stuff
         self.memory = ReplayMemory(hparams.get('memory_capacity', 1000000))
-        self.device = torch.device("cuda" if torch.cuda.is_available() and hparams.get('use_gpu', False) else "cpu")
+        self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.mini_batch_size = hparams.get('mini_batch_size', 8)
         self.n_sgd_epochs = hparams.get('n_sgd_epochs', 10)
@@ -71,7 +71,7 @@ class DQN(Sepa):
         elif hparams.get('value_aggr', 'mean') == 'mean':
             self.aggr_func = scatter_mean
         self.nstep_learning = hparams.get('nstep_learning', 1)
-        self.dqn_objective = hparams.get('dqn_objective', 'dualbound_integral')
+        self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
 
         # training stuff
         self.steps_done = 0
@@ -112,8 +112,8 @@ class DQN(Sepa):
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
-        self.tmp_stats_buffer = {'dualbound_integral': [], 'gap_integral': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
-        self.test_stats_buffer = {'db_int_improvement': [], 'gap_int_improvement': []}
+        self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
+        self.test_stats_buffer = {'db_auc_frac': [], 'gap_auc_frac': []}
         self.best_perf = {'easy_validset': -1000000, 'medium_validset': -1000000, 'hard_validset': -1000000}
         self.loss_moving_avg = 0
 
@@ -429,8 +429,8 @@ class DQN(Sepa):
         """
         Compute action-wise reward and store (s,a,r,s') transitions in memory
         By the way, compute so metrics for plotting, e.g.
-        1. dualbound integral,
-        2. gap integral,
+        1. dualbound auc,
+        2. gap auc,
         3. nactive/napplied,
         4. napplied/navailable
         """
@@ -442,8 +442,12 @@ class DQN(Sepa):
         # compute the area under the curve:
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
         gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
-
-        objective_area = dualbound_area if self.dqn_objective == 'dualbound_integral' else gap_area
+        if self.dqn_objective == 'db_auc':
+            objective_area = dualbound_area
+        elif self.dqn_objective == 'gap_auc':
+            objective_area = gap_area
+        else:
+            raise NotImplementedError
 
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
@@ -497,16 +501,16 @@ class DQN(Sepa):
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
         # store episode results in tmp_stats_buffer
-        dualbound_integral = sum(dualbound_area)
-        gap_integral = sum(gap_area)
-        self.tmp_stats_buffer['dualbound_integral'].append(dualbound_integral)
-        self.tmp_stats_buffer['gap_integral'].append(gap_integral)
+        db_auc = sum(dualbound_area)
+        gap_auc = sum(gap_area)
+        self.tmp_stats_buffer['db_auc'].append(db_auc)
+        self.tmp_stats_buffer['gap_auc'].append(gap_auc)
         self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
         self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
-        if self.baseline.get('dualbound_integral', None) is not None:
+        if self.baseline.get('db_auc', None) is not None:
             # this is evaluation round.
-            self.test_stats_buffer['db_int_improvement'].append(dualbound_integral/self.baseline['dualbound_integral'])
-            self.test_stats_buffer['gap_int_improvement'].append(gap_integral/self.baseline['gap_integral'])
+            self.test_stats_buffer['db_auc_frac'].append(db_auc/self.baseline['db_auc'])
+            self.test_stats_buffer['gap_auc_frac'].append(gap_auc/self.baseline['gap_auc'])
 
     # done
     def log_stats(self, save_best=False):
@@ -533,7 +537,7 @@ class DQN(Sepa):
 
             self.tmp_stats_buffer[k] = []
 
-        if len(self.test_stats_buffer['db_int_improvement']) > 0:
+        if len(self.test_stats_buffer['db_auc_frac']) > 0:
             for k, vals in self.test_stats_buffer.items():
                 avg = np.mean(vals)
                 std = np.std(vals)
@@ -578,7 +582,7 @@ class DQN(Sepa):
     # done
     def _save_if_best(self):
         """Save the model if show the best performance on the validation set.
-        The performance is the -(dualbound/gap integral),
+        The performance is the -(dualbound/gap auc),
         according to the DQN objective"""
         perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
         if perf > self.best_perf[self.dataset_name]:

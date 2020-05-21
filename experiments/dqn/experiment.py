@@ -41,38 +41,36 @@ def experiment(hparams):
     for dataset_name, dataset in datasets.items():
         if dataset_name == 'trainset':
             continue
-        dualbound_integral_list = []
-        gap_integral_list = []
+        db_auc_list = []
+        gap_auc_list = []
         for (_, baseline) in dataset['instances']:
             optimal_value = baseline['optimal_value']
             dualbound = baseline['rootonly_stats']['dualbound']
             gap = baseline['rootonly_stats']['gap']
             lpiter = baseline['rootonly_stats']['lp_iterations']
-            dualbound_integral = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
-            gap_integral = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
-            baseline['dualbound_integral'] = dualbound_integral
-            baseline['gap_integral'] = gap_integral
-            dualbound_integral_list.append(dualbound_integral)
-            gap_integral_list.append(gap_integral)
+            db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
+            gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+            baseline['db_auc'] = db_auc
+            baseline['gap_auc'] = gap_auc
+            db_auc_list.append(db_auc)
+            gap_auc_list.append(gap_auc)
         # compute stats for the whole dataset
-        dualbound_integral_avg = np.mean(dualbound_integral)
-        dualbound_integral_std = np.std(dualbound_integral)
-        gap_integral_avg = np.mean(gap_integral)
-        gap_integral_std = np.std(gap_integral)
+        db_auc_avg = np.mean(db_auc)
+        db_auc_std = np.std(db_auc)
+        gap_auc_avg = np.mean(gap_auc)
+        gap_auc_std = np.std(gap_auc)
         dataset['stats'] = {}
-        dataset['stats']['dualbound_integral_avg'] = dualbound_integral_avg
-        dataset['stats']['dualbound_integral_std'] = dualbound_integral_std
-        dataset['stats']['gap_integral_avg'] = gap_integral_avg
-        dataset['stats']['gap_integral_std'] = gap_integral_std
+        dataset['stats']['db_auc_avg'] = db_auc_avg
+        dataset['stats']['db_auc_std'] = db_auc_std
+        dataset['stats']['gap_auc_avg'] = gap_auc_avg
+        dataset['stats']['gap_auc_std'] = gap_auc_std
 
     # training
     trainset = datasets['trainset']
     graph_indices = torch.randperm(trainset['num_instances'])
 
     # dqn agent
-    dqn_hparams = hparams['dqn_hparams']
-    dqn_hparams['logdir'] = hparams['logdir']
-    dqn_agent = DQN(hparams=dqn_hparams)
+    dqn_agent = DQN(hparams=hparams)
     dqn_agent.train()
 
     if hparams.get('resume_training', False):
@@ -169,6 +167,9 @@ if __name__ == '__main__':
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
+    parser.add_argument('--gpu-id', type=int, default=None,
+                        help='gpu id to use if available')
+
     args = parser.parse_args()
     if args.mixed_debug:
         import ptvsd
@@ -177,8 +178,6 @@ if __name__ == '__main__':
         ptvsd.enable_attach(address=('127.0.0.1', port))
         ptvsd.wait_for_attach()
 
-    if not os.path.exists(args.logdir):
-        os.makedirs(args.logdir)
     with open(args.configfile) as f:
         hparams = yaml.load(f, Loader=yaml.FullLoader)
     for k, v in vars(args).items():
@@ -187,4 +186,10 @@ if __name__ == '__main__':
     for dataset_name, dataset in datasets.items():
         with open(f'{dataset_name}_config.yaml') as f:
             dataset['config'] = yaml.load(f, Loader=yaml.FullLoader)
+    # set logdir according to hparams
+    relative_logdir = f"lr_{hparams['lr']}-nstep_{hparams['nstep_learning']}-credit_{hparams['credit_assignment']}-gamma_{hparams['gamma']}-obj_{hparams['dqn_objective']}"
+    hparams['logdir'] = os.path.join(hparams['logdir'], relative_logdir)
+    if not os.path.exists(args.logdir):
+        os.makedirs(args.logdir)
+
     experiment(hparams)
