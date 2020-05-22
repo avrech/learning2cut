@@ -11,18 +11,20 @@ import numpy as np
 import yaml
 from datetime import datetime
 import os, pickle
-from experiments.cut_root.experiment import experiment
+from experiments.cutrootnode.experiment import experiment
 from itertools import product
 import time
+
+
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--experiment', type=str, default='cut_root',
+parser.add_argument('--experiment', type=str, default='cutrootnode',
                     help='experiment dir')
-parser.add_argument('--config_file', type=str, default='cut_root/adaptive_policy_config.yaml',
+parser.add_argument('--config_file', type=str, default='cutrootnode/adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log_dir', type=str, default='cut_root/results/adaptive_policy/' + NOW,
+parser.add_argument('--log_dir', type=str, default='cutrootnode/results/adaptive_policy/' + NOW,
                     help='path to results root')
-parser.add_argument('--data_dir', type=str, default='cut_root/data',
+parser.add_argument('--data_dir', type=str, default='cutrootnode/data',
                     help='path to generate/read data')
 parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
@@ -108,6 +110,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
     except Exception as e:
         print(e)
 
+    # the following doesn't really work on the cluster. permission denied.
     if args.auto:
         # write DONE to a file named "task-id-finished" in iter_logdir
         with open(os.path.join(iter_logdir, 'task-{}-finished'.format(args.taskid)), 'w') as f:

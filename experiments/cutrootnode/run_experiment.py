@@ -11,7 +11,7 @@ import yaml
 from datetime import datetime
 import os
 from utils.maxcut import generate_data
-from experiments.cut_root.experiment import experiment as experiment_func
+from experiments.cutrootnode.experiment import experiment as experiment_func
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
