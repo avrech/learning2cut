@@ -52,17 +52,19 @@ constants:
   barabasi_albert_m: 10
   weights: normal  # uniform01 | normal | ones
   graph_type: barabasi-albert
-  time_limit_sec: 600
+  time_limit_sec: 900
   dataset_generation_seed: 36
-  graph_size: 100
+  graph_size: 50
   policy: baseline
-  cuts_budget: 500
+  cuts_budget: 10000000
+  lp_iterations_limit: 50000
+
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
 #  max_per_node: 1000
 #  max_per_round: 1
 #  criterion: most_infeasible_var
 #  max_per_root: 2000
-
+  record: True
   # SCIP SEPARATING PARAMETERS
 #  objparalfac: 0.1       # default
 #  dircutoffdistfac: 0.5  # default

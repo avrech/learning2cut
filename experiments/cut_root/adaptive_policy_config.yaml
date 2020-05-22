@@ -35,13 +35,14 @@ constants:
   barabasi_albert_m: 10
   weights: normal  # uniform01 | normal | ones
   graph_type: barabasi-albert
-  time_limit_sec: 500
+  time_limit_sec: 900
   dataset_generation_seed: 36
-  graph_size: 100
+  graph_size: 50
   policy: adaptive
-  cuts_budget: 600
+  cuts_budget: 10000000
   policy_update_freq: 5
   n_policy_iterations: 10
+  lp_iterations_limit: 50000
 
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
 #  max_per_node: 1000
@@ -49,6 +50,8 @@ constants:
   criterion: most_violated_cycle
   max_per_root: 2000000
   forcecut: False
+  record: True
+
   # SCIP SEPARATING PARAMETERS
 #  objparalfac: 0.1       # default
 #  dircutoffdistfac: 0.5  # default
