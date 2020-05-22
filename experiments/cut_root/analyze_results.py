@@ -324,7 +324,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                         cfg = datasets[dataset]['configs'][config]
                         if cfg[k] == v:
                             dbi.append(stats['dualbound_integral'][graph_idx][scip_seed])
-                    dbi_avg_dict[v] = np.mean(dbi)
+                    dbi_avg_dict[k][v] = np.mean(dbi)
 
 
 
@@ -723,12 +723,12 @@ def average_dualbound_integral(rootdir, dstdir, n_iter):
     :param n_iter:
     :return:
     """
-    results = None
+    results = {}
     for idx in range(n_iter):
         print('##### ANALYZING ITERATION {} #####'.format(idx))
         iterdir = os.path.join(rootdir, 'iter{}results'.format(idx))
         dbi_avg = list(analyze_results(rootdir=iterdir, avg=True).values())[0]['dualbound_integral_average']
-        if results is None:
+        if len(results) == 0:
             for k, values in dbi_avg.items():
                 results[k] = {}
                 for v in values.keys():
