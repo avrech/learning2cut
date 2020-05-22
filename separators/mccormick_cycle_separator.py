@@ -443,8 +443,10 @@ class MccormickCycleSeparator(Sepa):
 
         # filter duplicated cuts
         # after coefficient aggregation, to different cycles can collapse into the same inequality.
-        x_items = list(x_coef.items()).sort(key=operator.itemgetter(0)) # sort variables
-        y_keys = list(y_coef.keys()).sort(key=operator.itemgetter(0, 1)) # sort edges
+        x_items = list(x_coef.items())
+        x_items.sort(key=operator.itemgetter(0)) # sort variables
+        y_keys = list(y_coef.keys())
+        y_keys.sort(key=operator.itemgetter(0, 1)) # sort edges
         y_items = [(ij, y_coef[ij]) for ij in y_keys]
         cut_id = (tuple(x_items), tuple(y_items), cutrhs, cutlhs)
         if cut_id in self.added_cuts:
