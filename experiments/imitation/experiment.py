@@ -94,7 +94,7 @@ if __name__ == '__main__':
     import argparse
     from ray.tune import track
     import yaml
-    from experiments.cut_root.data_generator import generate_data
+    from experiments.cutrootnode.data_generator import generate_data
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results/test',

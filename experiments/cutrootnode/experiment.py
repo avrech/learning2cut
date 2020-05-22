@@ -17,12 +17,11 @@ and the dualbound, lp_iterations and other statistics are collected.
 The metric optimized is the dualbound integral w.r.t the number of lp iterations at each round.
 """
 from ray import tune
-from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
+from utils.scip_models import maxcut_mccormic_model
 from separators.mccormick_cycle_separator import MccormickCycleSeparator
 import pickle
 import os
-from tqdm import tqdm
-from pathlib import Path
+
 
 def experiment(config):
     log_dir = tune.track.trial_dir()
@@ -100,15 +99,15 @@ def experiment(config):
     # collect statistics TODO collect stats every round in sepa
     sepa.finish_experiment()
     stats = sepa.stats
-    if stats['total_ncuts_applied'][-1] < config['cuts_budget']:
-        print('************* DID NOT EXPLOIT ALL CUTS BUDGET *************')
+    if stats['lp_iterations'][-1] < config['lp_iterations_limit']:
+        print('************* DID NOT REACHED LP_ITERATIONS_LIMIT *************')
 
     # save stats to pkl
     experiment_results_filepath = os.path.join(log_dir, 'experiment_results.pkl')
     experiment_results = {}
     experiment_results['stats'] = stats
     experiment_results['config'] = config
-    experiment_results['experiment'] = 'cut_root_fixed_maxcutsroot'
+    experiment_results['experiment'] = 'cut_root_fixed_lp_iterations_limit'
     with open(experiment_results_filepath, 'wb') as f:
         pickle.dump(experiment_results, f)
         print('Saved experiment results to: ' + experiment_results_filepath)
@@ -119,7 +118,7 @@ if __name__ == '__main__':
     import argparse
     from ray.tune import track
     import yaml
-    from experiments.cut_root.data_generator import generate_data
+    from experiments.cutrootnode.data_generator import generate_data
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--log_dir', type=str, default='results/adaptive_policy',
