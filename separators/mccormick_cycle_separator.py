@@ -39,6 +39,7 @@ class MccormickCycleSeparator(Sepa):
         self.chordless_only = hparams.get('chordless_only', False)
         self.simple_cycle_only = hparams.get('simple_cycle_only', False)
         self._dijkstra_edge_list = None
+        self.added_cuts = set()
 
         # policy
         self.policy = hparams.get('policy', 'baseline')
@@ -177,6 +178,8 @@ class MccormickCycleSeparator(Sepa):
 
     def separate(self):
         self.current_round_cycles = {}
+        self.added_cuts = set()
+
         # if exceeded limit of cuts per node ,then exit and branch or whatever else.
         cur_node = self.model.getCurrentNode().getNumber()
         self.ncuts_applied_at_cur_node = self.model.getNCutsApplied() - self.ncuts_applied_at_entering_cur_node
@@ -217,9 +220,12 @@ class MccormickCycleSeparator(Sepa):
                 if result['result'] == SCIP_RESULT.CUTOFF:
                     print('CUTOFF')
                     return result
-                elif result == 'invalid_inequality':
+                elif result == 'invalid':
                     print('skipped invalid inequality')
                     continue
+                elif result == 'duplicated':
+                    continue
+
                 self.ncuts += 1
                 self.ncuts_at_cur_node += 1
                 cut_found = True
@@ -372,15 +378,8 @@ class MccormickCycleSeparator(Sepa):
         # add the cycle variables to the new row
         cycle_edges, F, C_minus_F, is_chordless, is_simple = violated_cycle
 
-        cutrhs = len(F) - 1
-        name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
-        cut = model.createEmptyRowSepa(self, name, rhs=cutrhs, lhs=-len(C_minus_F),
-                                       local=self.local,
-                                       removable=self.removable)
-        model.cacheRowExtensions(cut)
         x = self.x
         y = self.y
-        self.current_round_cycles[name] = {'is_chordless': is_chordless, 'is_simple': is_simple, 'applied': False}
         # # TODO: !!! BUG !!!
         # # cycle inequlity should be:
         # # \sum_{e \in F} x_e - \sum_{e \in C\F} x_e <= |F|-1
@@ -435,11 +434,34 @@ class MccormickCycleSeparator(Sepa):
         # print('<= ', cutrhs)
 
         # check if inequality is valid with respect to the optimal solution found
-        if self.debug_cutoff and not self.is_valid_inequality(x_coef, y_coef, cutrhs):
-            result = SCIP_RESULT.DIDNOTRUN
-            return 'invalid_inequality'
 
-        # now add the variables and correct coefficients to cut.
+        cutrhs = len(F) - 1
+        cutlhs = -len(C_minus_F)
+        # debug
+        if self.debug_cutoff and not self.is_valid_inequality(x_coef, y_coef, cutrhs):
+            return 'invalid'
+
+        # filter duplicated cuts
+        # after coefficient aggregation, to different cycles can collapse into the same inequality.
+        x_items = list(x_coef.items()).sort(key=operator.itemgetter(0)) # sort variables
+        y_keys = list(y_coef.keys()).sort(key=operator.itemgetter(0, 1)) # sort edges
+        y_items = [(ij, y_coef[ij]) for ij in y_keys]
+        cut_id = (tuple(x_items), tuple(y_items), cutrhs, cutlhs)
+        if cut_id in self.added_cuts:
+            # skip this cycle
+            return 'duplicated'
+
+        # else - add to the added_cuts set, and add the cut to scip separation storage
+        self.added_cuts.add(cut_id)
+
+        # create a Row object, and add the variables and the coefficients
+        name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
+        cut = model.createEmptyRowSepa(self, name, rhs=cutrhs, lhs=cutlhs,
+                                       local=self.local,
+                                       removable=self.removable)
+        model.cacheRowExtensions(cut)
+        self.current_round_cycles[name] = {'is_chordless': is_chordless, 'is_simple': is_simple, 'applied': False}
+
         for i, c in x_coef.items():
             if c != 0:
                 model.addVarToRow(cut, x[i], c)
