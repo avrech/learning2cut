@@ -14,16 +14,15 @@ from tqdm import tqdm
 from pathlib import Path
 from itertools import product
 import argunparse
+from experiments.cutrootnode.data_generator import generate_data
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--experiment', type=str, default='cutrootnode',
-                    help='experiment dir')
-parser.add_argument('--config_file', type=str, default='cutrootnode/adaptive_policy_config.yaml',
+parser.add_argument('--config_file', type=str, default='adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log_dir', type=str, default='cutrootnode/results/cutsbudget1000/adaptive_policy',
+parser.add_argument('--log_dir', type=str, default='results/adaptive_policy',
                     help='path to results root')
-parser.add_argument('--data_dir', type=str, default='cutrootnode/data',
+parser.add_argument('--data_dir', type=str, default='data',
                     help='path to generate/read data')
 parser.add_argument('--cpus_per_task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
@@ -65,8 +64,7 @@ def submit_job(jobname, taskid, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines('python adaptive_policy_runner.py --experiment {} --log_dir {} --config_file {} --data_dir {} --taskid {} {} --product_keys {}\n'.format(
-            args.experiment,
+        fh.writelines('python adaptive_policy_runner.py --log_dir {} --config_file {} --data_dir {} --taskid {} {} --product_keys {}\n'.format(
             args.log_dir,
             args.config_file,
             args.data_dir,
@@ -83,8 +81,7 @@ with open(args.config_file) as f:
     sweep_config = yaml.load(f, Loader=yaml.FullLoader)
 
 # dataset generation
-data_generator = import_module('experiments.' + args.experiment + '.data_generator')
-data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
+data_abspath = generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
 
 # # generate tune config for the sweep hparams
 # tune_search_space = dict()
@@ -122,7 +119,7 @@ time_limit_minutes = max(int(np.ceil(1.5*search_space_size/n_tasks/(args.cpus_pe
 assert 60 > time_limit_minutes > 0
 
 # run n policy iterations, parallelizing on n_tasks, each task on a separated node.
-# in each iteration k, load k-1 starting policies from args.experiment,
+# in each iteration k, load k-1 starting policies,
 # run exhaustive search for the best k'th policy - N LP rounds search,
 # and for the rest use default cut selection.
 # Then when all experiments ended, find the best policy for the i'th iteration and append to starting policies.
@@ -189,8 +186,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
 # run the final adaptive policy in a clean directory and save the experiment results
 config_file = os.path.abspath('cutrootnode/final_adaptive_policy_config.yaml')
 print('To generate clean final results run:')
-print('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
-    args.experiment,
+print('python adaptive_policy_runner.py --log-dir {} --config-file {} --data-dir {}\n'.format(
     os.path.abspath(os.path.join(args.log_dir, 'final_adaptive_policy')),
     config_file,
     os.path.abspath(args.data_dir)
