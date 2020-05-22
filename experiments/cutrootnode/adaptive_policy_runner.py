@@ -12,19 +12,18 @@ import yaml
 from datetime import datetime
 import os, pickle
 from experiments.cutrootnode.experiment import experiment
+from experiments.cutrootnode.data_generator import generate_data
 from itertools import product
 import time
 
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--experiment', type=str, default='cutrootnode',
-                    help='experiment dir')
-parser.add_argument('--config_file', type=str, default='cutrootnode/adaptive_policy_config.yaml',
+parser.add_argument('--config_file', type=str, default='adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log_dir', type=str, default='cutrootnode/results/adaptive_policy/' + NOW,
+parser.add_argument('--log_dir', type=str, default='results/adaptive_policy/' + NOW,
                     help='path to results root')
-parser.add_argument('--data_dir', type=str, default='cutrootnode/data',
+parser.add_argument('--data_dir', type=str, default='data',
                     help='path to generate/read data')
 parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
@@ -40,8 +39,7 @@ with open(args.config_file) as f:
     sweep_config = yaml.load(f, Loader=yaml.FullLoader)
 
 # dataset generation
-data_generator = import_module('experiments.' + args.experiment + '.data_generator')
-data_abspath = data_generator.generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
+data_abspath = generate_data(sweep_config, args.data_dir, solve_maxcut=True, time_limit=600)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
@@ -79,7 +77,7 @@ if not os.path.exists(starting_policies_abspath):
         pickle.dump([], f)
 
 # run n policy iterations,
-# in each iteration k, load k-1 starting policies from args.experiment,
+# in each iteration k, load k-1 starting policies,
 # run exhaustive search for the best k'th policy - N LP rounds search,
 # and for the rest use default cut selection.
 # Then when all experiments ended, find the best policy for the i'th iteration and append to starting policies.
