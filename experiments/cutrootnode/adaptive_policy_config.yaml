@@ -36,7 +36,7 @@ constants:
   weights: normal  # uniform01 | normal | ones
   graph_type: barabasi-albert
   time_limit_sec: 900
-  dataset_generation_seed: 36
+  dataset_generation_seed: 223
   graph_size: 50
   policy: adaptive
   cuts_budget: 10000000
