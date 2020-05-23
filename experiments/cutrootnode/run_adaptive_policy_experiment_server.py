@@ -156,7 +156,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
             print('iteration analyzed - continue')
             continue
     else:
-        print('iteration has not been completed - now completing')
+        print('completing iteration')
 
     print('################ RUNNING ITERATION {} ################'.format(k_iter))
     # run exhaustive search
