@@ -98,13 +98,14 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             filepath = os.path.join(s['config']['data_abspath'], 'graph_idx_{}.pkl'.format(graph_idx))
             # filepath = 'data/barabasi-albert-n50-m10-weights-normal-seed100/graph_idx_0.pkl'
             with open(filepath, 'rb') as f:
-                G = pickle.load(f)
+                G, baseline = pickle.load(f)
             cut = nx.get_edge_attributes(G, 'cut')
-            if len(cut) > 0:
-                weight = nx.get_edge_attributes(G, 'weight')
-                datasets[dataset]['optimal_values'][graph_idx] = sum([weight[e] for e in G.edges if cut[e]])
-            else:
-                datasets[dataset]['optimal_values'][graph_idx] = 0  # default
+            # if len(cut) > 0:
+            #     weight = nx.get_edge_attributes(G, 'weight')
+            #     datasets[dataset]['optimal_values'][graph_idx] = sum([weight[e] for e in G.edges if cut[e]])
+            # else:
+            #     datasets[dataset]['optimal_values'][graph_idx] = 0  # default
+            datasets[dataset]['optimal_values'][graph_idx] = baseline['optimal_value']  # dqn experiment file format
 
         # set baselines policy string for plots legend:
         if s['config']['maxcutsroot'] == 2000 and \
