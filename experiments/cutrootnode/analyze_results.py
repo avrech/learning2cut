@@ -208,10 +208,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                     stats['maxcutsroot'][graph_idx] = {}
                     for scip_seed in dualbounds[graph_idx].keys():
                         # compute some more stats:
-                        cuts_applied = np.array(stats['cycle_ncuts_applied'][graph_idx][scip_seed])
-                        if sum(cuts_applied == -1) > 0:
-                            cuts_applied = np.array(stats['total_ncuts_applied'][graph_idx][scip_seed])
-                        cuts_generated = np.array(stats['cycle_ncuts'][graph_idx][scip_seed])
+                        cuts_applied = np.array(stats['ncuts_applied'][graph_idx][scip_seed])
+                        cuts_generated = np.array(stats['ncuts'][graph_idx][scip_seed])
                         cuts_applied[1:] -= cuts_applied[:-1]
                         cuts_generated[1:] -= cuts_generated[:-1]
                         hp = datasets[dataset]['configs'][config]
@@ -520,7 +518,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                             # dualbound vs. cycles applied
                             writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx, scip_seed),
                                               scalar_value=records['dualbound'],
-                                              global_step=records['cycle_ncuts_applied'],
+                                              global_step=records['ncuts_applied'],
                                               walltime=records['solving_time'])
                             # dualbound vs. total cuts applied
                             writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx, scip_seed),
@@ -569,10 +567,10 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               walltime=records['solving_time'])
 
                             # dualbound vs. cycles applied
-                            if 'cycle_ncuts_applied' in records.keys():
+                            if 'ncuts_applied' in records.keys():
                                 writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
                                                   scalar_value=records['dualbound'],
-                                                  global_step=records['cycle_ncuts_applied'],
+                                                  global_step=records['ncuts_applied'],
                                                   walltime=records['solving_time'])
                                 writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
                                                   scalar_value=records['cuts_applied'],
