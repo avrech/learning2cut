@@ -78,6 +78,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             datasets[dataset]['configs'] = {}
             datasets[dataset]['experiment'] = s['experiment']
             datasets[dataset]['optimal_values'] = {}
+            datasets[dataset]['baseline'] = {}
             datasets[dataset]['max_lp_iterations'] = {graph_idx: {}
                                                       for graph_idx in
                                                       range(s['config']['sweep_config']['sweep']['graph_idx']['range'])}
