@@ -604,18 +604,18 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                   scalar_value=v, global_step=2000, walltime=400)
                 writer.close()
 
-            # plot the baseline stored in the graph file as the default curve.
-            for graph_idx in datasets[dataset]['graph_idx_range']:
-                writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'baseline-g{}'.format(graph_idx)))
-                b = datasets[dataset]['baseline'][graph_idx]['rootonly_stats']
-                # dualbound vs. lp iterations
-                for lp_round, db in enumerate(b['dualbound']):
-                    writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
-                                      scalar_value=db, global_step=b['lp_iterations'][lp_round], walltime=b['solving_time'][lp_round])
-                    # dualbound vs. Cuts applied
-                    writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
-                                      scalar_value=db, global_step=b['ncuts_applied'][lp_round], walltime=b['solving_time'][lp_round])
-                writer.close()
+            # # plot the baseline stored in the graph file as the default curve.
+            # for graph_idx in datasets[dataset]['graph_idx_range']:
+            #     writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'baseline-g{}'.format(graph_idx)))
+            #     b = datasets[dataset]['baseline'][graph_idx]['rootonly_stats']
+            #     # dualbound vs. lp iterations
+            #     for lp_round, db in enumerate(b['dualbound']):
+            #         writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
+            #                           scalar_value=db, global_step=b['lp_iterations'][lp_round], walltime=b['solving_time'][lp_round])
+            #         # dualbound vs. Cuts applied
+            #         writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
+            #                           scalar_value=db, global_step=b['ncuts_applied'][lp_round], walltime=b['solving_time'][lp_round])
+            #     writer.close()
 
             print('Tensorboard events written to ' + tensorboard_dir)
             print('To open tensorboard tab on web browser, run in terminal the following command:')
