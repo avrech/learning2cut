@@ -12,11 +12,4 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-type=REQUEUE
 #SBATCH --mail-type=ALL
-
-nvidia-smi
-
-# load modules and activate virtualenv
-
-# run the experiment
-
 python experiment.py --configfile experiment_config.yaml --logdir $SCRATCH/dqn/results/lr0.001-gamma0.99-nstep1 --datadir $SCRATCH/dqn/data --resume-training
