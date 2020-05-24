@@ -693,9 +693,9 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
 
                 # plot the default baseline curve (should duplicate the default_cut_selection curve)
                 b = datasets[dataset]['baseline'][graph_idx]['rootonly_stats']
-                plot_y_vs_x('dualbound', 'lp_rounds', b, {}, 1, label='optimal objective', style='k', ncol=2)
-                plot_y_vs_x('dualbound', 'lp_iterations', b, {}, 2, label='optimal objective', style='k', ncol=2)
-                plot_y_vs_x('dualbound', 'solving_time', b, {}, 3, label='optimal objective', style='k', ncol=2)
+                plot_y_vs_x('dualbound', 'lp_rounds', b, {}, 1, label='default', style='k', ncol=2)
+                plot_y_vs_x('dualbound', 'lp_iterations', b, {}, 2, label='default', style='k', ncol=2)
+                plot_y_vs_x('dualbound', 'solving_time', b, {}, 3, label='default', style='k', ncol=2)
 
             # save all figures
             for fignum, filename in fig_filenames.items():
