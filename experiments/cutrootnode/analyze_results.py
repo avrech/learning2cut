@@ -611,7 +611,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 # dualbound vs. lp iterations
                 for lp_round, db in enumerate(b['dualbound']):
                     writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
-                                      scalar_value=db, global_step=b['lp_iterations'][lp_round], walltime=b['solving_time'])
+                                      scalar_value=db, global_step=b['lp_iterations'][lp_round], walltime=b['solving_time'][lp_round])
                     # dualbound vs. Cuts applied
                     writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                       scalar_value=db, global_step=b['ncuts_applied'][lp_round], walltime=b['solving_time'][lp_round])
