@@ -606,6 +606,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=2000, walltime=400)
                 writer.close()
+
+
             print('Tensorboard events written to ' + tensorboard_dir)
             print('To open tensorboard tab on web browser, run in terminal the following command:')
             tensorboard_commandline = 'tensorboard --logdir ' + os.path.abspath(tensorboard_dir) + ' --port 6007'
