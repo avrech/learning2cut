@@ -13,11 +13,14 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-type=REQUEUE
 #SBATCH --mail-type=ALL
-source $HOME/login_niagara_bashrc
+# source $HOME/login_niagara_bashrc
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-cd cutrootnode 
+module load python
+source $HOME/server_bashrc
+source $HOME/venv/bin/activate
+# cd cutrootnode
 
-srun python run_experiment.py --logdir /scratch/a/alodi/avrech/cutrootnode/gsize50/results/experts --configfile experts_config.yaml
+python run_experiment.py --logdir /scratch/a/alodi/avrech/cutrootnode/gsize50/results/experts --configfile experts_config.yaml
 
 # python experiment.py --log_dir $SCRATCH/cutrootnode/gsize50/adaptive-final --starting_policies_abspath $SCRATCH/cutrootnode/gsize50/adaptive-final/starting_policies.pkl
 
