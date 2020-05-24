@@ -517,29 +517,24 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               global_step=records['lp_iterations'],
                                               walltime=records['solving_time'])
                             # dualbound vs. cycles applied
-                            writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx, scip_seed),
+                            writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx, scip_seed),
                                               scalar_value=records['dualbound'],
                                               global_step=records['ncuts_applied'],
-                                              walltime=records['solving_time'])
-                            # dualbound vs. total cuts applied
-                            writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx, scip_seed),
-                                              scalar_value=records['dualbound'],
-                                              global_step=records['total_ncuts_applied'],
                                               walltime=records['solving_time'])
                             writer.add_scalar(tag='Dualbound_vs_LP_Rounds/g{}'.format(graph_idx),
                                               scalar_value=records['dualbound'],
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
 
-                            writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
+                            writer.add_scalar(tag='Cuts_Applied_vs_LP_round/g{}'.format(graph_idx),
                                               scalar_value=records['cuts_applied'],
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
-                            writer.add_scalar(tag='Cycles_Applied_Normalized_vs_LP_round/g{}'.format(graph_idx),
+                            writer.add_scalar(tag='Cuts_Applied_Normalized_vs_LP_round/g{}'.format(graph_idx),
                                               scalar_value=records['cuts_applied_normalized'],
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
-                            writer.add_scalar(tag='Cycles_Generated_vs_LP_round/g{}'.format(graph_idx),
+                            writer.add_scalar(tag='Cuts_Generated_vs_LP_round/g{}'.format(graph_idx),
                                               scalar_value=records['cuts_generated'],
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
@@ -567,29 +562,25 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                               global_step=records['lp_rounds'],
                                               walltime=records['solving_time'])
 
-                            # dualbound vs. cycles applied
+                            # dualbound vs. Cuts applied
                             if 'ncuts_applied' in records.keys():
-                                writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
-                                                  scalar_value=records['dualbound'],
-                                                  global_step=records['ncuts_applied'],
-                                                  walltime=records['solving_time'])
-                                writer.add_scalar(tag='Cycles_Applied_vs_LP_round/g{}'.format(graph_idx),
+                                writer.add_scalar(tag='Cuts_Applied_vs_LP_round/g{}'.format(graph_idx),
                                                   scalar_value=records['cuts_applied'],
                                                   global_step=records['lp_rounds'],
                                                   walltime=records['solving_time'])
-                                writer.add_scalar(tag='Cycles_Applied_Normalized_vs_LP_round/g{}'.format(graph_idx),
+                                writer.add_scalar(tag='Cuts_Applied_Normalized_vs_LP_round/g{}'.format(graph_idx),
                                                   scalar_value=records['cuts_applied_normalized'],
                                                   global_step=records['lp_rounds'],
                                                   walltime=records['solving_time'])
-                                writer.add_scalar(tag='Cycles_Generated_vs_LP_round/g{}'.format(graph_idx),
+                                writer.add_scalar(tag='Cuts_Generated_vs_LP_round/g{}'.format(graph_idx),
                                                   scalar_value=records['cuts_generated'],
                                                   global_step=records['lp_rounds'],
                                                   walltime=records['solving_time'])
 
                             # dualbound vs. total cuts applied
-                            writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx),
+                            writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                               scalar_value=records['dualbound'],
-                                              global_step=records['total_ncuts_applied'],
+                                              global_step=records['ncuts_applied'],
                                               walltime=records['solving_time'])
 
                         writer.close()
@@ -604,15 +595,15 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                   scalar_value=v, global_step=0, walltime=0)
                 writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=support_end, walltime=400)
-                # dualbound vs. cycles applied
-                writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
+                # dualbound vs. Cuts applied
+                writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=0, walltime=0)
-                writer.add_scalar(tag='Dualbound_vs_Cycles_Applied/g{}'.format(graph_idx),
+                writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=2000, walltime=400)
                 # dualbound vs. total cuts applied
-                writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx),
+                writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=0, walltime=0)
-                writer.add_scalar(tag='Dualbound_vs_Total_Cuts_Applied/g{}'.format(graph_idx),
+                writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=2000, walltime=400)
                 writer.close()
             print('Tensorboard events written to ' + tensorboard_dir)
