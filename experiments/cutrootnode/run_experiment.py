@@ -10,7 +10,7 @@ import numpy as np
 import yaml
 from datetime import datetime
 import os
-from utils.maxcut import generate_data
+from experiments.cutrootnode.data_generator import generate_data
 from experiments.cutrootnode.experiment import experiment as experiment_func
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
