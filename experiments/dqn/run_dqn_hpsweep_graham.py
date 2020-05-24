@@ -29,21 +29,11 @@ parser.add_argument('--cpus_per_task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
 parser.add_argument('--product_keys', nargs='+', default=['intsupportfac', 'maxcutsroot'],
                     help='list of hparam keys on which to product')
-# TODO: that doesn't work. use jobs dependency options in slurm.
-parser.add_argument('--auto', action='store_true',
-                    help='run again automatically after each iteration completed')
 
 args = parser.parse_args()
-unparser = argunparse.ArgumentUnparser()
-kwargs = vars(args)
-prefix = f'python {sys.argv[0]} '
-arg_string = unparser.unparse(**kwargs)
-cmd_string = prefix + arg_string
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
-with open(os.path.join(args.log_dir, 'cmd.txt'), 'w') as f:
-    f.writelines(cmd_string + "\n")
 
 def submit_job(jobname, taskid, time_limit_minutes):
     # CREATE SBATCH FILE
