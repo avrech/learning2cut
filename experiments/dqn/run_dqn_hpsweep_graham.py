@@ -9,7 +9,7 @@ import numpy as np
 import yaml
 from datetime import datetime
 import os, pickle, time, sys
-from experiments.cut_root.analyze_results import analyze_results
+from experiments.cutrootnode.analyze_results import analyze_results
 from tqdm import tqdm
 from pathlib import Path
 from itertools import product
@@ -17,13 +17,13 @@ import argunparse
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
 parser = ArgumentParser()
-parser.add_argument('--experiment', type=str, default='cut_root',
+parser.add_argument('--experiment', type=str, default='cutrootnode',
                     help='experiment dir')
-parser.add_argument('--config_file', type=str, default='cut_root/adaptive_policy_config.yaml',
+parser.add_argument('--config_file', type=str, default='cutrootnode/adaptive_policy_config.yaml',
                     help='relative path to config file to generate configs for ray.tune.run')
-parser.add_argument('--log_dir', type=str, default='cut_root/results/cutsbudget1000/adaptive_policy',
+parser.add_argument('--log_dir', type=str, default='cutrootnode/results/cutsbudget1000/adaptive_policy',
                     help='path to results root')
-parser.add_argument('--data_dir', type=str, default='cut_root/data',
+parser.add_argument('--data_dir', type=str, default='cutrootnode/data',
                     help='path to generate/read data')
 parser.add_argument('--cpus_per_task', type=int, default=40,
                     help='Graham - 32, Niagara - 40')
@@ -175,7 +175,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     exit(0)
 
 # run the final adaptive policy in a clean directory and save the experiment results
-config_file = os.path.abspath('cut_root/final_adaptive_policy_config.yaml')
+config_file = os.path.abspath('cutrootnode/final_adaptive_policy_config.yaml')
 print('To generate clean final results run:')
 print('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-file {} --data-dir {}\n'.format(
     args.experiment,
@@ -186,4 +186,4 @@ print('python adaptive_policy_runner.py --experiment {} --log-dir {} --config-fi
 # analyze_results(rootdir=iter_logdir, dstdir=os.path.join(args.log_dir, 'final_analysis'), tensorboard=True)
 print('finished adaptive policy search. congrats!')
 
-'"python /home/avrech/learning2cut/experiments/run_adaptive_policy_experiment_server.py --experiment=cut_root --config_file=cut_root/adaptive_policy_config.yaml --log_dir=cut_root/results/cutsbudget1000/adaptive_policy --data_dir=cut_root/data --cpus_per_task=40 --product_keys="[\'intsupportfac\', \'maxcutsroot\']" --auto"'
+'"python /home/avrech/learning2cut/experiments/run_adaptive_policy_experiment_server.py --experiment=cutrootnode --config_file=cutrootnode/adaptive_policy_config.yaml --log_dir=cutrootnode/results/cutsbudget1000/adaptive_policy --data_dir=cutrootnode/data --cpus_per_task=40 --product_keys="[\'intsupportfac\', \'maxcutsroot\']" --auto"'
