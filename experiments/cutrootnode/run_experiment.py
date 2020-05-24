@@ -54,7 +54,7 @@ tune_search_space['data_abspath'] = tune.grid_search([data_abspath])
 
 # initialize global tracker for all experiments
 
-track.init()
+track.init(args.logdir)
 
 # run experiment
 if args.mp == 'ray':
