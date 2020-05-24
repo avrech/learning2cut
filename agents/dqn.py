@@ -352,7 +352,7 @@ class DQN(Sepa):
         if self.cut_generator is not None:
             assert self.nseparounds == self.cut_generator.nseparounds
 
-        if self.prev_action.get('tightness_penalty', None) is None:
+        if self.prev_action.get('normalized_slack', None) is None:
             nvars = self.model.getNVars()
             ncuts = self.prev_action['ncuts']
             cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
@@ -363,11 +363,19 @@ class DQN(Sepa):
             sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
             sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
             sol_vector = np.array(sol_vector)
-            # tightness of all cuts added at the previous round (including the discarded cuts)
-            tightness = self.prev_action['rhss'] - cuts_matrix @ sol_vector
+            # rhs slack of all cuts added at the previous round (including the discarded cuts)
+            # generally, LP rows look like
+            # lhs <= coef @ vars + cst <= rhs
+            # here, self.prev_action['rhss'] = rhs - cst,
+            # so cst is already subtracted.
+            # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
+            # with only constant factor between them
+            cuts_norm = np.linalg.norm(cuts_matrix, axis=0)
+            rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
+            normalized_slack = rhs_slack / cuts_norm
             # assign tightness penalty only to the selected cuts.
-            self.prev_action['tightness_penalty'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
-            self.prev_action['tightness_penalty'][self.prev_action['selected']] = tightness[self.prev_action['selected']]
+            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
+            self.prev_action['normalized_slack'][self.prev_action['selected']] = normalized_slack[self.prev_action['selected']]
             # assume that all the selected actions were actually applied,
             # although we cannot verify it
             self.prev_action['applied'] = self.prev_action['selected']
@@ -477,12 +485,12 @@ class DQN(Sepa):
                 # tightness == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
                 # so we punish inactive cuts by decreasing their reward to
                 # R * (1 + tightness)
-                tightness_penalty = action['tightness_penalty']
+                normalized_slack = action['normalized_slack']
                 if self.hparams.get('credit_assignment', True):
-                    credit = 1 + tightness_penalty
+                    credit = 1 + normalized_slack
                     reward = joint_reward * credit
                 else:
-                    reward = joint_reward * np.ones_like(tightness_penalty)
+                    reward = joint_reward * np.ones_like(normalized_slack)
 
                 transition = get_transition(state, action['selected'], reward, next_state)
                 self.memory.push(transition)
@@ -491,13 +499,13 @@ class DQN(Sepa):
         active_applied_ratio = []
         applied_available_ratio = []
         for _, action in self.state_action_pairs:
-            tightness_penalty = action['tightness_penalty']
+            normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
-            approximately_zero = np.abs(tightness_penalty) < 1e-6
-            tightness_penalty[approximately_zero] = 0
+            approximately_zero = np.abs(normalized_slack) < 1e-6
+            normalized_slack[approximately_zero] = 0
 
             applied = action['applied']
-            is_active = tightness_penalty[applied] == 0
+            is_active = normalized_slack[applied] == 0
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
         # store episode results in tmp_stats_buffer
