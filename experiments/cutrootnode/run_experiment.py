@@ -36,7 +36,7 @@ with open(args.configfile) as f:
 if not os.path.exists(args.logdir):
     os.makedirs(args.logdir)
 
-data_abspath = generate_data(sweep_config, args.datadir, solve_maxcut=args.solvegraphs, time_limit=1200, use_cycles=False)
+data_abspath = generate_data(sweep_config, args.datadir, solve_maxcut=args.solvegraphs, time_limit=1200)
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
