@@ -11,6 +11,7 @@ import pandas as pd
 import operator
 import matplotlib.pyplot as plt
 
+
 def analyze_results(rootdir='results', dstdir='analysis', filepattern='experiment_results.pkl',
                     tensorboard=False, tb_k_best=1, csv=False, final_adaptive=False, plot=False,
                     starting_policies_abspath=None, avg=False):
@@ -24,7 +25,6 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
         with open(path, 'rb') as f:
             res = pickle.load(f)
             summary.append(res)
-
 
     def str_hparams(hparams_dict):
         """ Serialize predefined key-value pairs into a string,
@@ -106,6 +106,7 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             # else:
             #     datasets[dataset]['optimal_values'][graph_idx] = 0  # default
             datasets[dataset]['optimal_values'][graph_idx] = baseline['optimal_value']  # dqn experiment file format
+            datasets[dataset]['baseline'][graph_idx] = baseline  # dqn experiment file format
 
         # set baselines policy string for plots legend:
         if s['config']['maxcutsroot'] == 2000 and \
@@ -600,13 +601,20 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                                   scalar_value=v, global_step=0, walltime=0)
                 writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
                                   scalar_value=v, global_step=2000, walltime=400)
-                # dualbound vs. total cuts applied
-                writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
-                                  scalar_value=v, global_step=0, walltime=0)
-                writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
-                                  scalar_value=v, global_step=2000, walltime=400)
                 writer.close()
 
+            # plot the baseline stored in the graph file as the default curve.
+            for graph_idx in datasets[dataset]['graph_idx_range']:
+                writer = SummaryWriter(log_dir=os.path.join(tensorboard_dir, 'baseline-g{}'.format(graph_idx)))
+                b = datasets[dataset]['baseline'][graph_idx]['rootonly_stats']
+                # dualbound vs. lp iterations
+                for lp_round, db in enumerate(b['dualbound']):
+                    writer.add_scalar(tag='Dualbound_vs_LP_Iterations/g{}'.format(graph_idx),
+                                      scalar_value=db, global_step=b['lp_iterations'][lp_round], walltime=b['solving_time'])
+                    # dualbound vs. Cuts applied
+                    writer.add_scalar(tag='Dualbound_vs_Cuts_Applied/g{}'.format(graph_idx),
+                                      scalar_value=db, global_step=b['ncuts_applied'][lp_round], walltime=b['solving_time'][lp_round])
+                writer.close()
 
             print('Tensorboard events written to ' + tensorboard_dir)
             print('To open tensorboard tab on web browser, run in terminal the following command:')
@@ -682,6 +690,12 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
                 plot_y_vs_x('dualbound', 'lp_rounds', records, {}, 1, label='optimal objective', style='-k', ncol=2)
                 plot_y_vs_x('dualbound', 'lp_iterations', records, {}, 2, label='optimal objective', style='-k', ncol=2)
                 plot_y_vs_x('dualbound', 'solving_time', records, {}, 3, label='optimal objective', style='-k', ncol=2)
+
+                # plot the default baseline curve (should duplicate the default_cut_selection curve)
+                b = datasets[dataset]['baseline'][graph_idx]['rootonly_stats']
+                plot_y_vs_x('dualbound', 'lp_rounds', b, {}, 1, label='optimal objective', style='k', ncol=2)
+                plot_y_vs_x('dualbound', 'lp_iterations', b, {}, 2, label='optimal objective', style='k', ncol=2)
+                plot_y_vs_x('dualbound', 'solving_time', b, {}, 3, label='optimal objective', style='k', ncol=2)
 
             # save all figures
             for fignum, filename in fig_filenames.items():
