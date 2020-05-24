@@ -136,7 +136,7 @@ if __name__ == '__main__':
         os.makedirs(log_dir)
     with open(os.path.join(os.path.dirname(os.path.dirname(log_dir)), 'checkpoint.pkl'), 'wb') as f:
         pickle.dump([], f)
-    with open('adaptive_policy_config.yaml') as f:
+    with open('final_adaptive_policy_config.yaml') as f:
         sweep_config = yaml.load(f, Loader=yaml.FullLoader)
     config = sweep_config['constants']
     for k, v in sweep_config['sweep'].items():
