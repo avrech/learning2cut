@@ -45,12 +45,12 @@ with open(os.path.join(args.log_dir, 'cmd.txt'), 'w') as f:
     f.writelines(cmd_string + "\n")
 
 
-def submit_job(jobname, taskid, time_limit_minutes, controller=False):
+def submit_job(jobname, taskid, time_limit_hours, time_limit_minutes, controller=False):
     # CREATE SBATCH FILE
     job_file = os.path.join(args.log_dir, jobname + '.sh')
     with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
-        fh.writelines('#SBATCH --time=00:{}:00\n'.format(time_limit_minutes))
+        fh.writelines('#SBATCH --time={}:{}:00\n'.format(time_limit_hours, time_limit_minutes))
         fh.writelines('#SBATCH --account=def-alodi\n')
         fh.writelines('#SBATCH --output={}/{}.out\n'.format(args.log_dir,jobname))
         fh.writelines('#SBATCH --mem=0\n')
@@ -116,7 +116,13 @@ search_space_size = np.prod([d['range'] if k =='graph_idx' else len(d['values'])
 product_lists = [sweep_config['sweep'][k]['values'] for k in args.product_keys]
 products = list(product(*product_lists))
 n_tasks = len(products)
-time_limit_minutes = max(int(np.ceil(1.5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)
+time_limit_minutes = max(int(np.ceil(5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)
+if args.auto:
+    time_limit_minutes *= sweep_config['constants'].get('n_policy_iterations', 1)
+
+time_limit_hours = int(np.floor(time_limit_minutes / 60))
+time_limit_minutes = time_limit_minutes % 60
+assert 24 > time_limit_hours >= 0
 assert 60 > time_limit_minutes > 0
 
 # run n policy iterations, parallelizing on n_tasks, each task on a separated node.
@@ -176,7 +182,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     print('submitting jobs:')
     for taskid in range(n_tasks):
         jobname = 'iter{}-cfg{}'.format(k_iter, taskid)
-        submit_job(jobname, taskid, time_limit_minutes, controller=taskid == 0)
+        submit_job(jobname, taskid, time_limit_hours, time_limit_minutes, controller=taskid == 0)
         time.sleep(0.5)
 
     if not args.auto:
