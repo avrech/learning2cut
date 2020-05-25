@@ -37,12 +37,12 @@ constants:
   graph_type: barabasi-albert
   time_limit_sec: 900
   dataset_generation_seed: 223
-  graph_size: 50
+  graph_size: 100
   policy: adaptive
   cuts_budget: 10000000
-  policy_update_freq: 5
+  policy_update_freq: 10
   n_policy_iterations: 10
-  lp_iterations_limit: 50000
+  lp_iterations_limit: 70000
 
   # MCCORMIC_CYCLE_SEPARATOR PARAMETERS
 #  max_per_node: 1000
