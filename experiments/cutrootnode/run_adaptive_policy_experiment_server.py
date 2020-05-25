@@ -118,7 +118,8 @@ products = list(product(*product_lists))
 n_tasks = len(products)
 time_limit_minutes = max(int(np.ceil(5*search_space_size/n_tasks/(args.cpus_per_task-1)) + 2), 16)
 if args.auto:
-    time_limit_minutes *= sweep_config['constants'].get('n_policy_iterations', 1)
+    # multiply single iteration time by the number of policy iterations and add 15 minutes for synchronization waste.
+    time_limit_minutes = time_limit_minutes * sweep_config['constants'].get('n_policy_iterations', 1) + 15
 
 time_limit_hours = int(np.floor(time_limit_minutes / 60))
 time_limit_minutes = time_limit_minutes % 60
