@@ -130,7 +130,7 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
         iteration_completed = False
         while not iteration_completed:
             n_finished = 0
-            for path in tqdm(Path(iter_logdir).rglob(args.filepattern), desc='Checking finished trials'):
+            for path in tqdm(Path(iter_logdir).rglob('experiment_results.pkl'), desc='Checking finished trials'):
                 n_finished += 1
             if n_finished == search_space_size:
                 iteration_completed = True
