@@ -3,7 +3,7 @@ Launch multiple experiment configurations in parallel on distributed resources.
 Requires a folder in ./ containing experiment.py, data_generator,py and config_fixed_max_rounds.yaml
 See example in ./variability
 """
-from importlib import import_module
+from tqdm import tqdm
 from ray import tune
 from ray.tune import track
 from argparse import ArgumentParser
@@ -15,6 +15,8 @@ from experiments.cutrootnode.experiment import experiment
 from experiments.cutrootnode.data_generator import generate_data
 from itertools import product
 import time
+from experiments.cutrootnode.analyze_results import analyze_results
+from pathlib import Path
 
 
 NOW = str(datetime.now())[:-7].replace(' ', '.').replace(':', '-').replace('.', '/')
@@ -29,8 +31,10 @@ parser.add_argument('--taskid', type=int,
                     help='serial number to choose maxcutsroot and objparalfac')
 parser.add_argument('--product_keys', nargs='+', default=[],
                     help='list of hparam keys on which to product')
+parser.add_argument('--controller', action='store_true',
+                    help='control the adaptive policy runners, analyze all results and update starting_policies.pkl')
 parser.add_argument('--auto', action='store_true',
-                    help='run again automatically after each iteration completed')
+                    help='automatically analyze experiments and run the next iteration')
 
 args = parser.parse_args()
 
@@ -43,6 +47,7 @@ data_abspath = generate_data(sweep_config, args.data_dir, solve_maxcut=True, tim
 
 # generate tune config for the sweep hparams
 tune_search_space = dict()
+search_space_dim = []
 for hp, config in sweep_config['sweep'].items():
     tune_search_space[hp] = {'grid': tune.grid_search(config.get('values')),
                        'grid_range': tune.grid_search(list(range(config.get('range', 2)))),
@@ -50,6 +55,12 @@ for hp, config in sweep_config['sweep'].items():
                        'randint': tune.randint(config.get('min'), config.get('max')),
                        'uniform': tune.sample_from(lambda spec: np.random.uniform(config.get('min'), config.get('max')))
                              }.get(config['search'])
+    if config['search'] == 'grid':
+        search_space_dim.append(len(config['values']))
+    elif config['search'] == 'grid_range':
+        search_space_dim.append(config['range'])
+    else:
+        raise NotImplementedError
 
 # fix some hparams ranges according to taskid:
 if len(args.product_keys) > 0:
@@ -62,6 +73,8 @@ if len(args.product_keys) > 0:
 # add the sweep_config and data_abspath as constant parameters for global experiment management
 tune_search_space['sweep_config'] = tune.grid_search([sweep_config])
 tune_search_space['data_abspath'] = tune.grid_search([data_abspath])
+
+search_space_size = np.prod(search_space_dim)
 
 # initialize global tracker for all experiments
 track.init(experiment_dir=args.log_dir)
@@ -109,31 +122,63 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations',1)):
         print(e)
 
     # the following doesn't really work on the cluster. permission denied.
-    if args.auto:
-        # write DONE to a file named "task-id-finished" in iter_logdir
-        with open(os.path.join(iter_logdir, 'task-{}-finished'.format(args.taskid)), 'w') as f:
-            f.writelines('DONE')
-        time.sleep(1)
+    if args.auto and args.controller:  # todo
+        # check if iteration completed but not analyzed
+        iter_analysisdir = os.path.join(args.log_dir, 'iter{}analysis'.format(k_iter))
+        print('################ CHECKING ITERATION {} ################'.format(k_iter))
+        # check if all workers finished successfully all their jobs
+        iteration_completed = False
+        while not iteration_completed:
+            n_finished = 0
+            for path in tqdm(Path(iter_logdir).rglob(args.filepattern), desc='Checking finished trials'):
+                n_finished += 1
+            if n_finished == search_space_size:
+                iteration_completed = True
+            else:
+                time.sleep(10)
+            # todo iteration timeout
 
-        # check if all tasks finished and launch run_server.py again
-        # the number of tasks is always len(products) (defined in run_server.py)
-        all_finished = True
-        for taskid in range(len(products)):
-            if not os.path.exists(os.path.join(iter_logdir, 'task-{}-finished'.format(taskid))):
-                all_finished = False
-                break
-        if all_finished:
-            # # override job output file and clean for the next iteration restarting
-            # with open(os.path.join(args.log_dir, 'iter{}-cfg{}.out'.format(k_iter, args.taskid)), 'w') as f:
-            #     f.writelines('RESTARTING ITERATION {}\n'.format(k_iter + 1))
-            print('################# RESTARTING ITERATION {} #################\n'.format(k_iter + 1))
-            with open(os.path.join(args.log_dir, 'cmd.txt'), 'r') as f:
-                cmd = f.readline()
-            print('################# EXECUTING THE NEXT POLICY ITERATION #################')
-            print(cmd)
-            retval = os.system(cmd)
-            print('os system command return value: {}'.format(retval))
+        # all trials have been completed. analyze and start the next iteration
 
+        analyses = analyze_results(rootdir=iter_logdir, dstdir=iter_analysisdir,
+                                   starting_policies_abspath=starting_policies_abspath)
+        if len(analyses) > 0:
+            analysis = list(analyses.values())[0]
+            best_policy = analysis['best_policy'][0]
+            # append best policy to starting policies
+            with open(starting_policies_abspath, 'rb') as f:
+                starting_policies = pickle.load(f)
+            starting_policies.append(best_policy)
+            with open(starting_policies_abspath, 'wb') as f:
+                pickle.dump(starting_policies, f)
+            print('iteration analyzed')
+
+            print('################ PREPARING ITERATION {} ################'.format(k_iter+1))
+            # create a list of completed trials for from previos checkpoints for recovering from failures.
+            print('loading checkpoints from ', iter_logdir)
+            checkpoint = []
+            iter_logdir = os.path.join(args.log_dir, 'iter{}results'.format(k_iter+1))
+            if not os.path.exists(iter_logdir):
+                os.makedirs(iter_logdir)
+            with open(os.path.join(iter_logdir, 'checkpoint.pkl'), 'wb') as f:
+                pickle.dump(checkpoint, f)
+
+            # continue to the next iteration
+            continue
+        else:
+            raise Exception('Analysis failed')
+
+    elif args.auto and not args.controller:
+        # wait for starting_policies update
+        while len(starting_policies) == k_iter:
+            time.sleep(10)
+            with open(starting_policies_abspath, 'rb') as f:
+                starting_policies = pickle.load(f)
+        # todo timeout
+        # go to the next iteration
+        continue
+
+    # else, exit when iteration finished
     print('Iteration completed successfully. Terminating.')
     exit(0)
 

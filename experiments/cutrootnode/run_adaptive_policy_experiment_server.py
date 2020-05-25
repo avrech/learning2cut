@@ -45,7 +45,7 @@ with open(os.path.join(args.log_dir, 'cmd.txt'), 'w') as f:
     f.writelines(cmd_string + "\n")
 
 
-def submit_job(jobname, taskid, time_limit_minutes):
+def submit_job(jobname, taskid, time_limit_minutes, controller=False):
     # CREATE SBATCH FILE
     job_file = os.path.join(args.log_dir, jobname + '.sh')
     with open(job_file, 'w') as fh:
@@ -64,11 +64,12 @@ def submit_job(jobname, taskid, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines('python adaptive_policy_runner.py --log_dir {} --config_file {} --data_dir {} --taskid {} {} --product_keys {}\n'.format(
+        fh.writelines('python adaptive_policy_runner.py --log_dir {} --config_file {} --data_dir {} --taskid {} {} {} --product_keys {}\n'.format(
             args.log_dir,
             args.config_file,
             args.data_dir,
             taskid,
+            '--controller' if args.auto and controller else '',
             '--auto' if args.auto else '',
             ' '.join(args.product_keys)
         ))
@@ -170,28 +171,30 @@ for k_iter in range(sweep_config['constants'].get('n_policy_iterations', 1)):
     with open(os.path.join(iter_logdir, 'checkpoint.pkl'), 'wb') as f:
         pickle.dump(checkpoint, f)
 
-    # break the search space into 5 smaller jobs, according to objparalfac
-    # hardcoded config files are predefined.
-    # submit 5 experiments each one execute one config file.
+    # break the search space into smaller jobs, according to product-keys
     # after all jobs complete, continue to the next iteration.
     print('submitting jobs:')
     for taskid in range(n_tasks):
         jobname = 'iter{}-cfg{}'.format(k_iter, taskid)
-        submit_job(jobname, taskid, time_limit_minutes)
-        time.sleep(1)
+        submit_job(jobname, taskid, time_limit_minutes, controller=taskid == 0)
+        time.sleep(0.5)
 
-    print('submitted jobs - run again in {} minutes after all jobs completed'.format(time_limit_minutes))
-    exit(0)
+    if not args.auto:
+        print('submitted jobs - run again in {} minutes after all jobs completed'.format(time_limit_minutes))
+    else:
+        print(f'controller and workers launched. monitor experiment progress in {args.log_dir}')
+        exit(0)
 
 # run the final adaptive policy in a clean directory and save the experiment results
 config_file = os.path.abspath('cutrootnode/final_adaptive_policy_config.yaml')
-print('To generate clean final results run:')
-print('python adaptive_policy_runner.py --log-dir {} --config-file {} --data-dir {}\n'.format(
-    os.path.abspath(os.path.join(args.log_dir, 'final_adaptive_policy')),
-    config_file,
-    os.path.abspath(args.data_dir)
-))
+print('To generate clean final results update launch_adaptive_final_niagara.sh and run:')
+print('sbatch launch_adaptive_final_niagara.sh')
+# print('python experiment.py --log_dir {} --starting_policies_abspath {} --data_dir {}\n'.format(
+#     os.path.abspath(os.path.join(args.log_dir, 'final_adaptive_policy')),
+#     starting_policies_abspath,
+#     os.path.abspath(args.data_dir)
+# ))
 # analyze_results(rootdir=iter_logdir, dstdir=os.path.join(args.log_dir, 'final_analysis'), tensorboard=True)
 print('finished adaptive policy search. congrats!')
 
-'"python /home/avrech/learning2cut/experiments/run_adaptive_policy_experiment_server.py --experiment=cutrootnode --config_file=cutrootnode/adaptive_policy_config.yaml --log_dir=cutrootnode/results/cutsbudget1000/adaptive_policy --data_dir=cutrootnode/data --cpus_per_task=40 --product_keys="[\'intsupportfac\', \'maxcutsroot\']" --auto"'
+# '"python /home/avrech/learning2cut/experiments/run_adaptive_policy_experiment_server.py --experiment=cutrootnode --config_file=cutrootnode/adaptive_policy_config.yaml --log_dir=cutrootnode/results/cutsbudget1000/adaptive_policy --data_dir=cutrootnode/data --cpus_per_task=40 --product_keys="[\'intsupportfac\', \'maxcutsroot\']" --auto"'
