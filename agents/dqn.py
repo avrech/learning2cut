@@ -370,7 +370,7 @@ class DQN(Sepa):
             # so cst is already subtracted.
             # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
             # with only constant factor between them
-            cuts_norm = np.linalg.norm(cuts_matrix, axis=0)
+            cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
             rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
             normalized_slack = rhs_slack / cuts_norm
             # assign tightness penalty only to the selected cuts.
