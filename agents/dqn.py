@@ -479,13 +479,14 @@ class DQN(Sepa):
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
-                # now, assign to each cut its reward according to its tightness
-                # tightness == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
+                # now, assign to each cut its reward according to its slack
+                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
                 # so we punish inactive cuts by decreasing their reward to
-                # R * (1 + tightness)
+                # R * (1 - slack)
+                # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
                 normalized_slack = action['normalized_slack']
                 if self.hparams.get('credit_assignment', True):
-                    credit = 1 + normalized_slack
+                    credit = 1 - normalized_slack
                     reward = joint_reward * credit
                 else:
                     reward = joint_reward * np.ones_like(normalized_slack)
