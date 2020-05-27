@@ -136,9 +136,19 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
     t = np.array(t)
 
     # normalize ft to [0,1] according to the reference value,
-    # such that it will start from 1 and end at zero (if optimal).
-    # if ft is increasing function, we flip it to be decreasing.
-    ft = np.abs(ft - reference) / np.abs(ft[0])
+    # such that it will start at 0 and end at 1 (if optimal).
+    # if ft is decreasing function, we flip it to increasing.
+    # finally, it should looks like:
+    # 1__^_ _ _ _ _ _ _ _ _ _ _
+    #    |      ________/ |
+    #    |  ___/|    |    |
+    #    | / |  |    |    |
+    #    |/a0|a1| ...|aN-1|
+    # 0__|___|__|____|____|________
+    #    t0  t1 t2   tN-1 t_support (normalized such that t_support = 1)
+    # the areas returned are a0, a1, aN-1
+    # old and incorrect : ft = np.abs(ft - reference) / np.abs(ft[0])
+    ft = np.abs(ft - ft[0]) / np.abs(reference - ft[0])
 
     # normalize t to [0,1]
     t = t / t_support

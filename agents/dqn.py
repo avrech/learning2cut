@@ -469,11 +469,9 @@ class DQN(Sepa):
             if max_index >= len(objective_area):
                 objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
             # take sliding windows of width n_step from objective_area
-            # with minus because we want to minimize the area under the curve
-
-            n_step_rewards = - objective_area[indices]
+            n_step_rewards = objective_area[indices]
             # compute returns
-            # R[t] = - ( r[t] + gamma*r[t+1] + ... + gamma^(n-1)r[t+n-1] )
+            # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
             for step, ((state, action), joint_reward) in enumerate(zip(self.state_action_pairs, R)):

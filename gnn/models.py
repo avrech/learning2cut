@@ -90,7 +90,16 @@ class GATConvV2(MessagePassing):
         zeros(self.bias)
 
     def forward(self, x, edge_index, edge_attr, size=None):
-        """"""
+        """
+        Compute multi head attention, where the compatibility coefficient \alpha
+        takes into account the edge attributes.
+        For cut encoder, edge attributes e_ij can be the orthogonality of cut i and cut j.
+        For cut decoder, e_ij can be the decoder information about cut i, while processing cut j.
+        In the latter case, e_ij will be two bits: (processed, selected).
+        :param x: torch.Tensor [|V|, d_v]
+        :param edge_index: torch.Tensor [2, |E|]
+        :param edge_index: torch.Tensor [|E|, d_e]
+        """
         if size is None and torch.is_tensor(x):
             edge_index, _ = remove_self_loops(edge_index)
             edge_index, _ = add_self_loops(edge_index,

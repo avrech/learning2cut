@@ -119,6 +119,10 @@ def experiment(hparams):
         # sample graph randomly
         graph_idx = graph_indices[i_episode % len(graph_indices)]
         G, baseline = trainset['instances'][graph_idx]
+        if hparams.get('debug', False):
+            filename = os.listdir(dataset_paths['trainset'])[graph_idx]
+            filename = os.path.join(dataset_paths['trainset'], filename)
+            print(f'instance no. {graph_idx}, filename: {filename}')
 
         execute_episode(G, baseline, trainset['lp_iterations_limit'])
 
