@@ -39,7 +39,7 @@ class GATConvV2(MessagePassing):
     Args:
         in_channels (int): Size of each input sample.
         out_channels (int): Size of each output sample.
-        edge_attr_bits (int): edge attributes dimensionality.
+        edge_attr_dim (int): edge attributes dimensionality.
         heads (int, optional): Number of multi-head-attentions.
             (default: :obj:`1`)
         concat (bool, optional): If set to :obj:`False`, the multi-head
@@ -55,14 +55,14 @@ class GATConvV2(MessagePassing):
         **kwargs (optional): Additional arguments of
             :class:`torch_geometric.nn.conv.MessagePassing`.
     """
-    def __init__(self, in_channels, out_channels, edge_attr_bits, heads=1, concat=True,
+    def __init__(self, in_channels, out_channels, edge_attr_dim, edge_attr_emb=4, heads=1, concat=True,
                  negative_slope=0.2, dropout=0, bias=True, **kwargs):
         super(GATConvV2, self).__init__(aggr='add', **kwargs)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.edge_attr_bits = edge_attr_bits
-        self.edge_attr_
+        self.edge_attr_dim = edge_attr_dim
+        self.edge_attr_emb = edge_attr_emb
         self.heads = heads
         self.concat = concat
         self.negative_slope = negative_slope
@@ -71,9 +71,9 @@ class GATConvV2(MessagePassing):
         # projection of x_a to attention heads
         self.weight = Parameter(torch.Tensor(in_channels, heads * out_channels))
         # projection of edge_attr to attention heads
-        self.edge_attr_weight = Parameter(torch.Tensor(edge_attr_bits, heads * 2 ** edge_attr_bits))
+        self.edge_attr_weight = Parameter(torch.Tensor(edge_attr_dim, heads * edge_attr_emb))  # todo
         # extend the attention projection vector according to the additional edge_attr dimensions
-        self.att = Parameter(torch.Tensor(1, heads, 2 * out_channels + edge_attr_bits))  # todo
+        self.att = Parameter(torch.Tensor(1, heads, 2 * out_channels + edge_attr_dim))  # todo
 
         if bias and concat:
             self.bias = Parameter(torch.Tensor(heads * out_channels))
@@ -101,24 +101,27 @@ class GATConvV2(MessagePassing):
         else:
             x = (None if x[0] is None else torch.matmul(x[0], self.weight),
                  None if x[1] is None else torch.matmul(x[1], self.weight))
-
+        edge_attr = torch.matmul(edge_attr, self.edge_attr_weight)
         return self.propagate(edge_index, size=size, x=x, edge_attr=edge_attr)
 
     def message(self, edge_index_i, x_i, x_j, size_i, edge_attr):  # todo
         # Compute attention coefficients.
-        # split x_j projections to attention heads
+        # split x_j and edge_attr projections to attention heads
         x_j = x_j.view(-1, self.heads, self.out_channels)
+        edge_attr = edge_attr.view(-1, self.heads, self.edge_attr_emb)
         if x_i is None:  # why should it happen?
             alpha = (x_j * self.att[:, :, self.out_channels:]).sum(dim=-1)
         else:
             # split x_i projections to attention heads
             x_i = x_i.view(-1, self.heads, self.out_channels)
             # todo - split edge_attr projections to the attention heads
-            # concatenate x_i to each one of its neighbors, including the associated edge attribute.
+            # concatenate x_i to each one of its neighbors
+            # including the associated edge attributes,
+            # then multiply and sum to generate \alpha_ij for each attention head
             alpha = (torch.cat([x_i, x_j, edge_attr], dim=-1) * self.att).sum(dim=-1)  # todo
 
         alpha = F.leaky_relu(alpha, self.negative_slope)
-        alpha = softmax(alpha, edge_index_i, size_i)
+        alpha = softmax(alpha, edge_index_i, size_i)  # todo - what is size role?
 
         # Sample attention coefficients stochastically.
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
@@ -139,7 +142,6 @@ class GATConvV2(MessagePassing):
         return '{}({}, {}, heads={})'.format(self.__class__.__name__,
                                              self.in_channels,
                                              self.out_channels, self.heads)
-
 
 
 class CutsEmbedding(torch.nn.Module):
