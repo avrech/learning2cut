@@ -7,7 +7,7 @@ from torch_sparse import spspmm
 from torch_geometric.nn import TopKPooling
 from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops
 from torch_geometric.utils.repeat import repeat
-
+from collections import OrderedDict
 
 from torch.nn import Parameter
 from torch_geometric.nn.conv import MessagePassing
@@ -15,7 +15,8 @@ from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
 from torch_geometric.nn.inits import glorot, zeros
 
 
-class GATConvV2(MessagePassing):
+# Cut convolution with attention and pairwise edge attributes
+class CATConv(MessagePassing):
     r"""The graph attentional operator from the `"Graph Attention Networks"
     <https://arxiv.org/abs/1710.10903>`_ paper, extended with edge attributes :math:`e_{ij}`
 
@@ -57,7 +58,7 @@ class GATConvV2(MessagePassing):
     """
     def __init__(self, in_channels, out_channels, edge_attr_dim, edge_attr_emb=4, heads=1, concat=True,
                  negative_slope=0.2, dropout=0, bias=True, **kwargs):
-        super(GATConvV2, self).__init__(aggr='add', **kwargs)
+        super(CATConv, self).__init__(aggr='add', **kwargs)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -89,7 +90,7 @@ class GATConvV2(MessagePassing):
         glorot(self.att)
         zeros(self.bias)
 
-    def forward(self, x, edge_index, edge_attr, size=None):
+    def forward(self, inputs):
         """
         Compute multi head attention, where the compatibility coefficient \alpha
         takes into account the edge attributes.
@@ -100,20 +101,24 @@ class GATConvV2(MessagePassing):
         :param edge_index: torch.Tensor [2, |E|]
         :param edge_index: torch.Tensor [|E|, d_e]
         """
+        if len (inputs) == 3:
+            x, edge_index, edge_attr = inputs
+            size = None
+        else:
+            x, edge_index, edge_attr, size = inputs
         if size is None and torch.is_tensor(x):
             edge_index, _ = remove_self_loops(edge_index)
             edge_index, _ = add_self_loops(edge_index,
                                            num_nodes=x.size(self.node_dim))
-
         if torch.is_tensor(x):
             x = torch.matmul(x, self.weight)
         else:
             x = (None if x[0] is None else torch.matmul(x[0], self.weight),
                  None if x[1] is None else torch.matmul(x[1], self.weight))
         edge_attr = torch.matmul(edge_attr, self.edge_attr_weight)
-        return self.propagate(edge_index, size=size, x=x, edge_attr=edge_attr)
+        return self.propagate(edge_index, size=size, x=x, edge_attr=edge_attr), edge_index, edge_attr, size  # todo verify
 
-    def message(self, edge_index_i, x_i, x_j, size_i, edge_attr):  # todo
+    def message(self, edge_index_i, x_i, x_j, size_i, edge_attr):  # todo verify
         # Compute attention coefficients.
         # split x_j and edge_attr projections to attention heads
         x_j = x_j.view(-1, self.heads, self.out_channels)
@@ -153,7 +158,8 @@ class GATConvV2(MessagePassing):
                                              self.out_channels, self.heads)
 
 
-class CutsEmbedding(torch.nn.Module):
+# LP tripartite graph convolution
+class LPConv(torch.nn.Module):
     r"""Left to right and right to left graph neural network convolution,
         inspired from the `"Exact Combinatorial Optimizationwith Graph Convolutional Neural Networks"
         <https://arxiv.org/pdf/1906.01629.pdf>`_ paper
@@ -215,7 +221,7 @@ class CutsEmbedding(torch.nn.Module):
 
     def __init__(self, x_v_channels, x_c_channels, x_a_channels, edge_attr_dim,
                  emb_dim=32, aggr='mean', cuts_only=True):
-        super(CutsEmbedding, self).__init__()
+        super(LPConv, self).__init__()
         self.x_v_channels = x_v_channels
         self.x_c_channels = x_c_channels
         self.x_a_channels = x_a_channels
@@ -250,22 +256,24 @@ class CutsEmbedding(torch.nn.Module):
             self.g_c = Seq(Lin(self.g_c_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
             self.f_c = Seq(Lin(self.f_c_in_channels, emb_dim), ReLU(), Lin(emb_dim, emb_dim))
 
-    def forward(self, x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v):
+    def forward(self, inputs):
         """
         Compute the left-to-right convolution of a bipartite graph.
         Assuming a PairTripartiteAndCliqueData or Batch object, d, produced by
         utils.data.get_gnn_data,
         the module inputs should be as follows:
-        :param x_c:             = d.x_c
-        :param x_v:             = d.x_v
-        :param x_a:             = d.x_a
-        :param edge_index_c2v:  = d.edge_index_c2v
-        :param edge_index_a2v:  = d.edge_index_a2v
-        :param edge_attr_c2v:   = d.edge_attr_c2v
-        :param edge_attr_a2v:   = d.edge_attr_a2v
-        :return: torch.Tensor([d.ncuts.sum(), out_channels]) if self.cuts_only=True
-                 torch.Tensor([x_s.shape[0], out_channels]) otherwise
+        :param inputs: a tuple consists of
+                       x_c            : d.x_c
+                       x_v            : d.x_v
+                       x_a            : d.x_a
+                       edge_index_c2v : d.edge_index_c2v
+                       edge_index_a2v : d.edge_index_a2v
+                       edge_attr_c2v  : d.edge_attr_c2v
+                       edge_attr_a2v  : d.edge_attr_a2v
+        :return: if self.cuts_only==True: torch.Tensor([d.ncuts.sum(), out_channels])
+                 else: tuple like inputs, where x_c, x_v and x_a have emb_dim features, and the rest are the same.
         """
+        x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v = inputs
         ### LEFT TO RIGHT CONVOLUTION ###
         c2v_s, c2v_t = edge_index_c2v
         a2v_s, a2v_t = edge_index_a2v
@@ -332,14 +340,15 @@ class CutsEmbedding(torch.nn.Module):
             f_c_out = self.f_c(f_c_input)
 
             # return the updated features of the constraint, variable and cut nodes
-            return f_c_out, f_v_out, f_a_out
+            return f_c_out, f_v_out, f_a_out, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
 
         # if embedding only cuts:
         return f_a_out
 
 
-class FGConv(MessagePassing):
-    r"""Factor Graph Convolution
+# classic convolution for cuts
+class CutConv(MessagePassing):
+    r"""Inter cuts convolution
 
     .. math::
         \mathbf{x}^{\prime}_i = \mathbf{f} \left([\mathbf{x}_i, \square_{j \in \mathcal{N}(i)}
@@ -362,8 +371,8 @@ class FGConv(MessagePassing):
         **kwargs (optional): Additional arguments of
             :class:`torch_geometric.nn.conv.MessagePassing`.
     """
-    def __init__(self, channels, edge_attr_dim, aggr='add', **kwargs):
-        super(FGConv, self).__init__(aggr=aggr, **kwargs)
+    def __init__(self, channels, edge_attr_dim, aggr='mean', **kwargs):
+        super(CutConv, self).__init__(aggr=aggr, **kwargs)
         self.in_channels = channels
         self.out_channels = channels
         self.edge_attr_dim = edge_attr_dim
@@ -377,10 +386,10 @@ class FGConv(MessagePassing):
         self.f.reset_parameters()
         self.g.reset_parameters()
 
-    def forward(self, x, edge_index, edge_attr, batch=None):
+    def forward(self, inputs):
         """"""
-        return self.propagate(edge_index, x=x, edge_attr=edge_attr)
-
+        x, edge_index, edge_attr = inputs
+        return self.propagate(edge_index, x=x, edge_attr=edge_attr), edge_index, edge_attr
 
     def message(self, x_i, x_j, edge_attr):
         z_ij = torch.cat([x_i, x_j, edge_attr], dim=-1)
@@ -396,19 +405,228 @@ class FGConv(MessagePassing):
                                                      self.edge_attr_dim)
 
 
+# transformer Q network
+class TQnet(torch.nn.Module):
+    def __init__(self, hparams={}):
+        super(TQnet, self).__init__()
+        self.hparams = hparams
+
+        ###########
+        # Encoder #
+        ###########
+        # stack lp conv layers todo consider skip connections
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
+                                                                emb_dim=hparams.get('emb_dim', 32),                   # default
+                                                                aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
+                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1))))
+                                        for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
+
+        # stack cut conv layers todo consider skip connections
+        self.cut_conv = {
+            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+                                                                  edge_attr_dim=1,
+                                                                  aggr=hparams.get('cut_conv_aggr', 'mean')))
+                                        for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
+            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+                                                                  edge_attr_dim=1,
+                                                                  edge_attr_emb=1,
+                                                                  heads=hparams.get('attention_heads', 4)))
+                                        for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
+        }.get('cut_conv', 'CATConv')
+
+        ###########
+        # Decoder #
+        ###########
+        self.decoder_conv = {
+            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+                                                                  edge_attr_dim=2,
+                                                                  aggr=hparams.get('cut_conv_aggr', 'mean')))
+                                        for i in range(hparams.get('decoder_layers', 1))])),
+            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+                                                                  edge_attr_dim=2,
+                                                                  edge_attr_emb=4,
+                                                                  heads=hparams.get('attention_heads', 4)))
+                                        for i in range(hparams.get('decoder_layers', 1))])),
+        }.get('decoder_conv', 'CATConv')
+        self.decoder_context = None
+        self.decoder_edge_index = None
+
+        ##########
+        # Q head #
+        ##########
+        self.q = Lin(hparams.get('emb_dim', 32), 2)  # Q-values for adding a cut or not
+
+    def forward(self,
+                x_c,
+                x_v,
+                x_a,
+                edge_index_c2v,
+                edge_index_a2v,
+                edge_attr_c2v,
+                edge_attr_a2v,
+                edge_index_a2a,
+                edge_attr_a2a,
+                decoder_context=None,
+                decoder_edge_index=None
+                ):
+        """
+        :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
+                 torch.Tensor([x.shape[0], out_channels]) otherwise
+        """
+        # encoding
+        # run lp conv and generate cut embedding
+        lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
+        x_a = self.lp_conv(lp_conv_inputs)
+        # run cut conv and generate cut encoding
+        cut_conv_inputs = x_a, edge_index_a2a, edge_attr_a2a
+        cut_encoding, _, _ = self.cut_conv(cut_conv_inputs)
+
+        # decoding - inference
+        if decoder_context is None:
+            ncuts = cut_encoding.shape[0]
+
+            # rand permutation over available cuts
+            inference_order = torch.randperm(ncuts)
+            decoder_edge_index = torch.cat([torch.arange(ncuts).view(1, -1),
+                                            torch.empty((1, ncuts))], dim=0).long()
+
+            # initialize the decoder with all cuts marked as not (processed, selected)
+            self.decoder_context = []
+            self.decoder_edge_index = []
+            decoder_context = torch.zeros((ncuts, 2), dtype=torch.float32)
+
+            # create a tensor of all q values to return to user
+            q_vals = torch.empty_like(decoder_context)
+
+            # iterate over all cuts in random order, and process one cut each time
+            for cut_index in inference_order:
+                # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+                decoder_edge_index[1, :] = cut_index
+
+                # store the context and edge_index of the current iteration
+                self.decoder_context.append(decoder_context.clone())
+                self.decoder_edge_index.append(decoder_edge_index.clone())
+
+                # decode
+                decoder_inputs = (cut_encoding, decoder_edge_index, decoder_context)
+                cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+                # take the decoder output only at the cut_index and estimate q values
+                q = self.q(cut_decoding[cut_index, :])
+                decoder_context[cut_index, 0] = 1           # mark the current cut as processed
+                decoder_context[cut_index, 1] = q.argmax()  # mark the cut as selected or not, greedily according to q
+                # store q in the output q_vals tensor
+                q_vals[cut_index, :] = q
+
+            # finally, stack the decoder context and edge_index tensors in order to store them later in Transition,
+            # and allow by that fast parallel training
+            self.decoder_context = torch.cat(self.decoder_context, dim=0)
+            self.decoder_edge_index = torch.cat(self.decoder_edge_index, dim=1)
+
+            return q_vals
+
+        else:
+            # we are in training.
+            # produce all q values in parallel
+            decoder_inputs = (cut_encoding, decoder_edge_index, decoder_context)
+            cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+            # take the decoder output only at the cut_index and estimate q values
+            return self.q(cut_decoding)
+
+
+# standard Q network
+class Qnet(torch.nn.Module):
+    def __init__(self, hparams={}):
+        super(Qnet, self).__init__()
+        self.hparams = hparams
+        assert hparams.get('cuts_embedding_layers', 1) == 1, "Not implemented"
+
+        ###########
+        # Encoder #
+        ###########
+        # stack lp conv layers todo consider skip connections
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i == 0 else hparams.get('emb_dim', 32),
+                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i == 0 else hparams.get('emb_dim', 32),
+                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i == 0 else hparams.get('emb_dim', 32),
+                                                                edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
+                                                                emb_dim=hparams.get('emb_dim', 32),  # default
+                                                                aggr=hparams.get('lp_conv_aggr', 'mean'),  # default
+                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1))))
+                                        for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
+
+        # stack cut conv layers todo consider skip connections
+        self.cut_conv = {
+            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+                                                                  edge_attr_dim=1,
+                                                                  aggr=hparams.get('cut_conv_aggr', 'mean')))
+                                        for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
+            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+                                                                  edge_attr_dim=1,
+                                                                  edge_attr_emb=1,
+                                                                  heads=hparams.get('attention_heads', 4)))
+                                        for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
+        }.get('cut_conv', 'CATConv')
+
+        ###########
+        # Decoder #
+        ###########
+        # todo add some standard sequential model, e.g. LSTM
+
+        ##########
+        # Q head #
+        ##########
+        self.q = Lin(hparams.get('emb_dim', 32), 2)  # Q-values for adding a cut or not
+
+    def forward(self,
+                x_c,
+                x_v,
+                x_a,
+                edge_index_c2v,
+                edge_index_a2v,
+                edge_attr_c2v,
+                edge_attr_a2v,
+                edge_index_a2a,
+                edge_attr_a2a,
+                x_a_batch
+                ):
+        """
+        :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
+                 torch.Tensor([x.shape[0], out_channels]) otherwise
+        """
+        # encoding
+        # run lp conv and generate cut embedding
+        lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
+        x_a = self.lp_conv(lp_conv_inputs)
+        # run cut conv and generate cut encoding
+        cut_conv_inputs = x_a, edge_index_a2a, edge_attr_a2a
+        cut_encoding, _, _ = self.cut_conv(cut_conv_inputs)
+
+        # decoding
+        # todo - add here the sequential decoder stuff.
+
+        # compute q values
+        return self.q(cut_encoding)
+
+
+# imitation learning models - not relevant
 class CutsSelector(torch.nn.Module):
     def __init__(self, channels, edge_attr_dim, hparams={}):
         super(CutsSelector, self).__init__()
         self.channels = channels
         self.edge_attr_dim = edge_attr_dim
-        self.factorization_arch = hparams.get('factorization_arch', 'FGConv')
+        self.factorization_arch = hparams.get('factorization_arch', 'CutConv')
         self.factorization_aggr = hparams.get('factorization_aggr', 'mean')
         # TODO: support more factorizations, e.g. GCNConv, GATConv, etc.
         # In addition, support sequential selection
         self.f = {
-            'FGConv': FGConv(channels, edge_attr_dim, aggr=self.factorization_aggr),
+            'CutConv': CutConv(channels, edge_attr_dim, aggr=self.factorization_aggr),
             'GraphUNet': GraphUNet(channels, channels, channels, depth=3)
-        }.get(self.factorization_arch, 'FGConv')
+        }.get(self.factorization_arch, 'CutConv')
         self.classifier = Seq(Lin(channels, 1))  # binary decision, wheter to apply the cut or not.
 
     def forward(self, x_a, edge_index_a2a, edge_attr_a2a, batch=None):
@@ -435,96 +653,6 @@ class CutsSelector(torch.nn.Module):
         return y, probs
 
 
-class Qhead(torch.nn.Module):
-    def __init__(self, channels, edge_attr_dim, hparams={}):
-        super(Qhead, self).__init__()
-        self.channels = channels
-        self.edge_attr_dim = edge_attr_dim
-        self.factorization_arch = hparams.get('factorization_arch', 'FGConv')
-        self.factorization_aggr = hparams.get('factorization_aggr', 'mean')
-        # TODO: support more factorizations, e.g. GCNConv, GATConv, etc.
-        # In addition, support sequential selection
-        self.f = {
-            'FGConv': FGConv(channels, edge_attr_dim, aggr=self.factorization_aggr),
-            'GraphUNet': GraphUNet(channels, channels, channels, depth=3)
-        }.get(self.factorization_arch, 'FGConv')
-        self.q = Lin(channels, 2)  # Q-values for adding a cut or not
-
-    def forward(self, x_a, edge_index_a2a, edge_attr_a2a, batch=None):
-        """
-        Assuming a PairTripartiteAndClique (or Batch) object, d,
-        produced by utils.data.get_gnn_data,
-        this module works on the cuts clique graph of d.
-        The module applies some factorization function on the clique graph,
-        and then applies a classifier to select cuts.
-        The module inputs are as follows
-        :param x_a: d.x_a (the updated cut features from CutsEmbedding)
-        :param edge_index_a2a: d.edge_index_a2a (instance-wise cuts clique graph connectivity)
-        :param edge_attr_a2a: d.edge_attr_a2a (intra-cuts orthogonality)
-        :return:
-        """
-        # apply factorization module
-        x_a = self.f(x_a, edge_index_a2a, edge_attr_a2a, batch)
-
-        # approximate the q value of each action
-        q_a = self.q(x_a)
-        return q_a
-
-
-class Qnet(torch.nn.Module):
-    def __init__(self, hparams={}):
-        super(Qnet, self).__init__()
-        self.hparams = hparams
-        assert hparams.get('cuts_embedding_layers', 1) == 1, "Not implemented"
-
-        # cuts embedding
-        self.cuts_embedding = CutsEmbedding(
-            x_v_channels=hparams.get('state_x_v_channels', 13),   # mandatory - derived from state features
-            x_c_channels=hparams.get('state_x_c_channels', 14),   # mandatory - derived from state features
-            x_a_channels=hparams.get('state_x_a_channels', 16),   # mandatory - derived from state features
-            edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
-            emb_dim=hparams.get('emb_dim', 32),                   # default
-            aggr=hparams.get('cuts_embedding_aggr', 'mean')       # default
-        )
-
-        # cut selector
-        self.q_head = Qhead(
-            channels=hparams.get('emb_dim', 32),                  # default
-            edge_attr_dim=hparams.get('state_edge_attr_dim', 1),         # this is the intra cuts orthogonalities
-            hparams=hparams
-        )
-
-    def forward(self,
-                x_c,
-                x_v,
-                x_a,
-                edge_index_c2v,
-                edge_index_a2v,
-                edge_attr_c2v,
-                edge_attr_a2v,
-                edge_index_a2a,
-                edge_attr_a2a,
-                x_a_batch
-                ):
-        """
-        :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
-                 torch.Tensor([x.shape[0], out_channels]) otherwise
-        """
-        cuts_embedding = self.cuts_embedding(x_c=x_c,
-                                             x_v=x_v,
-                                             x_a=x_a,
-                                             edge_index_c2v=edge_index_c2v,
-                                             edge_index_a2v=edge_index_a2v,
-                                             edge_attr_c2v=edge_attr_c2v,
-                                             edge_attr_a2v=edge_attr_a2v)
-
-        q_a = self.q_head(x_a=cuts_embedding,
-                          edge_index_a2a=edge_index_a2a,
-                          edge_attr_a2a=edge_attr_a2a,
-                          batch=x_a_batch)
-        return q_a
-
-
 class CutSelectionModel(torch.nn.Module):
     def __init__(self, hparams={}):
         super(CutSelectionModel, self).__init__()
@@ -532,7 +660,7 @@ class CutSelectionModel(torch.nn.Module):
         assert hparams.get('cuts_embedding_layers', 1) == 1, "Not implemented"
 
         # cuts embedding
-        self.cuts_embedding = CutsEmbedding(
+        self.cuts_embedding = LPConv(
             x_v_channels=hparams.get('state_x_v_channels', 13),     # mandatory - derived from state features
             x_c_channels=hparams.get('state_x_c_channels', 14),     # mandatory - derived from state features
             x_a_channels=hparams.get('state_x_a_channels', 16),     # mandatory - derived from state features
@@ -566,9 +694,6 @@ class CutSelectionModel(torch.nn.Module):
                                       edge_attr_a2a=state.edge_attr_a2a,
                                       batch=state.x_a_batch)
         return y, probs
-
-
-
 
 
 class GraphUNet(torch.nn.Module):
