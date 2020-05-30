@@ -7,12 +7,13 @@ from torch_sparse import spspmm
 from torch_geometric.nn import TopKPooling
 from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops
 from torch_geometric.utils.repeat import repeat
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 
 from torch.nn import Parameter
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
 from torch_geometric.nn.inits import glorot, zeros
+TransformerDecoderContext = namedtuple('TransformerDecoderContext', ('edge_index', 'edge_attr'))
 
 
 # Cut convolution with attention and pairwise edge attributes
@@ -453,8 +454,9 @@ class TQnet(torch.nn.Module):
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_layers', 1))])),
         }.get('decoder_conv', 'CATConv')
+        self.decoder_edge_attr_list = None
+        self.decoder_edge_index_list = None
         self.decoder_context = None
-        self.decoder_edge_index = None
 
         ##########
         # Q head #
@@ -471,8 +473,8 @@ class TQnet(torch.nn.Module):
                 edge_attr_a2v,
                 edge_index_a2a,
                 edge_attr_a2a,
-                decoder_context=None,
-                decoder_edge_index=None
+                edge_attr_dec=None,
+                edge_index_dec=None
                 ):
         """
         :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
@@ -487,52 +489,53 @@ class TQnet(torch.nn.Module):
         cut_encoding, _, _ = self.cut_conv(cut_conv_inputs)
 
         # decoding - inference
-        if decoder_context is None:
+        if edge_attr_dec is None:
             ncuts = cut_encoding.shape[0]
 
             # rand permutation over available cuts
             inference_order = torch.randperm(ncuts)
-            decoder_edge_index = torch.cat([torch.arange(ncuts).view(1, -1),
-                                            torch.empty((1, ncuts))], dim=0).long()
+            edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                        torch.empty((1, ncuts))], dim=0).long()
 
             # initialize the decoder with all cuts marked as not (processed, selected)
-            self.decoder_context = []
-            self.decoder_edge_index = []
-            decoder_context = torch.zeros((ncuts, 2), dtype=torch.float32)
+            self.decoder_edge_index_list = []
+            self.decoder_edge_attr_list = []
+            edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
 
             # create a tensor of all q values to return to user
-            q_vals = torch.empty_like(decoder_context)
+            q_vals = torch.empty_like(edge_attr_dec)
 
             # iterate over all cuts in random order, and process one cut each time
             for cut_index in inference_order:
                 # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
-                decoder_edge_index[1, :] = cut_index
+                edge_index_dec[1, :] = cut_index
 
                 # store the context and edge_index of the current iteration
-                self.decoder_context.append(decoder_context.clone())
-                self.decoder_edge_index.append(decoder_edge_index.clone())
+                self.decoder_edge_attr_list.append(edge_attr_dec.clone())
+                self.decoder_edge_index_list.append(edge_index_dec.clone())
 
                 # decode
-                decoder_inputs = (cut_encoding, decoder_edge_index, decoder_context)
+                decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
                 cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
                 # take the decoder output only at the cut_index and estimate q values
                 q = self.q(cut_decoding[cut_index, :])
-                decoder_context[cut_index, 0] = 1           # mark the current cut as processed
-                decoder_context[cut_index, 1] = q.argmax()  # mark the cut as selected or not, greedily according to q
+                edge_attr_dec[cut_index, 0] = 1           # mark the current cut as processed
+                edge_attr_dec[cut_index, 1] = q.argmax()  # mark the cut as selected or not, greedily according to q
                 # store q in the output q_vals tensor
                 q_vals[cut_index, :] = q
 
-            # finally, stack the decoder context and edge_index tensors in order to store them later in Transition,
-            # and allow by that fast parallel training
-            self.decoder_context = torch.cat(self.decoder_context, dim=0)
-            self.decoder_edge_index = torch.cat(self.decoder_edge_index, dim=1)
-
+            # finally, stack the decoder edge_attr and edge_index tensors,
+            # and make a transformer context in order to generate later a Transition for training,
+            # allowing by that fast parallel backprop
+            edge_attr_dec = torch.cat(self.decoder_edge_attr_list, dim=0)
+            edge_index_dec = torch.cat(self.decoder_edge_index_list, dim=1)
+            self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
             return q_vals
 
         else:
             # we are in training.
             # produce all q values in parallel
-            decoder_inputs = (cut_encoding, decoder_edge_index, decoder_context)
+            decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
             cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
             # take the decoder output only at the cut_index and estimate q values
             return self.q(cut_decoding)
@@ -592,7 +595,7 @@ class Qnet(torch.nn.Module):
                 edge_attr_a2v,
                 edge_index_a2a,
                 edge_attr_a2a,
-                x_a_batch
+                **kwargs
                 ):
         """
         :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True

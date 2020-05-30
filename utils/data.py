@@ -19,6 +19,8 @@ class Transition(Data):
                  edge_attr_a2v=None,
                  edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
                  edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
+                 edge_index_dec=None, # transformer decoder context
+                 edge_attr_dec=None, # transformer decoder context
                  stats=None,
                  # action
                  a=None,  # cuts clique graph node labels  - the action whether to apply the cut or not.
@@ -47,6 +49,8 @@ class Transition(Data):
         self.edge_attr_a2v = edge_attr_a2v
         self.edge_index_a2a = edge_index_a2a
         self.edge_attr_a2a = edge_attr_a2a
+        self.edge_index_dec = edge_index_dec
+        self.edge_attr_dec = edge_attr_dec
         self.stats = stats
         self.a = a
         self.r = r
@@ -69,6 +73,8 @@ class Transition(Data):
             return torch.tensor([[self.x_a.size(0)], [self.x_v.size(0)]])
         if key == 'edge_index_a2a':
             return self.x_a.size(0)
+        if key == 'edge_index_dec':
+            return self.x_a.size(0)
         if key == 'ns_edge_index_c2v':
             return torch.tensor([[self.ns_x_c.size(0)], [self.ns_x_v.size(0)]])
         if key == 'ns_edge_index_a2v':
@@ -79,11 +85,16 @@ class Transition(Data):
             return super(Transition, self).__inc__(key, value)
 
 
-def get_transition(scip_state, action=None, reward=None, scip_next_state=None):
+def get_transition(scip_state,
+                   action=None,
+                   transformer_decoder_context=None,
+                   reward=None,
+                   scip_next_state=None):
     """
     Creates a torch_geometric.data.Data object from SCIP state
     produced by scip.Model.getState(state_format='tensor')
     :param scip_state: scip.getState(state_format='tensor')
+    :param transformer_decoder_context: required only if using transformer
     :param action: np.ndarray
     :param reward: np.ndarray
     :param scip_next_state: scip.getState(state_format='tensor')
@@ -113,9 +124,16 @@ def get_transition(scip_state, action=None, reward=None, scip_next_state=None):
     edge_attr_c2v = torch.from_numpy(nzrcoef).unsqueeze(dim=1)
     edge_attr_a2v = torch.from_numpy(cuts_nzrcoef).unsqueeze(dim=1)
 
-    # build the clique graph the candidate cuts:
+    # build the clique graph of the candidate cuts:
     edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality))
     edge_attr_a2a.unsqueeze_(dim=1)
+
+    # if using transformer, take the decoder context and edge_index from the input, else generate empty one
+    if transformer_decoder_context is not None:
+        edge_index_dec, edge_attr_dec = transformer_decoder_context
+    else:
+        edge_index_dec = torch.tensor([[0], [0]], dtype=torch.long)  # self loop
+        edge_attr_dec = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
 
     if action is not None:
         a = torch.from_numpy(action).long()
@@ -189,6 +207,8 @@ def get_transition(scip_state, action=None, reward=None, scip_next_state=None):
         edge_attr_a2v=edge_attr_a2v,
         edge_index_a2a=edge_index_a2a,
         edge_attr_a2a=edge_attr_a2a,
+        edge_index_dec=edge_index_dec,
+        edge_attr_dec=edge_attr_dec,
         stats=stats,
         a=a,
         r=r,

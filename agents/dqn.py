@@ -5,7 +5,7 @@ from utils.data import get_transition
 import os
 import math
 import random
-from gnn.models import Qnet
+from gnn.models import Qnet, TQnet
 import torch
 import scipy as sp
 import torch.optim as optim
@@ -60,8 +60,8 @@ class DQN(Sepa):
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
         self.eps_decay = hparams.get('eps_decay', 200)
-        self.policy_net = Qnet(hparams=hparams).to(self.device)
-        self.target_net = Qnet(hparams=hparams).to(self.device)
+        self.policy_net = TQnet(hparams=hparams).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
+        self.target_net = TQnet(hparams=hparams).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
@@ -72,6 +72,7 @@ class DQN(Sepa):
             self.aggr_func = scatter_mean
         self.nstep_learning = hparams.get('nstep_learning', 1)
         self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
+        self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
 
         # training stuff
         self.steps_done = 0
@@ -223,7 +224,8 @@ class DQN(Sepa):
                     edge_attr_a2v=batch.edge_attr_a2v,
                     edge_index_a2a=batch.edge_index_a2a,
                     edge_attr_a2a=batch.edge_attr_a2a,
-                    x_a_batch=batch.x_a_batch
+                    edge_index_dec=batch.edge_index_dec,  # transformer stuff
+                    edge_attr_dec=batch.edge_attr_dec     # transformer stuff
                 )
                 state_action_values = state_action_values.gather(1, action_batch.unsqueeze(1))
                 # Compute V(s_{t+1}) for all next states.
@@ -233,6 +235,19 @@ class DQN(Sepa):
                 # state value or 0 in case the state was terminal.
                 # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
                 # next-state action-wise values
+                if self.use_transformer:
+                    # trick to parallelize the next state q_vals computation:
+                    # since the optimal target q values should be
+                    # independent of the inference order,
+                    # we infer each cut q-values like it was processed first in the inference loop.
+                    # thus, the edge_attr_dec is zeros, to indicate that each
+                    # cut is processed conditioning on "no-cut-selected"
+                    ns_edge_index_dec = batch.ns_edge_index_a2a
+                    ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
+                else:
+                    ns_edge_index_dec = None
+                    ns_edge_attr_dec = None
+                    
                 next_state_action_wise_values = self.target_net(
                     x_c=batch.ns_x_c,
                     x_v=batch.ns_x_v,
@@ -243,7 +258,8 @@ class DQN(Sepa):
                     edge_attr_a2v=batch.ns_edge_attr_a2v,
                     edge_index_a2a=batch.ns_edge_index_a2a,
                     edge_attr_a2a=batch.ns_edge_attr_a2a,
-                    x_a_batch=batch.ns_x_a_batch
+                    edge_index_dec=ns_edge_index_dec,
+                    edge_attr_dec=ns_edge_attr_dec
                 ).max(1)[0].detach()
                 # aggregate the action-wise values using mean or max,
                 # and generate for each graph in the batch a single value
@@ -335,7 +351,10 @@ class DQN(Sepa):
             # unless the instance is solved and the episode is done.
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
-            self.state_action_pairs.append((cur_state, available_cuts))
+            if self.use_transformer:
+                self.state_action_pairs.append((cur_state, available_cuts, self.policy_net.decoder_context))
+            else:
+                self.state_action_pairs.append((cur_state, available_cuts, None))
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
@@ -474,7 +493,7 @@ class DQN(Sepa):
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action), joint_reward) in enumerate(zip(self.state_action_pairs, R)):
+            for step, ((state, action, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_pairs, R)):
                 next_state, _ = self.state_action_pairs[step+n_steps] if step+n_steps < n_transitions else (None, None)
 
                 # credit assignment:
@@ -491,7 +510,11 @@ class DQN(Sepa):
                 else:
                     reward = joint_reward * np.ones_like(normalized_slack)
 
-                transition = get_transition(state, action['selected'], reward, next_state)
+                transition = get_transition(scip_state=state,
+                                            action=action['selected'],
+                                            transformer_decoder_context=transformer_decoder_context,
+                                            reward=reward,
+                                            scip_next_state=next_state)
                 self.memory.push(transition)
 
         # compute some stats and store in buffer
