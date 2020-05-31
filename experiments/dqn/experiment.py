@@ -186,6 +186,9 @@ if __name__ == '__main__':
         hparams = yaml.load(f, Loader=yaml.FullLoader)
     for k, v in vars(args).items():
         hparams[k] = v
+    if hparams.get('debug_cuda', False):
+        os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
     datasets = hparams['datasets']
     for dataset_name, dataset in datasets.items():
         with open(f'{dataset_name}_config.yaml') as f:

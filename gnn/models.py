@@ -411,7 +411,7 @@ class TQnet(torch.nn.Module):
     def __init__(self, hparams={}):
         super(TQnet, self).__init__()
         self.hparams = hparams
-
+        self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
         ###########
         # Encoder #
         ###########
@@ -437,7 +437,7 @@ class TQnet(torch.nn.Module):
                                                                   edge_attr_emb=1,
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
-        }.get('cut_conv', 'CATConv')
+        }.get(hparams.get('cut_conv', 'CATConv'))
 
         ###########
         # Decoder #
@@ -453,7 +453,7 @@ class TQnet(torch.nn.Module):
                                                                   edge_attr_emb=4,
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
-        }.get('cut_conv', 'CATConv')
+        }.get(hparams.get('cut_conv', 'CATConv'))
         self.decoder_edge_attr_list = None
         self.decoder_edge_index_list = None
         self.decoder_context = None
@@ -495,12 +495,12 @@ class TQnet(torch.nn.Module):
             # rand permutation over available cuts
             inference_order = torch.randperm(ncuts)
             edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
-                                        torch.empty((1, ncuts))], dim=0).long()
+                                        torch.empty((1, ncuts), dtype=torch.long)], dim=0).to(self.device)
 
             # initialize the decoder with all cuts marked as not (processed, selected)
             self.decoder_edge_index_list = []
             self.decoder_edge_attr_list = []
-            edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
+            edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32).to(self.device)
 
             # create a tensor of all q values to return to user
             q_vals = torch.empty_like(edge_attr_dec)
@@ -511,8 +511,8 @@ class TQnet(torch.nn.Module):
                 edge_index_dec[1, :] = cut_index
 
                 # store the context and edge_index of the current iteration
-                self.decoder_edge_attr_list.append(edge_attr_dec.clone())
-                self.decoder_edge_index_list.append(edge_index_dec.clone())
+                self.decoder_edge_attr_list.append(edge_attr_dec.detach().cpu().clone())
+                self.decoder_edge_index_list.append(edge_index_dec.detach().cpu().clone())
 
                 # decode
                 decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)

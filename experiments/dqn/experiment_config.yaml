@@ -18,7 +18,7 @@ dqn_objective: db_auc
 empty_action_penalty: 0
 
 # DQN ARCHITECTURE HPARAMS
-dqn_arch: QNet
+dqn_arch: TQNet
 emb_dim: 128
 cut_conv: CutConv
 encoder_cut_conv_layers: 1
@@ -58,6 +58,7 @@ num_episodes: 2000000
 log_interval: 20
 checkpoint_interval: 20
 verbose: 1
+debug_cuda: False
 
 # SCIP STUFF
 reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP

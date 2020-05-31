@@ -133,7 +133,7 @@ def get_transition(scip_state,
         edge_index_dec, edge_attr_dec = transformer_decoder_context
     else:
         edge_index_dec = torch.tensor([[0], [0]], dtype=torch.long)  # self loop
-        edge_attr_dec = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
+        edge_attr_dec = torch.zeros(size=(1, 2), dtype=torch.float32)  # null attributes
 
     if action is not None:
         a = torch.from_numpy(action).long()

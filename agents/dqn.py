@@ -173,7 +173,6 @@ class DQN(Sepa):
                         edge_attr_a2v=batch.edge_attr_a2v,
                         edge_index_a2a=batch.edge_index_a2a,
                         edge_attr_a2a=batch.edge_attr_a2a,
-                        x_a_batch=batch.x_a_batch
                     )
                     return q_values.max(1)[1]
             else:
@@ -191,8 +190,7 @@ class DQN(Sepa):
                     edge_attr_c2v=batch.edge_attr_c2v,
                     edge_attr_a2v=batch.edge_attr_a2v,
                     edge_index_a2a=batch.edge_index_a2a,
-                    edge_attr_a2a=batch.edge_attr_a2a,
-                    x_a_batch=batch.x_a_batch
+                    edge_attr_a2a=batch.edge_attr_a2a
                 )
                 return q_values.max(1)[1]
 
