@@ -146,7 +146,7 @@ def get_transition(scip_state,
         assert r.shape[0] == x_a.shape[0]  # n_a_nodes
     else:
         # don't care
-        r = torch.zeros(size=(x_a.shape[0], ), dtype=torch.long)
+        r = torch.zeros(size=(x_a.shape[0], ), dtype=torch.float32)
 
     # proceses the next state:
     if scip_next_state is not None:

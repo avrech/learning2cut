@@ -140,9 +140,9 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
     # if ft is decreasing function, we flip it to increasing.
     # finally, it should looks like:
     # 1__^_ _ _ _ _ _ _ _ _ _ _
-    #    |      ________/ |
-    #    |  ___/|    |    |
-    #    | / |  |    |    |
+    #    |         _______|
+    #    |     ___/  |    |
+    #    | ___/ |    |    |
     #    |/a0|a1| ...|aN-1|
     # 0__|___|__|____|____|________
     #    t0  t1 t2   tN-1 t_support (normalized such that t_support = 1)

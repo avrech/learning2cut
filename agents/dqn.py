@@ -15,6 +15,8 @@ from torch_scatter import scatter_mean, scatter_max
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
 from utils.functions import get_normalized_areas
+from collections import namedtuple
+StateActionContext = namedtuple('StateActionContext', ('scip_state', 'action', 'transformer_context'))
 
 
 class ReplayMemory(object):
@@ -73,6 +75,7 @@ class DQN(Sepa):
         self.nstep_learning = hparams.get('nstep_learning', 1)
         self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
         self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
+        self.empty_action_penalty = self.hparams.get('empty_action_penalty', 0)
 
         # training stuff
         self.steps_done = 0
@@ -93,7 +96,7 @@ class DQN(Sepa):
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_pairs = []
+        self.state_action_context_list = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -127,7 +130,7 @@ class DQN(Sepa):
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_pairs = []
+        self.state_action_context_list = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -352,9 +355,9 @@ class DQN(Sepa):
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
             if self.use_transformer:
-                self.state_action_pairs.append((cur_state, available_cuts, self.policy_net.decoder_context))
+                self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, self.policy_net.decoder_context))
             else:
-                self.state_action_pairs.append((cur_state, available_cuts, None))
+                self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, None))
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
@@ -479,7 +482,7 @@ class DQN(Sepa):
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
             # and store a transition (s_t, a_t, r_t, s_{t+n}
-            n_transitions = len(self.state_action_pairs)
+            n_transitions = len(self.state_action_context_list)
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
@@ -493,8 +496,8 @@ class DQN(Sepa):
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_pairs, R)):
-                next_state, _ = self.state_action_pairs[step+n_steps] if step+n_steps < n_transitions else (None, None)
+            for step, ((state, action, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_context_list, R)):
+                next_state, _, _ = self.state_action_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
@@ -510,6 +513,11 @@ class DQN(Sepa):
                 else:
                     reward = joint_reward * np.ones_like(normalized_slack)
 
+                # penalize "empty" action
+                is_empty_action = np.logical_not(action['selected']).all()
+                if self.empty_action_penalty is not None and is_empty_action:
+                    reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
+
                 transition = get_transition(scip_state=state,
                                             action=action['selected'],
                                             transformer_decoder_context=transformer_decoder_context,
@@ -520,7 +528,7 @@ class DQN(Sepa):
         # compute some stats and store in buffer
         active_applied_ratio = []
         applied_available_ratio = []
-        for _, action in self.state_action_pairs:
+        for _, action, _ in self.state_action_context_list:
             normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
             approximately_zero = np.abs(normalized_slack) < 1e-6

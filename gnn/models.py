@@ -422,7 +422,7 @@ class TQnet(torch.nn.Module):
                                                                 edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
                                                                 emb_dim=hparams.get('emb_dim', 32),                   # default
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
-                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1))))
+                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1) - 1)))
                                         for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
 
         # stack cut conv layers todo consider skip connections
@@ -446,14 +446,14 @@ class TQnet(torch.nn.Module):
             'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
                                                                   edge_attr_dim=2,
                                                                   aggr=hparams.get('cut_conv_aggr', 'mean')))
-                                        for i in range(hparams.get('decoder_layers', 1))])),
+                                        for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
             'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
                                                                   out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
                                                                   edge_attr_dim=2,
                                                                   edge_attr_emb=4,
                                                                   heads=hparams.get('attention_heads', 4)))
-                                        for i in range(hparams.get('decoder_layers', 1))])),
-        }.get('decoder_conv', 'CATConv')
+                                        for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
+        }.get('cut_conv', 'CATConv')
         self.decoder_edge_attr_list = None
         self.decoder_edge_index_list = None
         self.decoder_context = None
@@ -546,7 +546,6 @@ class Qnet(torch.nn.Module):
     def __init__(self, hparams={}):
         super(Qnet, self).__init__()
         self.hparams = hparams
-        assert hparams.get('cuts_embedding_layers', 1) == 1, "Not implemented"
 
         ###########
         # Encoder #
@@ -558,7 +557,7 @@ class Qnet(torch.nn.Module):
                                                                 edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
                                                                 emb_dim=hparams.get('emb_dim', 32),  # default
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),  # default
-                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1))))
+                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1) - 1)))
                                         for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
 
         # stack cut conv layers todo consider skip connections
@@ -573,7 +572,7 @@ class Qnet(torch.nn.Module):
                                                                   edge_attr_emb=1,
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
-        }.get('cut_conv', 'CATConv')
+        }.get(hparams.get('cut_conv', 'CATConv'))
 
         ###########
         # Decoder #
