@@ -1,11 +1,11 @@
 # DQN ALGORITHM HPARAMS
 batch_size: 1024
-mini_batch_size: 128
+mini_batch_size: 256
 n_sgd_epochs: 10
 lr: 0.001 # 0.01, 0.001
 weight_decay: 0.0001
 nstep_learning: 4 # 1, 4
-backprop_interval: 10
+backprop_interval: 1  # 10
 target_update_interval: 1000
 value_aggr: mean
 credit_assignment: True
@@ -20,7 +20,7 @@ empty_action_penalty: 0
 # DQN ARCHITECTURE HPARAMS
 dqn_arch: TQNet
 emb_dim: 128
-cut_conv: CutConv
+cut_conv: CATConv
 encoder_cut_conv_layers: 1
 encoder_lp_conv_layers: 1
 decoder_cut_conv_layers: 1

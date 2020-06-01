@@ -597,11 +597,14 @@ class DQN(Sepa):
         if save_best:
             self._save_if_best()
         cur_time_sec = time() - self.start_time + self.walltime_offset
-        print(f'Episode {self.i_episode} \t| ', end='')
+        if self.training:
+            print(f'Episode {self.i_episode} | ', end='')
+        else:
+            print(f'Eval {self.i_episode} | ', end='')
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
             std = np.std(vals)
-            print('{}: {:.4f} \t| '.format(k, avg), end='')
+            print('{}: {:.4f} | '.format(k, avg), end='')
             self.writer.add_scalar(k + '/' + self.dataset_name, avg,
                                    global_step=self.i_episode,
                                    walltime=cur_time_sec)
@@ -615,7 +618,7 @@ class DQN(Sepa):
             for k, vals in self.test_stats_buffer.items():
                 avg = np.mean(vals)
                 std = np.std(vals)
-                print('{}: {:.4f} \t| '.format(k, avg), end='')
+                print('{}: {:.4f} | '.format(k, avg), end='')
                 self.writer.add_scalar(k + '/' + self.dataset_name, avg,
                                        global_step=self.i_episode,
                                        walltime=cur_time_sec)
@@ -625,17 +628,17 @@ class DQN(Sepa):
                 self.test_stats_buffer[k] = []
 
         # log the average loss of the last training session
-        print('Loss: {:.4f} \t| '.format(self.loss_moving_avg), end='')
+        print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
                                global_step=self.i_episode,
                                walltime=cur_time_sec)
-        print(f'Step: {self.steps_done} \t| ', end='')
+        print(f'Step: {self.steps_done} | ', end='')
 
         d = int(np.floor(cur_time_sec/(3600*24)))
         h = int(np.floor(cur_time_sec/3600) - 24*d)
         m = int(np.floor(cur_time_sec/60) - 60*(24*d + h))
         s = int(cur_time_sec) % 60
-        print('Iteration Time: {:.1f}[sec]\t| '.format(cur_time_sec - self.last_time_sec), end='')
+        print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
 
