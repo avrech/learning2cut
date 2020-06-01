@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch_geometric.data.data import Data
-from torch_geometric.utils import dense_to_sparse
+from torch_geometric.utils import dense_to_sparse, add_remaining_self_loops
 
 
 class Transition(Data):
@@ -126,8 +126,18 @@ def get_transition(scip_state,
 
     # build the clique graph of the candidate cuts:
     edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality))
-    edge_attr_a2a.unsqueeze_(dim=1)
-
+    # add self loops with corresponding edge_attr_a2a=0 since it is orthogonality
+    # in case there is only one cut, edge_index_a2a and edge_attr_a2a are empty,
+    # and then we need to create them by hand
+    if x_a.shape[0] > 1:
+        edge_index_a2a, edge_attr_a2a = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_a2a, fill_value=0)
+        edge_attr_a2a.unsqueeze_(dim=1)
+    elif x_a.shape[0] == 1:
+        edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # single self loop
+        edge_attr_a2a = torch.zeros(size=(1, 1), dtype=torch.float32)  # self orthogonality
+    else:
+        raise ValueError
+    
     # if using transformer, take the decoder context and edge_index from the input, else generate empty one
     if transformer_decoder_context is not None:
         edge_index_dec, edge_attr_dec = transformer_decoder_context

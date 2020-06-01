@@ -75,7 +75,7 @@ class CATConv(MessagePassing):
         # projection of edge_attr to attention heads
         self.edge_attr_weight = Parameter(torch.Tensor(edge_attr_dim, heads * edge_attr_emb))  # todo
         # extend the attention projection vector according to the additional edge_attr dimensions
-        self.att = Parameter(torch.Tensor(1, heads, 2 * out_channels + edge_attr_dim))  # todo
+        self.att = Parameter(torch.Tensor(1, heads, 2 * out_channels + edge_attr_emb))  # todo
 
         if bias and concat:
             self.bias = Parameter(torch.Tensor(heads * out_channels))
@@ -102,22 +102,23 @@ class CATConv(MessagePassing):
         :param edge_index: torch.Tensor [2, |E|]
         :param edge_index: torch.Tensor [|E|, d_e]
         """
-        if len (inputs) == 3:
-            x, edge_index, edge_attr = inputs
-            size = None
-        else:
-            x, edge_index, edge_attr, size = inputs
-        if size is None and torch.is_tensor(x):
-            edge_index, _ = remove_self_loops(edge_index)
-            edge_index, _ = add_self_loops(edge_index,
-                                           num_nodes=x.size(self.node_dim))
+        x, edge_index, edge_attr = inputs
+
+        # masked out this original lines, we don't need them, and I don't know why they exist.
+        # in addition, I don't know what is the meaning of the input size
+        # originally there was input keyword size=None, and then:
+        # if size is None and torch.is_tensor(x):
+        #     edge_index, _ = remove_self_loops(edge_index)
+        #     edge_index, _ = add_self_loops(edge_index,
+        #                                    num_nodes=x.size(self.node_dim))
+
         if torch.is_tensor(x):
             x = torch.matmul(x, self.weight)
         else:
             x = (None if x[0] is None else torch.matmul(x[0], self.weight),
                  None if x[1] is None else torch.matmul(x[1], self.weight))
         edge_attr = torch.matmul(edge_attr, self.edge_attr_weight)
-        return self.propagate(edge_index, size=size, x=x, edge_attr=edge_attr), edge_index, edge_attr, size  # todo verify
+        return self.propagate(edge_index, x=x, edge_attr=edge_attr), edge_index, edge_attr  # todo verify
 
     def message(self, edge_index_i, x_i, x_j, size_i, edge_attr):  # todo verify
         # Compute attention coefficients.
@@ -510,7 +511,7 @@ class TQnet(torch.nn.Module):
                 # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
                 edge_index_dec[1, :] = cut_index
 
-                # store the context and edge_index of the current iteration
+                # store the context (edge_index_dec and edge_attr_dec) of the current iteration
                 self.decoder_edge_attr_list.append(edge_attr_dec.detach().cpu().clone())
                 self.decoder_edge_index_list.append(edge_index_dec.detach().cpu().clone())
 

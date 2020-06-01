@@ -5,7 +5,7 @@ from utils.data import get_transition
 import os
 import math
 import random
-from gnn.models import Qnet, TQnet
+from gnn.models import Qnet, TQnet, TransformerDecoderContext
 import torch
 import scipy as sp
 import torch.optim as optim
@@ -174,10 +174,49 @@ class DQN(Sepa):
                         edge_index_a2a=batch.edge_index_a2a,
                         edge_attr_a2a=batch.edge_attr_a2a,
                     )
-                    return q_values.max(1)[1]
+                    greedy_action = q_values.max(1)[1].detach().cpu().numpy().astype(np.bool)
+
+                    if self.use_transformer:
+                        # return also the decoder context to store for backprop
+                        decoder_context = self.policy_net.decoder_context
+                    else:
+                        decoder_context = None
+                    return greedy_action, decoder_context
+
             else:
-                random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.long)
-                return random_action
+                # randomize action
+                random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
+                if self.use_transformer:
+                    # we create random decoder context to store for backprop.
+                    # we randomize inference order for building the context,
+                    # since it is exactly what the decoder does.
+                    decoder_edge_attr_list = []
+                    decoder_edge_index_list = []
+                    ncuts = random_action.shape[0]
+                    inference_order = torch.randperm(ncuts)
+                    edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                                torch.empty((1, ncuts), dtype=torch.long)], dim=0)
+                    edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
+                    # iterate over all cuts in the random order, and set each one a context
+                    for cut_index in inference_order:
+                        # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+                        edge_index_dec[1, :] = cut_index
+                        # store the context (edge_index_dec and edge_attr_dec) of the current iteration
+                        decoder_edge_attr_list.append(edge_attr_dec.clone())
+                        decoder_edge_index_list.append(edge_index_dec.clone())
+                        # assign the random action of cut_index to the context of the next round
+                        edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
+                        edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
+
+                    # finally, stack the decoder edge_attr and edge_index tensors,
+                    # and make a transformer context in order to generate later a Transition for training,
+                    # allowing by that fast parallel backprop
+                    edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+                    edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
+                    random_decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
+                else:
+                    random_decoder_context = None
+                return random_action.numpy().astype(np.bool), random_decoder_context
         else:
             # in test time, take greedy action
             with torch.no_grad():
@@ -192,7 +231,9 @@ class DQN(Sepa):
                     edge_index_a2a=batch.edge_index_a2a,
                     edge_attr_a2a=batch.edge_attr_a2a
                 )
-                return q_values.max(1)[1]
+                greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
+                # return None as decoder context, since it is used only in training
+                return greedy_action, None
 
     # done
     def optimize_model(self):
@@ -331,12 +372,12 @@ class DQN(Sepa):
         # since the terminal state is not important.
         if available_cuts['ncuts'] > 0:
 
-            # select an action
-            action = self._select_action(cur_state).detach().cpu().numpy().astype(np.bool)
+            # select an action (and get the decoder context for a case we use transformer
+            action, decoder_context = self._select_action(cur_state)
             available_cuts['selected'] = action
-            # force SCIP to take the selected cuts in action and discard the others
+            # force SCIP to take the selected cuts and discard the others
             if sum(action) > 0:
-                # need to do it onlt if there are selected actions
+                # need to do it only if there are selected actions
                 self.model.forceCuts(action)
                 # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
                 # in order to prevent it from adding more or less cuts
@@ -352,10 +393,7 @@ class DQN(Sepa):
             # unless the instance is solved and the episode is done.
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
-            if self.use_transformer:
-                self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, self.policy_net.decoder_context))
-            else:
-                self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, None))
+            self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, decoder_context))
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
