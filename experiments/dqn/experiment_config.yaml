@@ -58,6 +58,7 @@ datasets:
     scip_seed: [52, 176, 223]
 
 # GENERAL
+seed: 259385
 debug: False
 hide_scip_output: True
 num_episodes: 2000000

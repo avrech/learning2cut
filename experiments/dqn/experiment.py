@@ -15,6 +15,11 @@ from tqdm import tqdm
 
 
 def experiment(hparams):
+    # fix random seed for all experiment
+    if hparams.get('seed', None) is not None:
+        np.random.seed(hparams['seed'])
+        torch.manual_seed(hparams['seed'])
+
     # datasets and baselines
     dataset_paths = {}
     datasets = hparams['datasets']
@@ -100,11 +105,13 @@ def experiment(hparams):
         model.setLongintParam('limits/nodes', 1)  # solve only at the root node
         model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
-        # set up randomization
-        if scip_seed is not None:
-            model.setBoolParam('randomization/permutevars', True)
-            model.setIntParam('randomization/permutationseed', 'scip_seed')
-            model.setIntParam('randomization/randomseedshift', 'scip_seed')
+        # set environment random seed
+        if scip_seed is None:
+            # set random scip seed
+            scip_seed = np.random.randint(1000000000)
+        model.setBoolParam('randomization/permutevars', True)
+        model.setIntParam('randomization/permutationseed', scip_seed)
+        model.setIntParam('randomization/randomseedshift', scip_seed)
 
         if hparams.get('hide_scip_output', True):
             model.hideOutput()
@@ -143,7 +150,7 @@ def experiment(hparams):
             if i_episode % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
                 for G, baseline in dataset['instances']:
-                    for scip_seed in dataset['scip_seed'].values():
+                    for scip_seed in dataset['scip_seed']:
                         execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
                 dqn_agent.log_stats(save_best=(dataset_name[-8:] == 'validset'))
         dqn_agent.train()
