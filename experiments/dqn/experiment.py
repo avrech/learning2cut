@@ -76,7 +76,7 @@ def experiment(hparams):
     if hparams.get('resume_training', False):
         dqn_agent.load_checkpoint()
 
-    def execute_episode(G, baseline, lp_iterations_limit, dataset_name='trainset'):
+    def execute_episode(G, baseline, lp_iterations_limit, dataset_name='trainset', scip_seed=None):
         # create SCIP model for G
         model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))  # disable default cuts
 
@@ -101,10 +101,10 @@ def experiment(hparams):
         model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
         # set up randomization
-        if hparams.get('scip_seed', None) is not None:
+        if scip_seed is not None:
             model.setBoolParam('randomization/permutevars', True)
-            model.setIntParam('randomization/permutationseed', hparams.get('scip_seed'))
-            model.setIntParam('randomization/randomseedshift', hparams.get('scip_seed'))
+            model.setIntParam('randomization/permutationseed', 'scip_seed')
+            model.setIntParam('randomization/randomseedshift', 'scip_seed')
 
         if hparams.get('hide_scip_output', True):
             model.hideOutput()
@@ -143,7 +143,8 @@ def experiment(hparams):
             if i_episode % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
                 for G, baseline in dataset['instances']:
-                    execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name)
+                    for scip_seed in dataset['scip_seed'].values():
+                        execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
                 dqn_agent.log_stats(save_best=(dataset_name[-8:] == 'validset'))
         dqn_agent.train()
 
