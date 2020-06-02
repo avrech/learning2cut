@@ -113,25 +113,36 @@ def verify_maxcut_sol(model, x, G):
 
 def get_normalized_areas(t, ft, t_support=None, reference=0):
     """
-    Compute the area under f(t) vs. t on t_support
+    Compute the area under f(t) vs. t on t_support.
+    If the last point (t[-1], ft[-1]) is outside t_support (t[-1] > t_support),
+    we cut the curve, overriding t[-1] by t_support,
+    and overriding ft[-1] by the linear interpolation of ft at t=t_support.
     :param t: lp_iterations
     :param ft: dualbound (or gap)
-    :param t_support:
+    :param t_support: scalar
     :param reference: optimal dualbound (or 0 for gap integral)
     :return: array of length = len(t) -1 , containing the area under the normalized curve
     for each interval in t,
     using 1st order interpolation to approximate ft between each adjacent points in t.
     """
+    t_support = t[-1] if t_support is None else t_support
 
     # if t[-1] < t_support, extend t to t_support
     # and extend ft with a constant value ft[-1]
     extended = False
-    t_support = t[-1] if t_support is None else t_support
-
     if t[-1] < t_support:
         ft = ft + [ft[-1]]
         t = t + [t_support]
         extended = True
+    # truncate t and ft if t[-1] exceeded t_support
+    if t[-1] > t_support:
+        assert t[-2] < t_support
+        # compute ft slope in the last interval [t[-2], t[-1]]
+        slope = (ft[-1] - ft[-2]) / (t[-1] - t[-2])
+        # compute the linear interpolation of ft at t_support
+        ft[-1] = ft[-2] + slope * (t_support - t[-2])
+        t[-1] = t_support
+
     ft = np.array(ft)
     t = np.array(t)
 
