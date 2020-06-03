@@ -88,7 +88,7 @@ def experiment(hparams):
                           priority=1000000, freq=1)
 
         # reset dqn_agent to start a new episode
-        dqn_agent.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline, dataset_name=dataset_name)
+        dqn_agent.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline, dataset_name=dataset_name, scip_seed=scip_seed)
 
         # include dqn_agent, setting lower priority than the cycle inequalities separator
         model.includeSepa(dqn_agent, 'DQN', 'Cut selection agent',

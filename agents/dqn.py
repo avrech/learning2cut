@@ -95,6 +95,7 @@ class DQN(Sepa):
         self.x = None
         self.y = None
         self.baseline = None
+        self.scip_seed = None
         self.action = None
         self.prev_action = None
         self.prev_state = None
@@ -126,11 +127,12 @@ class DQN(Sepa):
         self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
 
     # done
-    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset'):
+    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
         self.G = G
         self.x = x
         self.y = y
         self.baseline = baseline
+        self.scip_seed = scip_seed
         self.action = None
         self.prev_action = None
         self.prev_state = None
@@ -601,10 +603,10 @@ class DQN(Sepa):
         self.tmp_stats_buffer['gap_auc'].append(gap_auc)
         self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
         self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
-        if self.baseline.get('db_auc', None) is not None:
+        if self.baseline.get('rootonly_stats', None) is not None:
             # this is evaluation round.
-            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['db_auc'])
-            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['gap_auc'])
+            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
+            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
 
     # done
     def log_stats(self, save_best=False):
@@ -661,15 +663,31 @@ class DQN(Sepa):
         self.last_time_sec = cur_time_sec
 
     def store_episode_plot(self):
-        """ plot the agent dualbound/gap together with the baseline and save in fig_list """
+        """ plot dqn agent dualbound/gap curve together with the baseline curve and save in fig_list """
+        dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
+        if dqn_lpiter[-1] < self.lp_iterations_limit:
+            # extend curve to the limit
+            dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
+            dqn_db = dqn_db + dqn_db[-1:]
+            dqn_gap = dqn_gap + dqn_gap[-1:]
+        bsl_lpiter = self.baseline['rootonly_stats'][self.scip_seed]['lp_iterations']
+        bsl_db = self.baseline['rootonly_stats'][self.scip_seed]['dualbound']
+        bsl_gap = self.baseline['rootonly_stats'][self.scip_seed]['gap']
+        if bsl_lpiter[-1] < self.lp_iterations_limit:
+            # extend curve to the limit
+            bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
+            bsl_db = bsl_db + bsl_db[-1:]
+            bsl_gap = bsl_gap + bsl_gap[-1:]
+        # plot dualbound
         dualbound_fig = plt.figure()
-        plt.plot(self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], 'b', label='DQN')
-        plt.plot(self.baseline['rootonly_stats']['lp_iterations'], self.baseline['rootonly_stats']['dualbound'], 'r', label='SCIP default')
+        plt.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
+        plt.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
         plt.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
         self.figures['Dual_Bound_vs_LP_Iterations'].append(dualbound_fig)
+        # plot gap
         gap_fig = plt.figure()
-        plt.plot(self.episode_stats['lp_iterations'], self.episode_stats['gap'], 'b', label='DQN')
-        plt.plot(self.baseline['rootonly_stats']['lp_iterations'], self.baseline['rootonly_stats']['gap'], 'r', label='SCIP default')
+        plt.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
+        plt.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
         plt.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
         self.figures['Gap_vs_LP_Iterations'].append(gap_fig)
 
