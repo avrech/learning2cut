@@ -483,6 +483,22 @@ class DQN(Sepa):
         self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
         self.episode_stats['dualbound'].append(self.model.getDualbound())
 
+        # enforce the lp_iterations_limit
+        lp_iterations_limit = self.lp_iterations_limit
+        if lp_iterations_limit > 0 and self.episode_stats['lp_iterations'][-1] > lp_iterations_limit:
+            # interpolate the dualbound and gap at the limit
+            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit
+            t = self.episode_stats['lp_iterations'][-2:]
+            for k in ['dualbound', 'gap']:
+                ft = self.episode_stats[k][-2:]
+                # compute ft slope in the last interval [t[-2], t[-1]]
+                slope = (ft[-1] - ft[-2]) / (t[-1] - t[-2])
+                # compute the linear interpolation of ft at the limit
+                interpolated_ft = ft[-2] + slope * (lp_iterations_limit - t[-2])
+                self.episode_stats[k][-1] = interpolated_ft
+            # finally truncate the lp_iterations to the limit
+            self.episode_stats['lp_iterations'][-1] = lp_iterations_limit
+
     # done
     def eval(self):
         self.training = False
