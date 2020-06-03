@@ -157,19 +157,37 @@ class MccormickCycleSeparator(Sepa):
         # NOTE: the last update must be done after the solver terminates optimization,
         # outside of this module, by calling McCormicCycleSeparator.update_stats() one more time.
         # if self._round_cnt > 0:
-        cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
+        # cycle_cuts, cycle_cuts_applied = get_separator_cuts_applied(self.model, self.name)
         self.stats['ncuts'].append(self.model.getNCuts() - self._cuts_probing)
         self.stats['ncuts_applied'].append(self.model.getNCutsApplied() - self._cuts_applied_probing)
         self.stats['cycles_sepa_time'].append(self.time_spent)
         self.stats['solving_time'].append(self.model.getSolvingTime())
         self.stats['processed_nodes'].append(self.model.getNNodes())
-        self.stats['gap'].append(self.model.getGap())
         self.stats['lp_rounds'].append(self.model.getNLPs() - self._lp_rounds_probing)
+        self.stats['gap'].append(self.model.getGap())
         self.stats['lp_iterations'].append(self.model.getNLPIterations() - self._lp_iterations_probing)
         self.stats['dualbound'].append(self.model.getDualbound())
+
+        # enforce the lp_iterations_limit:
+        lp_iterations_limit = self.hparams.get('lp_iterations_limit', -1)
+        if lp_iterations_limit > 0 and self.stats['lp_iterations'][-1] > lp_iterations_limit:
+            # interpolate the dualbound and gap at the limit
+            assert self.stats['lp_iterations'][-2] < lp_iterations_limit
+            t = self.stats['lp_iterations'][-2:]
+            for k in ['dualbound', 'gap']:
+                ft = self.stats[k][-2:]
+                # compute ft slope in the last interval [t[-2], t[-1]]
+                slope = (ft[-1] - ft[-2]) / (t[-1] - t[-2])
+                # compute the linear interpolation of ft at the limit
+                interpolated_ft = ft[-2] + slope * (lp_iterations_limit - t[-2])
+                self.stats[k][-1] = interpolated_ft
+            # finally truncate the lp_iterations to the limit
+            self.stats['lp_iterations'][-1] = lp_iterations_limit
+
         self.stats['nchordless'].append(self.nchordless)
         self.stats['nsimple'].append(self.nsimple)
         self.stats['ncycles'].append(self.ncycles)
+
         if self.model.getStage() == SCIP_STAGE.SOLVING:
             self.model.queryRows(self.current_round_cycles)
             self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
