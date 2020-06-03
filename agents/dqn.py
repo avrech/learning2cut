@@ -16,6 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
 from utils.functions import get_normalized_areas
 from collections import namedtuple
+import matplotlib.pyplot as plt
 StateActionContext = namedtuple('StateActionContext', ('scip_state', 'action', 'transformer_context'))
 
 
@@ -93,6 +94,7 @@ class DQN(Sepa):
         self.G = None
         self.x = None
         self.y = None
+        self.baseline = None
         self.action = None
         self.prev_action = None
         self.prev_state = None
@@ -117,9 +119,10 @@ class DQN(Sepa):
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
-        self.test_stats_buffer = {'db_auc_frac': [], 'gap_auc_frac': []}
+        self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
         self.best_perf = {'easy_validset': -1000000, 'medium_validset': -1000000, 'hard_validset': -1000000}
         self.loss_moving_avg = 0
+        self.figures = {'dualbound_vs_lp_iterations': [], 'gap_vs_lp_iterations': []}
 
     # done
     def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset'):
@@ -583,8 +586,8 @@ class DQN(Sepa):
         self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
         if self.baseline.get('db_auc', None) is not None:
             # this is evaluation round.
-            self.test_stats_buffer['db_auc_frac'].append(db_auc/self.baseline['db_auc'])
-            self.test_stats_buffer['gap_auc_frac'].append(gap_auc/self.baseline['gap_auc'])
+            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['db_auc'])
+            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['gap_auc'])
 
     # done
     def log_stats(self, save_best=False):
@@ -601,37 +604,35 @@ class DQN(Sepa):
             print(f'Episode {self.i_episode} | ', end='')
         else:
             print(f'Eval {self.i_episode} | ', end='')
+
+        # plot normalized dualbound and gap auc
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
             std = np.std(vals)
             print('{}: {:.4f} | '.format(k, avg), end='')
-            self.writer.add_scalar(k + '/' + self.dataset_name, avg,
-                                   global_step=self.i_episode,
-                                   walltime=cur_time_sec)
-            self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std,
-                                   global_step=self.i_episode,
-                                   walltime=cur_time_sec)
-
+            self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=self.i_episode, walltime=cur_time_sec)
+            self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
             self.tmp_stats_buffer[k] = []
 
-        if len(self.test_stats_buffer['db_auc_frac']) > 0:
+        # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
+        if len(self.test_stats_buffer['db_auc_imp']) > 0:
             for k, vals in self.test_stats_buffer.items():
                 avg = np.mean(vals)
                 std = np.std(vals)
                 print('{}: {:.4f} | '.format(k, avg), end='')
-                self.writer.add_scalar(k + '/' + self.dataset_name, avg,
-                                       global_step=self.i_episode,
-                                       walltime=cur_time_sec)
-                self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std,
-                                       global_step=self.i_episode,
-                                       walltime=cur_time_sec)
+                self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=self.i_episode, walltime=cur_time_sec)
+                self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
                 self.test_stats_buffer[k] = []
+
+        # add episode figures (for validation and test sets only)
+        for k, figs in self.figures.items():
+            if len(figs) > 0:
+                self.writer.add_figure(k + '/' + self.dataset_name, figs, global_step=self.i_episode, walltime=cur_time_sec)
+            self.figures[k] = []
 
         # log the average loss of the last training session
         print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
-        self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
-                               global_step=self.i_episode,
-                               walltime=cur_time_sec)
+        self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=self.i_episode, walltime=cur_time_sec)
         print(f'Step: {self.steps_done} | ', end='')
 
         d = int(np.floor(cur_time_sec/(3600*24)))
@@ -641,6 +642,19 @@ class DQN(Sepa):
         print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
+
+    def store_episode_plot(self):
+        """ plot the agent dualbound/gap together with the baseline and save in fig_list """
+        dualbound_fig = plt.figure()
+        plt.plot(self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], 'b', label='DQN')
+        plt.plot(self.baseline['rootonly_stats']['lp_iterations'], self.baseline['rootonly_stats']['dualbound'], 'r', label='SCIP default')
+        plt.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+        self.figures['dualbound_vs_lp_iterations'].append(dualbound_fig)
+        gap_fig = plt.figure()
+        plt.plot(self.episode_stats['lp_iterations'], self.episode_stats['gap'], 'b', label='DQN')
+        plt.plot(self.baseline['rootonly_stats']['lp_iterations'], self.baseline['rootonly_stats']['gap'], 'r', label='SCIP default')
+        plt.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
+        self.figures['gap_vs_lp_iterations'].append(gap_fig)
 
     # done
     def save_checkpoint(self, filepath=None):
