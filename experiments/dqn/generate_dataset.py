@@ -121,7 +121,7 @@ def generate_dataset(config):
                         rootonly_model.hideOutput(quiet=config.get('quiet', False))
                         rootonly_model.optimize()
                         rootonly_sepa.finish_experiment()
-                        assert rootonly_sepa.stats['lp_iterations'][-1] == config['lp_iterations_limit']
+                        assert rootonly_sepa.stats['lp_iterations'][-1] <= config['lp_iterations_limit']
                         rootonly_stats[scip_seed] = rootonly_sepa.stats
 
                 # summarize results for G
