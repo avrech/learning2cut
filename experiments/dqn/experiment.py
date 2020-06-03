@@ -24,22 +24,17 @@ def experiment(hparams):
     dataset_paths = {}
     datasets = hparams['datasets']
     for dataset_name, dataset in datasets.items():
-        dataset_config = dataset['config']
-        dataset_paths[dataset_name] = os.path.join(hparams['datadir'], dataset_name, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(dataset_config['graph_size'], dataset_config['barabasi_albert_m'], dataset_config['weights'], dataset_config['dataset_generation_seed']))
+        dataset_paths[dataset_name] = os.path.join(hparams['datadir'], dataset_name, "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(dataset['graph_size'], dataset['barabasi_albert_m'], dataset['weights'], dataset['dataset_generation_seed']))
 
         # read all graphs with their baselines from disk
-        # and find the max lp_iterations_limit across all instances
         dataset['instances'] = []
-        lp_iterations_limit = 0
         for filename in tqdm(os.listdir(dataset_paths[dataset_name]), desc=f'Loading {dataset_name}'):
             with open(os.path.join(dataset_paths[dataset_name], filename), 'rb') as f:
                 G, baseline = pickle.load(f)
                 if baseline['is_optimal']:
-                    lp_iterations_limit = max(lp_iterations_limit, baseline['lp_iterations_limit'])
                     dataset['instances'].append((G, baseline))
                 else:
                     print(filename, ' is not solved to optimality')
-        dataset['lp_iterations_limit'] = lp_iterations_limit
         dataset['num_instances'] = len(dataset['instances'])
 
     # for the validation and test datasets compute some metrics:
@@ -50,15 +45,16 @@ def experiment(hparams):
         gap_auc_list = []
         for (_, baseline) in dataset['instances']:
             optimal_value = baseline['optimal_value']
-            dualbound = baseline['rootonly_stats']['dualbound']
-            gap = baseline['rootonly_stats']['gap']
-            lpiter = baseline['rootonly_stats']['lp_iterations']
-            db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
-            gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
-            baseline['db_auc'] = db_auc
-            baseline['gap_auc'] = gap_auc
-            db_auc_list.append(db_auc)
-            gap_auc_list.append(gap_auc)
+            for scip_seed in dataset['scip_seed']:
+                dualbound = baseline['rootonly_stats'][scip_seed]['dualbound']
+                gap = baseline['rootonly_stats'][scip_seed]['gap']
+                lpiter = baseline['rootonly_stats'][scip_seed]['lp_iterations']
+                db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
+                gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+                baseline['rootonly_stats'][scip_seed]['db_auc'] = db_auc
+                baseline['rootonly_stats'][scip_seed]['gap_auc'] = gap_auc
+                db_auc_list.append(db_auc)
+                gap_auc_list.append(gap_auc)
         # compute stats for the whole dataset
         db_auc_avg = np.mean(db_auc)
         db_auc_std = np.std(db_auc)
@@ -81,7 +77,7 @@ def experiment(hparams):
     if hparams.get('resume_training', False):
         dqn_agent.load_checkpoint()
 
-    def execute_episode(G, baseline, lp_iterations_limit, dataset_name='trainset25', scip_seed=None):
+    def execute_episode(G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
         # create SCIP model for G
         model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))  # disable default cuts
 
@@ -98,10 +94,10 @@ def experiment(hparams):
         model.includeSepa(dqn_agent, 'DQN', 'Cut selection agent',
                           priority=-100000000, freq=1)
 
-        # set some model parameters, to avoid branching, early stopping etc.
-        # termination condition is either optimality or lp_iterations_limit exceeded.
-        # since there is no way to limit lp_iterations explicitely,
-        # it is enforced implicitely inside the separators.
+        # set some model parameters, to avoid early branching.
+        # termination condition is either optimality or lp_iterations_limit.
+        # since there is no way to limit lp_iterations explicitly,
+        # it is enforced implicitly by the separators, which won't add any more cuts.
         model.setLongintParam('limits/nodes', 1)  # solve only at the root node
         model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
@@ -131,7 +127,7 @@ def experiment(hparams):
             filename = os.path.join(dataset_paths['trainset25'], filename)
             print(f'instance no. {graph_idx}, filename: {filename}')
 
-        execute_episode(G, baseline, trainset['lp_iterations_limit'])
+        execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
 
         if i_episode % hparams.get('backprop_interval', 10) == 0:
             dqn_agent.optimize_model()
@@ -197,13 +193,9 @@ if __name__ == '__main__':
     if hparams.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-    datasets = hparams['datasets']
-    for dataset_name, dataset in datasets.items():
-        with open(f'{dataset_name}_config.yaml') as f:
-            dataset['config'] = yaml.load(f, Loader=yaml.FullLoader)
-    # set logdir according to hparams
-    relative_logdir = f"lr_{hparams['lr']}-nstep_{hparams['nstep_learning']}-credit_{hparams['credit_assignment']}-gamma_{hparams['gamma']}-obj_{hparams['dqn_objective']}"
-    hparams['logdir'] = os.path.join(hparams['logdir'], relative_logdir)
+    # # set logdir according to hparams
+    # relative_logdir = f"lr_{hparams['lr']}-nstep_{hparams['nstep_learning']}-credit_{hparams['credit_assignment']}-gamma_{hparams['gamma']}-obj_{hparams['dqn_objective']}"
+    # hparams['logdir'] = os.path.join(hparams['logdir'], relative_logdir)
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
