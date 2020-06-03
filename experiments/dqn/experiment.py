@@ -145,9 +145,11 @@ def experiment(hparams):
                 continue
             if i_episode % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
-                for G, baseline in dataset['instances']:
+                for gidx, (G, baseline) in enumerate(dataset['instances']):
                     for scip_seed in dataset['scip_seed']:
                         execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
+                        if gidx == 0:
+                            dqn_agent.store_episode_plot()
                 dqn_agent.log_stats(save_best=(dataset_name[:8] == 'validset'))
         dqn_agent.train()
 

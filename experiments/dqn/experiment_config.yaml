@@ -28,6 +28,24 @@ attention_heads: 4
 lp_conv_aggr: mean
 cut_conv_aggr: mean
 
+# GENERAL
+seed: 259385
+debug: False
+hide_scip_output: True
+num_episodes: 2000000
+log_interval: 20
+checkpoint_interval: 20
+verbose: 1
+debug_cuda: False
+
+# SCIP STUFF
+reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
+use_general_cuts: False
+
+# CYCLE INEQUALITIES
+chordless_only: False
+simple_cycle_only: True
+
 # DATASETS
 # measured lp_iterations for SCIP solving at the root node only:
 # barabasi albert 25 (10000 instances) mean ~ 1.9K, std < 900
@@ -132,20 +150,3 @@ datasets:
     baseline_solver: scip
     save_all_stats: True
 
-# GENERAL
-seed: 259385
-debug: False
-hide_scip_output: True
-num_episodes: 2000000
-log_interval: 20
-checkpoint_interval: 20
-verbose: 1
-debug_cuda: False
-
-# SCIP STUFF
-reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
-use_general_cuts: False
-
-# CYCLE INEQUALITIES
-chordless_only: False
-simple_cycle_only: True

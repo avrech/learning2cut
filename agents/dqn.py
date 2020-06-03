@@ -16,6 +16,10 @@ from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
 from utils.functions import get_normalized_areas
 from collections import namedtuple
+import matplotlib as mpl
+mpl.rc('figure', max_open_warning=0)
+mpl.rcParams['text.antialiased'] = False
+mpl.use('agg')
 import matplotlib.pyplot as plt
 StateActionContext = namedtuple('StateActionContext', ('scip_state', 'action', 'transformer_context'))
 
@@ -663,7 +667,10 @@ class DQN(Sepa):
         self.last_time_sec = cur_time_sec
 
     def store_episode_plot(self):
-        """ plot dqn agent dualbound/gap curve together with the baseline curve and save in fig_list """
+        """
+        plot dqn agent dualbound/gap curve together with the baseline curve and save in fig_list.
+        should be called after each validation/test episode
+        """
         dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
         if dqn_lpiter[-1] < self.lp_iterations_limit:
             # extend curve to the limit
@@ -679,17 +686,25 @@ class DQN(Sepa):
             bsl_db = bsl_db + bsl_db[-1:]
             bsl_gap = bsl_gap + bsl_gap[-1:]
         # plot dualbound
-        dualbound_fig = plt.figure()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         plt.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
         plt.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
         plt.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
-        self.figures['Dual_Bound_vs_LP_Iterations'].append(dualbound_fig)
+        plt.legend()
+        plt.xlabel('LP Iterations')
+        plt.ylabel('Dualbound')
+        plt.title(f'SCIP Seed: {self.scip_seed}')
+        plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
+        self.figures['Dual_Bound_vs_LP_Iterations'].append(fig)
         # plot gap
-        gap_fig = plt.figure()
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         plt.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
         plt.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
         plt.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
-        self.figures['Gap_vs_LP_Iterations'].append(gap_fig)
+        plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
+        self.figures['Gap_vs_LP_Iterations'].append(fig)
 
     # done
     def save_checkpoint(self, filepath=None):
