@@ -43,7 +43,7 @@ datasets:
     graph_type: barabasi-albert
     dataset_generation_seed: 46
     graph_size: 25
-    dataset: trainset25
+    dataset_name: trainset25
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: False
