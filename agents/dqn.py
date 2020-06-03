@@ -120,9 +120,10 @@ class DQN(Sepa):
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
-        self.best_perf = {'easy_validset': -1000000, 'medium_validset': -1000000, 'hard_validset': -1000000}
+        # best performance log for validation sets
+        self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
         self.loss_moving_avg = 0
-        self.figures = {'dualbound_vs_lp_iterations': [], 'gap_vs_lp_iterations': []}
+        self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
 
     # done
     def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset'):
@@ -665,12 +666,12 @@ class DQN(Sepa):
         plt.plot(self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], 'b', label='DQN')
         plt.plot(self.baseline['rootonly_stats']['lp_iterations'], self.baseline['rootonly_stats']['dualbound'], 'r', label='SCIP default')
         plt.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
-        self.figures['dualbound_vs_lp_iterations'].append(dualbound_fig)
+        self.figures['Dual_Bound_vs_LP_Iterations'].append(dualbound_fig)
         gap_fig = plt.figure()
         plt.plot(self.episode_stats['lp_iterations'], self.episode_stats['gap'], 'b', label='DQN')
         plt.plot(self.baseline['rootonly_stats']['lp_iterations'], self.baseline['rootonly_stats']['gap'], 'r', label='SCIP default')
         plt.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
-        self.figures['gap_vs_lp_iterations'].append(gap_fig)
+        self.figures['Gap_vs_LP_Iterations'].append(gap_fig)
 
     # done
     def save_checkpoint(self, filepath=None):

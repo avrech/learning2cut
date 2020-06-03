@@ -44,7 +44,7 @@ def experiment(hparams):
 
     # for the validation and test datasets compute some metrics:
     for dataset_name, dataset in datasets.items():
-        if dataset_name == 'trainset':
+        if dataset_name == 'trainset25':
             continue
         db_auc_list = []
         gap_auc_list = []
@@ -71,7 +71,7 @@ def experiment(hparams):
         dataset['stats']['gap_auc_std'] = gap_auc_std
 
     # training
-    trainset = datasets['trainset']
+    trainset = datasets['trainset25']
     graph_indices = torch.randperm(trainset['num_instances'])
 
     # dqn agent
@@ -81,7 +81,7 @@ def experiment(hparams):
     if hparams.get('resume_training', False):
         dqn_agent.load_checkpoint()
 
-    def execute_episode(G, baseline, lp_iterations_limit, dataset_name='trainset', scip_seed=None):
+    def execute_episode(G, baseline, lp_iterations_limit, dataset_name='trainset25', scip_seed=None):
         # create SCIP model for G
         model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))  # disable default cuts
 
@@ -127,8 +127,8 @@ def experiment(hparams):
         graph_idx = graph_indices[i_episode % len(graph_indices)]
         G, baseline = trainset['instances'][graph_idx]
         if hparams.get('debug', False):
-            filename = os.listdir(dataset_paths['trainset'])[graph_idx]
-            filename = os.path.join(dataset_paths['trainset'], filename)
+            filename = os.listdir(dataset_paths['trainset25'])[graph_idx]
+            filename = os.path.join(dataset_paths['trainset25'], filename)
             print(f'instance no. {graph_idx}, filename: {filename}')
 
         execute_episode(G, baseline, trainset['lp_iterations_limit'])
@@ -145,14 +145,14 @@ def experiment(hparams):
         # evaluate the model on the validation and test sets
         dqn_agent.eval()
         for dataset_name, dataset in datasets.items():
-            if dataset_name == 'trainset':
+            if dataset_name == 'trainset25':
                 continue
             if i_episode % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
                 for G, baseline in dataset['instances']:
                     for scip_seed in dataset['scip_seed']:
                         execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
-                dqn_agent.log_stats(save_best=(dataset_name[-8:] == 'validset'))
+                dqn_agent.log_stats(save_best=(dataset_name[:8] == 'validset'))
         dqn_agent.train()
 
         if i_episode % hparams.get('checkpoint_interval', 100) == 0:
