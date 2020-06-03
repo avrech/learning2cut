@@ -86,9 +86,10 @@ def generate_dataset(config):
                                   priority=1000000,
                                   freq=1)
                 # set arbitrary random seed only for reproducibility and debug - doesn't matter for results
+                bnc_seed = 72
                 bnc_model.setBoolParam('randomization/permutevars', True)
-                bnc_model.setIntParam('randomization/permutationseed', 72)
-                bnc_model.setIntParam('randomization/randomseedshift', 72)
+                bnc_model.setIntParam('randomization/permutationseed', bnc_seed)
+                bnc_model.setIntParam('randomization/randomseedshift', bnc_seed)
                 bnc_model.setRealParam('limits/time', config['time_limit_sec'])
                 bnc_model.hideOutput(quiet=config.get('quiet', False))
                 bnc_model.optimize()
@@ -153,10 +154,11 @@ def generate_dataset(config):
 
                 # store extensive stats needed for evaluation
                 if save_all_stats:
-                    baseline['bnc_stats'] = bnc_sepa.stats
+                    baseline['bnc_stats'] = {bnc_seed: bnc_sepa.stats}
                     baseline['rootonly_stats'] = rootonly_stats
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, baseline), f)
+                    print('saved instance to ', filepath)
 
             if config['baseline_solver'] == 'gurobi':
                 from utils.gurobi_models import maxcut_mccormic_model as gurobi_model
