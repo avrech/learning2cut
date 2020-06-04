@@ -18,8 +18,8 @@ from utils.functions import get_normalized_areas
 from collections import namedtuple
 import matplotlib as mpl
 mpl.rc('figure', max_open_warning=0)
-mpl.rcParams['text.antialiased'] = False
-mpl.use('agg')
+# mpl.rcParams['text.antialiased'] = False
+# mpl.use('agg')
 import matplotlib.pyplot as plt
 StateActionContext = namedtuple('StateActionContext', ('scip_state', 'action', 'transformer_context'))
 
@@ -128,7 +128,8 @@ class DQN(Sepa):
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
         self.loss_moving_avg = 0
-        self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
+        # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
+        self.figures = {}
 
     # done
     def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
@@ -613,20 +614,37 @@ class DQN(Sepa):
             self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
 
     # done
-    def log_stats(self, save_best=False):
+    def log_stats(self, save_best=False, plot_figures=False):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
         This function should be called periodically during training,
-        and at the end of every evaluation session - <valid/test>_set_<easy/medium/hard>
+        and at the end of every validation/test set evaluation
+        save_best should be set to the best model according to the agent performnace on the validation set.
+        If the model has shown its best so far, we save the model parameters and the dualbound/gap curves
         """
-        if save_best:
-            self._save_if_best()
         cur_time_sec = time() - self.start_time + self.walltime_offset
+        if plot_figures:
+            self.decorate_figures()
+
+        if save_best:
+            # self._save_if_best()
+            perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])  # todo bug with (-) ?
+            if perf > self.best_perf[self.dataset_name]:
+                self.best_perf[self.dataset_name] = perf
+                self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_name}_checkpoint.pt'))
+                self.save_figures(filename_prefix='best')
+
         if self.training:
             print(f'Episode {self.i_episode} | ', end='')
         else:
             print(f'Eval {self.i_episode} | ', end='')
+
+        # add episode figures (for validation and test sets only)
+        if plot_figures:
+            for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+                self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
+                                       global_step=self.i_episode, walltime=cur_time_sec)
 
         # plot normalized dualbound and gap auc
         for k, vals in self.tmp_stats_buffer.items():
@@ -647,12 +665,6 @@ class DQN(Sepa):
                 self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
                 self.test_stats_buffer[k] = []
 
-        # add episode figures (for validation and test sets only)
-        for k, figs in self.figures.items():
-            if len(figs) > 0:
-                self.writer.add_figure(k + '/' + self.dataset_name, figs, global_step=self.i_episode, walltime=cur_time_sec)
-            self.figures[k] = []
-
         # log the average loss of the last training session
         print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=self.i_episode, walltime=cur_time_sec)
@@ -666,10 +678,22 @@ class DQN(Sepa):
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
 
-    def store_episode_plot(self):
+    def init_figures(self, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
+        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+            fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True)
+            fig.set_size_inches(w=8, h=10)
+            fig.set_tight_layout(True)
+            self.figures[figname] = {'fig': fig, 'axes': axes}
+        self.figures['nrows'] = nrows
+        self.figures['ncols'] = ncols
+        self.figures['col_labels'] = col_labels
+        self.figures['row_labels'] = row_labels
+
+    def add_episode_subplot(self, row, col):
         """
-        plot dqn agent dualbound/gap curve together with the baseline curve and save in fig_list.
-        should be called after each validation/test episode
+        plot the last episode curves to subplot in position (row, col)
+        plot dqn agent dualbound/gap curves together with the baseline curves.
+        should be called after each validation/test episode with row=graph_idx, col=seed_idx
         """
         dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
         if dqn_lpiter[-1] < self.lp_iterations_limit:
@@ -686,25 +710,58 @@ class DQN(Sepa):
             bsl_db = bsl_db + bsl_db[-1:]
             bsl_gap = bsl_gap + bsl_gap[-1:]
         # plot dualbound
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        plt.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
-        plt.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
-        plt.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
-        plt.legend()
-        plt.xlabel('LP Iterations')
-        plt.ylabel('Dualbound')
-        plt.title(f'SCIP Seed: {self.scip_seed}')
-        plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
-        self.figures['Dual_Bound_vs_LP_Iterations'].append(fig)
+        # fig = plt.figure()
+
+        ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+        ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
+        ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
+        ax.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+        # plt.legend()
+        # plt.xlabel('LP Iterations')
+        # plt.ylabel('Dualbound')
+        # plt.title(f'SCIP Seed: {self.scip_seed}')
+        # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
+        # self.figures['Dual_Bound_vs_LP_Iterations'].append(fig)
+
         # plot gap
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        plt.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
-        plt.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
-        plt.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
-        plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
-        self.figures['Gap_vs_LP_Iterations'].append(fig)
+
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111)
+        ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+        ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
+        ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
+        ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
+        # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
+        # self.figures['Gap_vs_LP_Iterations'].append(fig)
+
+    def decorate_figures(self, legend=True, col_labels=True, row_labels=True):
+        """ save figures to png file """
+        # decorate (title, labels etc.)
+        nrows, ncols = self.figures['nrows'], self.figures['ncols']
+        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+            if col_labels:
+                # add col labels at the first row only
+                for col in range(ncols):
+                    ax = self.figures[figname]['axes'][0, col]
+                    ax.set_title(self.figures['col_labels'][col])
+            if row_labels:
+                # add row labels at the first col only
+                for row in range(nrows):
+                    ax = self.figures[figname]['axes'][row, 0]
+                    ax.set_ylabel(self.figures['row_labels'][row])
+            if legend:
+                # add legend to the bottom-left subplot only
+                ax = self.figures[figname]['axes'][-1, 0]
+                ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), fancybox=True, shadow=True, ncol=1, borderaxespad=0.)
+
+    def save_figures(self, filename_prefix=None):
+        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+            # save png
+            fname = f'{self.dataset_name}_{figname}.png'
+            if filename_prefix is not None:
+                fname = filename_prefix + '_' + fname
+            fpath = os.path.join(self.logdir, fname)
+            self.figures[figname]['fig'].savefig(fpath)
 
     # done
     def save_checkpoint(self, filepath=None):

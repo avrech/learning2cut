@@ -145,12 +145,15 @@ def experiment(hparams):
                 continue
             if i_episode % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
-                for gidx, (G, baseline) in enumerate(dataset['instances']):
-                    for scip_seed in dataset['scip_seed']:
+                dqn_agent.init_figures(nrows=dataset['num_instances'],
+                                       ncols=len(dataset['scip_seed']),
+                                       col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+                                       row_labels=[f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])])
+                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+                    for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
                         execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
-                        if gidx == 0:
-                            dqn_agent.store_episode_plot()
-                dqn_agent.log_stats(save_best=(dataset_name[:8] == 'validset'))
+                        dqn_agent.add_episode_subplot(inst_idx, seed_idx)
+                dqn_agent.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
         dqn_agent.train()
 
         if i_episode % hparams.get('checkpoint_interval', 100) == 0:
