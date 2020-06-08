@@ -7,25 +7,30 @@ from collections import deque
 from copy import deepcopy
 from datetime import datetime
 from typing import Deque
-
 import numpy as np
 import pyarrow as pa
 import torch
 import torch.nn as nn
 import zmq
-
+import ray
+from agents.dqn import GDQN
 # from common.utils.utils import create_env
 
 
 class Worker(ABC):
-    def __init__(
-        self, worker_id: int, worker_brain: nn.Module, worker_cfg: dict, comm_cfg: dict
+    def __init__(self,
+                 worker_id: int,
+                 worker_brain: nn.Module,  # not really needed, but must keep it to reuse distributedRL.Apex
+                 worker_cfg: dict,
+                 comm_cfg: dict,
+                 **kwargs
     ):
         self.worker_id = worker_id
         self.cfg = worker_cfg
         self.device = worker_cfg["worker_device"]
-        self.brain = deepcopy(worker_brain)
-        self.brain.to(self.device)
+        self.policy_net = None  # todo - assigned in child class GDQN
+        # self.brain = deepcopy(worker_brain)
+        # self.brain.to(self.device)
 
         # # create env - todo: replace with scip
         # random.seed(self.worker_id)
@@ -41,6 +46,8 @@ class Worker(ABC):
 
         # initialize zmq sockets
         print(f"[Worker {self.worker_id}]: initializing sockets..")
+        self.sub_socket = None
+        self.push_socket = None
         self.initialize_sockets()
 
     @abstractmethod
@@ -54,7 +61,7 @@ class Worker(ABC):
         pass
 
     @abstractmethod
-    def preprocess_data(self, data) -> list:
+    def preprocess_data(self, **kwargs) -> list:
         """Preprocess collected data if necessary (e.g. n-step)"""
         pass
 
@@ -70,7 +77,7 @@ class Worker(ABC):
 
     def synchronize(self, new_params: list):
         """Synchronize worker brain with parameter server"""
-        for param, new_param in zip(self.brain.parameters(), new_params):
+        for param, new_param in zip(self.policy_net.parameters(), new_params):
             new_param = torch.FloatTensor(new_param).to(self.device)
             param.data.copy_(new_param)
 
@@ -114,9 +121,12 @@ class Worker(ABC):
 class ApeXWorker(Worker):
     """Abstract class for ApeX distrbuted workers """
 
-    def __init__(
-        self, worker_id: int, worker_brain: nn.Module, cfg: dict, comm_cfg: dict
-    ):
+    def __init__(self,
+                 worker_id: int,
+                 worker_brain: nn.Module,
+                 cfg: dict,
+                 comm_cfg: dict
+                 ):
         super().__init__(worker_id, worker_brain, cfg, comm_cfg)
         self.nstep_queue = deque(maxlen=self.cfg["num_step"])
         self.worker_buffer_size = self.cfg["worker_buffer_size"]
@@ -132,12 +142,12 @@ class ApeXWorker(Worker):
             discounted_reward = reward + self.gamma * discounted_reward
         nstep_data = (state, action, discounted_reward, last_state, done)
 
-        q_value = self.brain.forward(
+        q_value = self.policy_net.forward(
             torch.FloatTensor(state).unsqueeze(0).to(self.device)
         )[0][action]
 
         bootstrap_q = torch.max(
-            self.brain.forward(
+            self.policy_net.forward(
                 torch.FloatTensor(last_state).unsqueeze(0).to(self.device)
             ),
             1,
@@ -182,3 +192,154 @@ class ApeXWorker(Worker):
                 print(f"Worker {self.worker_id}: {episode_reward}")
 
         return local_buffer
+
+
+@ray.remote
+class DQNWorker(Worker, GDQN):
+    def __init__(self,
+                 worker_id: int,
+                 worker_brain: nn.Module,
+                 cfg: dict,
+                 common_config: dict,
+                 **kwargs
+                 ):
+        super().__init__(worker_id=worker_id, worker_brain=None, cfg=cfg, common_config=common_config, hparams=hparams)
+        # self.worker_buffer_size = self.cfg["worker_buffer_size"]
+        # self.eps_greedy = self.cfg["eps_greedy"]
+        # self.eps_decay = self.cfg["eps_decay"]
+        # self.gamma = self.cfg["gamma"]
+        # self.test_state = self.env.reset()
+
+    def select_action(self, state: np.ndarray) -> np.ndarray:
+        # self.eps_greedy = self.eps_greedy * self.eps_decay
+        # if np.random.randn() < self.eps_greedy:
+        #     return self.env.action_space.sample()
+        #
+        # state = torch.FloatTensor(state).to(self.device)
+        # state = state.unsqueeze(0)
+        # qvals = self.brain.forward(state)
+        # action = np.argmax(qvals.cpu().detach().numpy())
+        # return action
+        print('not relevant - do nothing!')
+        raise NotImplementedError
+
+    def environment_step(self, state: np.ndarray, action: np.ndarray) -> tuple:
+        # next_state, reward, done, _ = self.env.step(action)
+        # return (state, action, reward, next_state, done)
+        print('not relevant - do nothing!')
+        raise NotImplementedError
+
+    def write_log(self):
+        print("TODO: include Tensorboard..")
+
+    def test_run(self):
+        # self.eps_greedy = 0
+        update_step = 0
+        update_interval = self.cfg["param_update_interval"]
+        datasets = self.load_datasets()
+        while True:
+            if self.receive_new_params():
+                # todo - run here eval episodes,
+                #  update GDQN such that it logs metrics according to this update_step
+                #  verify
+                self.evaluate(datasets)
+                update_step = update_step + update_interval
+                # episode_reward = 0
+                # state = self.env.reset()
+                # done = False
+                # while True:
+                #     #self.env.render()
+                #     action = self.select_action(state)
+                #     transition = self.environment_step(state, action)
+                #     next_state = transition[-2]
+                #     done = transition[-1]
+                #     reward = transition[-3]
+                #
+                #     episode_reward = episode_reward + reward
+                #     state = next_state
+                #
+                #     if done:
+                #         break
+
+                # print(f"Interim Test {update_step}: {episode_reward}")
+
+            else:
+                pass
+
+    def preprocess_data(self, nstepqueue: Deque) -> tuple:
+        # todo
+        #  - replace by finish_episode
+        #  - support initial priorities: compute q_values, and bootstrapped reward using policy_net
+        #  - try returning Transition or transform to tuple of numpy arrays
+
+        discounted_reward = 0
+        _, _, _, last_state, done = nstepqueue[-1]
+        for transition in list(reversed(nstepqueue)):
+            state, action, reward, _, _ = transition
+            discounted_reward = reward + self.gamma * discounted_reward
+        nstep_data = (state, action, discounted_reward, last_state, done)
+
+        q_value = self.policy_net.forward(
+            torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        )[0][action]
+
+        bootstrap_q = torch.max(
+            self.policy_net.forward(
+                torch.FloatTensor(last_state).unsqueeze(0).to(self.device)
+            ),
+            1,
+        )
+
+        target_q_value = (
+            discounted_reward + self.gamma ** self.num_step * bootstrap_q[0]
+        )
+
+        priority_value = torch.abs(target_q_value - q_value).detach().view(-1)
+        priority_value = torch.clamp(priority_value, min=1e-8)
+        priority_value = priority_value.cpu().numpy().tolist()
+
+        return nstep_data, priority_value
+
+    def collect_data(self, verbose=False):
+        # todo
+        #  - replace by execute episode
+        #  - or more generally dqn experiment loop.
+        """Fill worker buffer until some stopping criterion is satisfied"""
+        local_buffer = []
+        nstep_queue = deque(maxlen=self.num_step)
+
+        while len(local_buffer) < self.worker_buffer_size:
+            episode_reward = 0
+            done = False
+            state = self.env.reset()
+            while not done:
+                action = self.select_action(state)
+                transition = self.environment_step(state, action)
+                next_state = transition[-2]
+                done = transition[-1]
+                reward = transition[-3]
+                episode_reward = episode_reward + reward
+
+                nstep_queue.append(transition)
+                if (len(nstep_queue) == self.num_step) or done:
+                    nstep_data, priorities = self.preprocess_data(nstep_queue)
+                    local_buffer.append([nstep_data, priorities])
+
+                state = next_state
+
+            if verbose:
+                print(f"Worker {self.worker_id}: {episode_reward}")
+
+        return local_buffer
+
+
+"""
+        test_state = torch.FloatTensor(
+            self.env.reset()
+        ).unsqueeze(0).to(self.device)
+        test_output = self.brain.forward(test_state)
+        while True:
+            if self.receive_new_params():
+                output = self.brain.forward(test_state)
+                print(test_output.squeeze(0) - output.squeeze(0))
+"""

@@ -84,7 +84,8 @@ class GDQN(Sepa):
         self.empty_action_penalty = self.hparams.get('empty_action_penalty', 0)
 
         # training stuff
-        self.steps_done = 0
+        self.num_env_steps_done = 0
+        self.num_sgd_steps_done = 0
         self.i_episode = 0
         self.training = True
         self.walltime_offset = 0
@@ -168,8 +169,8 @@ class GDQN(Sepa):
             # take epsilon-greedy action
             sample = random.random()
             eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
-                            math.exp(-1. * self.steps_done / self.eps_decay)
-            self.steps_done += 1
+                            math.exp(-1. * self.num_env_steps_done / self.eps_decay)
+            self.num_env_steps_done += 1
             if sample > eps_threshold:
                 with torch.no_grad():
                     # t.max(1) will return largest column value of each row.
@@ -377,6 +378,7 @@ class GDQN(Sepa):
                                                   dim_size=self.batch_size))  # output tensor size in dim after scattering
 
         new_priorities = td_error_l2_norm.cpu().numpy().tolist()
+        self.num_sgd_steps_done += 1
         return loss.item(), new_priorities
 
     def update_target(self):
@@ -705,7 +707,7 @@ class GDQN(Sepa):
         # log the average loss of the last training session
         print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
         self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=self.i_episode, walltime=cur_time_sec)
-        print(f'Step: {self.steps_done} | ', end='')
+        print(f'Step: {self.num_env_steps_done} | ', end='')
 
         d = int(np.floor(cur_time_sec/(3600*24)))
         h = int(np.floor(cur_time_sec/3600) - 24*d)
@@ -806,7 +808,8 @@ class GDQN(Sepa):
             'policy_net_state_dict': self.policy_net.state_dict(),
             'target_net_state_dict': self.target_net.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'steps_done': self.steps_done,
+            'num_env_steps_done': self.num_env_steps_done,
+            'num_sgd_steps_done': self.num_sgd_steps_done,
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
             'best_perf': self.best_perf,
@@ -834,7 +837,8 @@ class GDQN(Sepa):
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.steps_done = checkpoint['steps_done']
+        self.num_env_steps_done = checkpoint['num_env_steps_done']
+        self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
         self.best_perf = checkpoint['best_perf']
@@ -962,7 +966,7 @@ class GDQN(Sepa):
         graph_indices = torch.randperm(trainset['num_instances'])
         hparams = self.hparams
 
-        # infinite loop
+        # training infinite loop
         for i_episode in range(self.i_episode + 1, hparams['num_episodes']):
             # sample graph randomly
             graph_idx = graph_indices[i_episode % len(graph_indices)]
@@ -983,25 +987,8 @@ class GDQN(Sepa):
             if i_episode % hparams.get('log_interval', 100) == 0:
                 self.log_stats()
 
-            # evaluate the model on the validation and test sets
-            self.set_eval_mode()
-            for dataset_name, dataset in datasets.items():
-                if dataset_name == 'trainset25':
-                    continue
-                if i_episode % dataset['eval_interval'] == 0:
-                    print('Evaluating ', dataset_name)
-                    self.init_figures(nrows=dataset['num_instances'],
-                                           ncols=len(dataset['scip_seed']),
-                                           col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
-                                           row_labels=[f'inst {inst_idx}' for inst_idx in
-                                                       range(dataset['num_instances'])])
-                    for inst_idx, (G, baseline) in enumerate(dataset['instances']):
-                        for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
-                            self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
-                                                 scip_seed=scip_seed)
-                            self.add_episode_subplot(inst_idx, seed_idx)
-                    self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
-            self.set_training_mode()
+            # evaluate periodically
+            self.evaluate(datasets, i_episode=i_episode)
 
             if i_episode % hparams.get('checkpoint_interval', 100) == 0:
                 self.save_checkpoint()
@@ -1010,3 +997,24 @@ class GDQN(Sepa):
                 graph_indices = torch.randperm(trainset['num_instances'])
 
         return 0
+
+    def evaluate(self, datasets, i_episode=0):
+        # evaluate the model on the validation and test sets
+        self.set_eval_mode()
+        for dataset_name, dataset in datasets.items():
+            if dataset_name == 'trainset25':
+                continue
+            if i_episode % dataset['eval_interval'] == 0:
+                print('Evaluating ', dataset_name)
+                self.init_figures(nrows=dataset['num_instances'],
+                                  ncols=len(dataset['scip_seed']),
+                                  col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+                                  row_labels=[f'inst {inst_idx}' for inst_idx in
+                                              range(dataset['num_instances'])])
+                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+                    for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
+                        self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
+                                             scip_seed=scip_seed)
+                        self.add_episode_subplot(inst_idx, seed_idx)
+                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
+        self.set_training_mode()

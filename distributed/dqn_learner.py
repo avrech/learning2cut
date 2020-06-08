@@ -41,6 +41,7 @@ class DQNLearner(Learner, GDQN):
         """
         # todo: transition, weights, idxes = data
         transitions, weights, idxes = data
+        # todo - reconstruct Transition list from the arrays received
         loss, new_priorities = self.sgd_step(transitions)
         # todo - call DQN sgd_step
 
