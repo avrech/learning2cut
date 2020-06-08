@@ -4,26 +4,28 @@ import torch
 import torch.nn.functional as F
 # distributedRL base class for learner - implements the distributed part
 from common.abstract.learner import Learner
-from agents.dqn import DQN
+from agents.dqn import GDQN
 
 
 @ray.remote(num_gpus=1)
-class DQNLearner(Learner):
-    def __init__(self, brain, cfg: dict, comm_config: dict):
-        super().__init__(brain, cfg, comm_config)
-        self.num_step = self.cfg["num_step"]
-        self.gamma = self.cfg["gamma"]
-        self.tau = self.cfg["tau"]
-        self.network = self.brain[0]
-        self.network.to(self.device)
-        self.target_network = self.brain[1]
-        self.target_network.to(self.device)
-        self.network_optimizer = torch.optim.Adam(
-            self.network.parameters(), lr=self.cfg["learning_rate"]
-        )
-        self.target_optimizer = torch.optim.Adam(
-            self.target_network.parameters(), lr=self.cfg["learning_rate"]
-        )
+class DQNLearner(Learner, GDQN):
+    def __init__(self, hparams, **kwargs):
+        # brain, cfg: dict, comm_config: dict - old distributedRL stuff
+        super().__init__(brain=None, cfg=hparams, comm_config=hparams, hparams=hparams)
+
+        # self.num_step = self.cfg["num_step"]
+        # self.gamma = self.cfg["gamma"]
+        # self.tau = self.cfg["tau"]
+        # self.network = self.brain[0]
+        # self.network.to(self.device)
+        # self.target_network = self.brain[1]
+        # self.target_network.to(self.device)
+        # self.network_optimizer = torch.optim.Adam(
+        #     self.network.parameters(), lr=self.cfg["learning_rate"]
+        # )
+        # self.target_optimizer = torch.optim.Adam(
+        #     self.target_network.parameters(), lr=self.cfg["learning_rate"]
+        # )
 
     def write_log(self):
         # todo - call DQN.log_stats() or modify to log the relevant metrics
@@ -39,7 +41,7 @@ class DQNLearner(Learner):
         """
         # todo: transition, weights, idxes = data
         transitions, weights, idxes = data
-
+        loss, new_priorities = self.sgd_step(transitions)
         # todo - call DQN sgd_step
 
 
@@ -78,10 +80,10 @@ class DQNLearner(Learner):
         # new_priorities = torch.abs(target_q - curr_q1).detach().view(-1)
         # new_priorities = torch.clamp(new_priorities, min=1e-8)
         # new_priorities = new_priorities.cpu().numpy().tolist()
-
+        step_info = (loss, )
         return step_info, idxes, new_priorities
 
     def get_params(self):
-        model = deepcopy(self.network)
-        model = model.cpu()
-        return self.params_to_numpy(self.network)
+        # model = deepcopy(self.policy_net.cpu())
+        # model = model.cpu()
+        return self.params_to_numpy(self.policy_net)

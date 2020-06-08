@@ -11,7 +11,7 @@ import scipy as sp
 import torch.optim as optim
 import torch.nn.functional as F
 from torch_geometric.data.batch import Batch
-from torch_scatter import scatter_mean, scatter_max
+from torch_scatter import scatter_mean, scatter_max, scatter_add
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
 from utils.functions import get_normalized_areas
@@ -48,8 +48,8 @@ class ReplayMemory(object):
         return len(self.memory)
 
 
-class DQN(Sepa):
-    def __init__(self, name='DQN', hparams={}):
+class GDQN(Sepa):
+    def __init__(self, name='DQN', hparams={}, **kwargs):
         """
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
@@ -252,17 +252,18 @@ class DQN(Sepa):
         if len(self.memory) < self.batch_size:
             return
         transitions = self.memory.sample(self.batch_size)
+        self.sgd_step(transitions)
+
+    def sgd_step(self, transitions):
+        """ implement the basic DQN optimization step """
         # todo consider all features in follow_batch to parse correctly
         batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
-        self.sgd_step(batch)
 
-    def sgd_step(self, batch):
-        """ implement the basic DQN optimization step """
         action_batch = batch.a
 
-        # Compute Q(s_t, a):
-        # the model computes Q(s_t), then we select the columns of the actions taken, i.e action_batch.
-        state_action_values = self.policy_net(
+        # Compute Q(s, a):
+        # the model computes Q(s,:), then we select the columns of the actions taken, i.e action_batch.
+        q_values = self.policy_net(
             x_c=batch.x_c,
             x_v=batch.x_v,
             x_a=batch.x_a,
@@ -275,7 +276,7 @@ class DQN(Sepa):
             edge_index_dec=batch.edge_index_dec,  # transformer stuff
             edge_attr_dec=batch.edge_attr_dec     # transformer stuff
         )
-        state_action_values = state_action_values.gather(1, action_batch.unsqueeze(1))
+        q_values = q_values.gather(1, action_batch.unsqueeze(1))
 
         # Compute the Bellman target for all next states.
         # Expected values of actions for non_terminal_next_states are computed based
@@ -299,7 +300,9 @@ class DQN(Sepa):
             ns_edge_index_dec = None
             ns_edge_attr_dec = None
 
-        next_state_action_wise_target_q_values = self.target_net(
+        # for each graph in the next state batch, and for each cut, compute the q_values
+        # using the target network.
+        target_next_q_values = self.target_net(
             x_c=batch.ns_x_c,
             x_v=batch.ns_x_v,
             x_a=batch.ns_x_a,
@@ -313,12 +316,13 @@ class DQN(Sepa):
             edge_attr_dec=ns_edge_attr_dec
         )
 
+        # compute the target using either DQN target or DDQN target
         if self.hparams.get('update_rule', 'DQN') == 'DQN':
             # y = r + gamma max_a' target_net(s', a')
-            max_next_state_action_wise_target_q_values = next_state_action_wise_target_q_values.max(1)[0].detach()
+            max_target_next_q_values = target_next_q_values.max(1)[0].detach()
         elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
             # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-            next_state_action_wise_policy_q_values = self.policy_net(
+            policy_next_q_values = self.policy_net(
                 x_c=batch.ns_x_c,
                 x_v=batch.ns_x_v,
                 x_a=batch.ns_x_a,
@@ -331,28 +335,28 @@ class DQN(Sepa):
                 edge_index_dec=ns_edge_index_dec,
                 edge_attr_dec=ns_edge_attr_dec
             )
-            argmax_next_state_action_wise_policy_q_values = next_state_action_wise_policy_q_values.max(1)[1].detach()
-            max_next_state_action_wise_target_q_values = next_state_action_wise_target_q_values.gather(1, argmax_next_state_action_wise_policy_q_values).detach()
+            argmax_policy_next_q_values = policy_next_q_values.max(1)[1].detach()
+            max_target_next_q_values = target_next_q_values.gather(1, argmax_policy_next_q_values).detach()
 
         # aggregate the action-wise values using mean or max,
         # and generate for each graph in the batch a single value
-        next_state_values = self.aggr_func(max_next_state_action_wise_target_q_values,   # source vector
+        max_target_next_q_values_aggr = self.aggr_func(max_target_next_q_values,   # source vector
                                            batch.ns_x_a_batch,              # target index of each element in source
                                            dim=0,                           # scattering dimension
                                            dim_size=self.mini_batch_size)   # output tensor size in dim after scattering
 
         # override with zeros the values of terminal states which are zero by convention
-        next_state_values[batch.ns_terminal] = 0
-        # scatter the next state values graph-wise to update all action-wise rewards
-        next_state_values = next_state_values[batch.x_a_batch]
+        max_target_next_q_values_aggr[batch.ns_terminal] = 0
+        # broadcast the next state q_values graph-wise to update all action-wise rewards
+        target_next_q_values_broadcast = max_target_next_q_values_aggr[batch.x_a_batch]
 
-        # now compute the expected Q values for each action separately
+        # now compute the target Q values - action-wise
         reward_batch = batch.r
-        expected_state_action_values = (next_state_values * self.gamma ** self.nstep_learning) + reward_batch
+        target_q_values = reward_batch + (self.gamma ** self.nstep_learning) * target_next_q_values_broadcast
 
         # Compute Huber loss
         # todo - support weighting the losses as done in distributed RL
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+        loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1))
         self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
 
         # Optimize the model
@@ -363,8 +367,16 @@ class DQN(Sepa):
         self.optimizer.step()
 
         # todo - for distributed learning return losses to update priorities
-        # for reference look in dqn_learner,
-        return None
+        # for transition, compute the norm of its TD-error
+        td_error = torch.abs(q_values - target_q_values).detach().view(-1)
+        td_error = torch.clamp(td_error, min=1e-8)
+        # to compute p,q norm take power p and compute sqrt q.
+        td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch,  # target index of each element in source
+                                                  dim=0,                           # scattering dimension
+                                                  dim_size=self.mini_batch_size))  # output tensor size in dim after scattering
+
+        new_priorities = td_error_l2_norm.cpu().numpy().tolist()
+        return loss.item(), new_priorities
 
     def update_target(self):
         # Update the target network, copying all weights and biases in DQN
