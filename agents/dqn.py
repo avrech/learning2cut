@@ -5,7 +5,7 @@ from utils.data import get_transition
 import os
 import math
 import random
-from gnn.models import Qnet
+from gnn.models import Qnet, TQnet, TransformerDecoderContext
 import torch
 import scipy as sp
 import torch.optim as optim
@@ -15,6 +15,13 @@ from torch_scatter import scatter_mean, scatter_max
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import DataLoader
 from utils.functions import get_normalized_areas
+from collections import namedtuple
+import matplotlib as mpl
+mpl.rc('figure', max_open_warning=0)
+# mpl.rcParams['text.antialiased'] = False
+# mpl.use('agg')
+import matplotlib.pyplot as plt
+StateActionContext = namedtuple('StateActionContext', ('scip_state', 'action', 'transformer_context'))
 
 
 class ReplayMemory(object):
@@ -60,8 +67,8 @@ class DQN(Sepa):
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
         self.eps_decay = hparams.get('eps_decay', 200)
-        self.policy_net = Qnet(hparams=hparams).to(self.device)
-        self.target_net = Qnet(hparams=hparams).to(self.device)
+        self.policy_net = TQnet(hparams=hparams).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
+        self.target_net = TQnet(hparams=hparams).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
@@ -72,6 +79,8 @@ class DQN(Sepa):
             self.aggr_func = scatter_mean
         self.nstep_learning = hparams.get('nstep_learning', 1)
         self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
+        self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
+        self.empty_action_penalty = self.hparams.get('empty_action_penalty', 0)
 
         # training stuff
         self.steps_done = 0
@@ -89,10 +98,12 @@ class DQN(Sepa):
         self.G = None
         self.x = None
         self.y = None
+        self.baseline = None
+        self.scip_seed = None
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_pairs = []
+        self.state_action_context_list = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -113,20 +124,24 @@ class DQN(Sepa):
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
-        self.test_stats_buffer = {'db_auc_frac': [], 'gap_auc_frac': []}
-        self.best_perf = {'easy_validset': -1000000, 'medium_validset': -1000000, 'hard_validset': -1000000}
+        self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
+        # best performance log for validation sets
+        self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
         self.loss_moving_avg = 0
+        # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
+        self.figures = {}
 
     # done
-    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset'):
+    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
         self.G = G
         self.x = x
         self.y = y
         self.baseline = baseline
+        self.scip_seed = scip_seed
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_pairs = []
+        self.state_action_context_list = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -169,12 +184,50 @@ class DQN(Sepa):
                         edge_attr_a2v=batch.edge_attr_a2v,
                         edge_index_a2a=batch.edge_index_a2a,
                         edge_attr_a2a=batch.edge_attr_a2a,
-                        x_a_batch=batch.x_a_batch
                     )
-                    return q_values.max(1)[1]
+                    greedy_action = q_values.max(1)[1].detach().cpu().numpy().astype(np.bool)
+
+                    if self.use_transformer:
+                        # return also the decoder context to store for backprop
+                        decoder_context = self.policy_net.decoder_context
+                    else:
+                        decoder_context = None
+                    return greedy_action, decoder_context
+
             else:
-                random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.long)
-                return random_action
+                # randomize action
+                random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
+                if self.use_transformer:
+                    # we create random decoder context to store for backprop.
+                    # we randomize inference order for building the context,
+                    # since it is exactly what the decoder does.
+                    decoder_edge_attr_list = []
+                    decoder_edge_index_list = []
+                    ncuts = random_action.shape[0]
+                    inference_order = torch.randperm(ncuts)
+                    edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                                torch.empty((1, ncuts), dtype=torch.long)], dim=0)
+                    edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
+                    # iterate over all cuts in the random order, and set each one a context
+                    for cut_index in inference_order:
+                        # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+                        edge_index_dec[1, :] = cut_index
+                        # store the context (edge_index_dec and edge_attr_dec) of the current iteration
+                        decoder_edge_attr_list.append(edge_attr_dec.clone())
+                        decoder_edge_index_list.append(edge_index_dec.clone())
+                        # assign the random action of cut_index to the context of the next round
+                        edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
+                        edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
+
+                    # finally, stack the decoder edge_attr and edge_index tensors,
+                    # and make a transformer context in order to generate later a Transition for training,
+                    # allowing by that fast parallel backprop
+                    edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+                    edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
+                    random_decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
+                else:
+                    random_decoder_context = None
+                return random_action.numpy().astype(np.bool), random_decoder_context
         else:
             # in test time, take greedy action
             with torch.no_grad():
@@ -187,10 +240,11 @@ class DQN(Sepa):
                     edge_attr_c2v=batch.edge_attr_c2v,
                     edge_attr_a2v=batch.edge_attr_a2v,
                     edge_index_a2a=batch.edge_index_a2a,
-                    edge_attr_a2a=batch.edge_attr_a2a,
-                    x_a_batch=batch.x_a_batch
+                    edge_attr_a2a=batch.edge_attr_a2a
                 )
-                return q_values.max(1)[1]
+                greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
+                # return None as decoder context, since it is used only in training
+                return greedy_action, None
 
     # done
     def optimize_model(self):
@@ -223,7 +277,8 @@ class DQN(Sepa):
                     edge_attr_a2v=batch.edge_attr_a2v,
                     edge_index_a2a=batch.edge_index_a2a,
                     edge_attr_a2a=batch.edge_attr_a2a,
-                    x_a_batch=batch.x_a_batch
+                    edge_index_dec=batch.edge_index_dec,  # transformer stuff
+                    edge_attr_dec=batch.edge_attr_dec     # transformer stuff
                 )
                 state_action_values = state_action_values.gather(1, action_batch.unsqueeze(1))
                 # Compute V(s_{t+1}) for all next states.
@@ -233,6 +288,19 @@ class DQN(Sepa):
                 # state value or 0 in case the state was terminal.
                 # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
                 # next-state action-wise values
+                if self.use_transformer:
+                    # trick to parallelize the next state q_vals computation:
+                    # since the optimal target q values should be
+                    # independent of the inference order,
+                    # we infer each cut q-values like it was processed first in the inference loop.
+                    # thus, the edge_attr_dec is zeros, to indicate that each
+                    # cut is processed conditioning on "no-cut-selected"
+                    ns_edge_index_dec = batch.ns_edge_index_a2a
+                    ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
+                else:
+                    ns_edge_index_dec = None
+                    ns_edge_attr_dec = None
+                    
                 next_state_action_wise_values = self.target_net(
                     x_c=batch.ns_x_c,
                     x_v=batch.ns_x_v,
@@ -243,7 +311,8 @@ class DQN(Sepa):
                     edge_attr_a2v=batch.ns_edge_attr_a2v,
                     edge_index_a2a=batch.ns_edge_index_a2a,
                     edge_attr_a2a=batch.ns_edge_attr_a2a,
-                    x_a_batch=batch.ns_x_a_batch
+                    edge_index_dec=ns_edge_index_dec,
+                    edge_attr_dec=ns_edge_attr_dec
                 ).max(1)[0].detach()
                 # aggregate the action-wise values using mean or max,
                 # and generate for each graph in the batch a single value
@@ -314,12 +383,12 @@ class DQN(Sepa):
         # since the terminal state is not important.
         if available_cuts['ncuts'] > 0:
 
-            # select an action
-            action = self._select_action(cur_state).detach().cpu().numpy().astype(np.bool)
+            # select an action (and get the decoder context for a case we use transformer
+            action, decoder_context = self._select_action(cur_state)
             available_cuts['selected'] = action
-            # force SCIP to take the selected cuts in action and discard the others
+            # force SCIP to take the selected cuts and discard the others
             if sum(action) > 0:
-                # need to do it onlt if there are selected actions
+                # need to do it only if there are selected actions
                 self.model.forceCuts(action)
                 # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
                 # in order to prevent it from adding more or less cuts
@@ -335,7 +404,7 @@ class DQN(Sepa):
             # unless the instance is solved and the episode is done.
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
-            self.state_action_pairs.append((cur_state, available_cuts))
+            self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, decoder_context))
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
@@ -370,7 +439,7 @@ class DQN(Sepa):
             # so cst is already subtracted.
             # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
             # with only constant factor between them
-            cuts_norm = np.linalg.norm(cuts_matrix, axis=0)
+            cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
             rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
             normalized_slack = rhs_slack / cuts_norm
             # assign tightness penalty only to the selected cuts.
@@ -422,6 +491,22 @@ class DQN(Sepa):
         self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
         self.episode_stats['dualbound'].append(self.model.getDualbound())
 
+        # enforce the lp_iterations_limit
+        lp_iterations_limit = self.lp_iterations_limit
+        if lp_iterations_limit > 0 and self.episode_stats['lp_iterations'][-1] > lp_iterations_limit:
+            # interpolate the dualbound and gap at the limit
+            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit
+            t = self.episode_stats['lp_iterations'][-2:]
+            for k in ['dualbound', 'gap']:
+                ft = self.episode_stats[k][-2:]
+                # compute ft slope in the last interval [t[-2], t[-1]]
+                slope = (ft[-1] - ft[-2]) / (t[-1] - t[-2])
+                # compute the linear interpolation of ft at the limit
+                interpolated_ft = ft[-2] + slope * (lp_iterations_limit - t[-2])
+                self.episode_stats[k][-1] = interpolated_ft
+            # finally truncate the lp_iterations to the limit
+            self.episode_stats['lp_iterations'][-1] = lp_iterations_limit
+
     # done
     def eval(self):
         self.training = False
@@ -460,7 +545,7 @@ class DQN(Sepa):
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
             # and store a transition (s_t, a_t, r_t, s_{t+n}
-            n_transitions = len(self.state_action_pairs)
+            n_transitions = len(self.state_action_context_list)
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
@@ -469,36 +554,44 @@ class DQN(Sepa):
             if max_index >= len(objective_area):
                 objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
             # take sliding windows of width n_step from objective_area
-            # with minus because we want to minimize the area under the curve
-
-            n_step_rewards = - objective_area[indices]
+            n_step_rewards = objective_area[indices]
             # compute returns
-            # R[t] = - ( r[t] + gamma*r[t+1] + ... + gamma^(n-1)r[t+n-1] )
+            # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action), joint_reward) in enumerate(zip(self.state_action_pairs, R)):
-                next_state, _ = self.state_action_pairs[step+n_steps] if step+n_steps < n_transitions else (None, None)
+            for step, ((state, action, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_context_list, R)):
+                next_state, _, _ = self.state_action_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
-                # now, assign to each cut its reward according to its tightness
-                # tightness == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
+                # now, assign to each cut its reward according to its slack
+                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
                 # so we punish inactive cuts by decreasing their reward to
-                # R * (1 + tightness)
+                # R * (1 - slack)
+                # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
                 normalized_slack = action['normalized_slack']
                 if self.hparams.get('credit_assignment', True):
-                    credit = 1 + normalized_slack
+                    credit = 1 - normalized_slack
                     reward = joint_reward * credit
                 else:
                     reward = joint_reward * np.ones_like(normalized_slack)
 
-                transition = get_transition(state, action['selected'], reward, next_state)
+                # penalize "empty" action
+                is_empty_action = np.logical_not(action['selected']).all()
+                if self.empty_action_penalty is not None and is_empty_action:
+                    reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
+
+                transition = get_transition(scip_state=state,
+                                            action=action['selected'],
+                                            transformer_decoder_context=transformer_decoder_context,
+                                            reward=reward,
+                                            scip_next_state=next_state)
                 self.memory.push(transition)
 
         # compute some stats and store in buffer
         active_applied_ratio = []
         applied_available_ratio = []
-        for _, action in self.state_action_pairs:
+        for _, action, _ in self.state_action_context_list:
             normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
             approximately_zero = np.abs(normalized_slack) < 1e-6
@@ -515,63 +608,160 @@ class DQN(Sepa):
         self.tmp_stats_buffer['gap_auc'].append(gap_auc)
         self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
         self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
-        if self.baseline.get('db_auc', None) is not None:
+        if self.baseline.get('rootonly_stats', None) is not None:
             # this is evaluation round.
-            self.test_stats_buffer['db_auc_frac'].append(db_auc/self.baseline['db_auc'])
-            self.test_stats_buffer['gap_auc_frac'].append(gap_auc/self.baseline['gap_auc'])
+            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
+            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
 
     # done
-    def log_stats(self, save_best=False):
+    def log_stats(self, save_best=False, plot_figures=False):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
         This function should be called periodically during training,
-        and at the end of every evaluation session - <valid/test>_set_<easy/medium/hard>
+        and at the end of every validation/test set evaluation
+        save_best should be set to the best model according to the agent performnace on the validation set.
+        If the model has shown its best so far, we save the model parameters and the dualbound/gap curves
         """
-        if save_best:
-            self._save_if_best()
         cur_time_sec = time() - self.start_time + self.walltime_offset
-        print(f'Episode {self.i_episode} \t| ', end='')
+        if plot_figures:
+            self.decorate_figures()
+
+        if save_best:
+            # self._save_if_best()
+            perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])  # todo bug with (-) ?
+            if perf > self.best_perf[self.dataset_name]:
+                self.best_perf[self.dataset_name] = perf
+                self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_name}_checkpoint.pt'))
+                self.save_figures(filename_prefix='best')
+
+        if self.training:
+            print(f'Episode {self.i_episode} | ', end='')
+        else:
+            print(f'Eval {self.i_episode} | ', end='')
+
+        # add episode figures (for validation and test sets only)
+        if plot_figures:
+            for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+                self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
+                                       global_step=self.i_episode, walltime=cur_time_sec)
+
+        # plot normalized dualbound and gap auc
         for k, vals in self.tmp_stats_buffer.items():
             avg = np.mean(vals)
             std = np.std(vals)
-            print('{}: {:.4f} \t| '.format(k, avg), end='')
-            self.writer.add_scalar(k + '/' + self.dataset_name, avg,
-                                   global_step=self.i_episode,
-                                   walltime=cur_time_sec)
-            self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std,
-                                   global_step=self.i_episode,
-                                   walltime=cur_time_sec)
-
+            print('{}: {:.4f} | '.format(k, avg), end='')
+            self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=self.i_episode, walltime=cur_time_sec)
+            self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
             self.tmp_stats_buffer[k] = []
 
-        if len(self.test_stats_buffer['db_auc_frac']) > 0:
+        # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
+        if len(self.test_stats_buffer['db_auc_imp']) > 0:
             for k, vals in self.test_stats_buffer.items():
                 avg = np.mean(vals)
                 std = np.std(vals)
-                print('{}: {:.4f} \t| '.format(k, avg), end='')
-                self.writer.add_scalar(k + '/' + self.dataset_name, avg,
-                                       global_step=self.i_episode,
-                                       walltime=cur_time_sec)
-                self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std,
-                                       global_step=self.i_episode,
-                                       walltime=cur_time_sec)
+                print('{}: {:.4f} | '.format(k, avg), end='')
+                self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=self.i_episode, walltime=cur_time_sec)
+                self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
                 self.test_stats_buffer[k] = []
 
         # log the average loss of the last training session
-        print('Loss: {:.4f} \t| '.format(self.loss_moving_avg), end='')
-        self.writer.add_scalar('Training_Loss', self.loss_moving_avg,
-                               global_step=self.i_episode,
-                               walltime=cur_time_sec)
-        print(f'Step: {self.steps_done} \t| ', end='')
+        print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
+        self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=self.i_episode, walltime=cur_time_sec)
+        print(f'Step: {self.steps_done} | ', end='')
 
         d = int(np.floor(cur_time_sec/(3600*24)))
         h = int(np.floor(cur_time_sec/3600) - 24*d)
         m = int(np.floor(cur_time_sec/60) - 60*(24*d + h))
         s = int(cur_time_sec) % 60
-        print('Iteration Time: {:.1f}[sec]\t| '.format(cur_time_sec - self.last_time_sec), end='')
+        print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
+
+    def init_figures(self, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
+        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+            fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True)
+            fig.set_size_inches(w=8, h=10)
+            fig.set_tight_layout(True)
+            self.figures[figname] = {'fig': fig, 'axes': axes}
+        self.figures['nrows'] = nrows
+        self.figures['ncols'] = ncols
+        self.figures['col_labels'] = col_labels
+        self.figures['row_labels'] = row_labels
+
+    def add_episode_subplot(self, row, col):
+        """
+        plot the last episode curves to subplot in position (row, col)
+        plot dqn agent dualbound/gap curves together with the baseline curves.
+        should be called after each validation/test episode with row=graph_idx, col=seed_idx
+        """
+        dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
+        if dqn_lpiter[-1] < self.lp_iterations_limit:
+            # extend curve to the limit
+            dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
+            dqn_db = dqn_db + dqn_db[-1:]
+            dqn_gap = dqn_gap + dqn_gap[-1:]
+        bsl_lpiter = self.baseline['rootonly_stats'][self.scip_seed]['lp_iterations']
+        bsl_db = self.baseline['rootonly_stats'][self.scip_seed]['dualbound']
+        bsl_gap = self.baseline['rootonly_stats'][self.scip_seed]['gap']
+        if bsl_lpiter[-1] < self.lp_iterations_limit:
+            # extend curve to the limit
+            bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
+            bsl_db = bsl_db + bsl_db[-1:]
+            bsl_gap = bsl_gap + bsl_gap[-1:]
+        # plot dualbound
+        # fig = plt.figure()
+
+        ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+        ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
+        ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
+        ax.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+        # plt.legend()
+        # plt.xlabel('LP Iterations')
+        # plt.ylabel('Dualbound')
+        # plt.title(f'SCIP Seed: {self.scip_seed}')
+        # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
+        # self.figures['Dual_Bound_vs_LP_Iterations'].append(fig)
+
+        # plot gap
+
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111)
+        ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+        ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
+        ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
+        ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
+        # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
+        # self.figures['Gap_vs_LP_Iterations'].append(fig)
+
+    def decorate_figures(self, legend=True, col_labels=True, row_labels=True):
+        """ save figures to png file """
+        # decorate (title, labels etc.)
+        nrows, ncols = self.figures['nrows'], self.figures['ncols']
+        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+            if col_labels:
+                # add col labels at the first row only
+                for col in range(ncols):
+                    ax = self.figures[figname]['axes'][0, col]
+                    ax.set_title(self.figures['col_labels'][col])
+            if row_labels:
+                # add row labels at the first col only
+                for row in range(nrows):
+                    ax = self.figures[figname]['axes'][row, 0]
+                    ax.set_ylabel(self.figures['row_labels'][row])
+            if legend:
+                # add legend to the bottom-left subplot only
+                ax = self.figures[figname]['axes'][-1, 0]
+                ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), fancybox=True, shadow=True, ncol=1, borderaxespad=0.)
+
+    def save_figures(self, filename_prefix=None):
+        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+            # save png
+            fname = f'{self.dataset_name}_{figname}.png'
+            if filename_prefix is not None:
+                fname = filename_prefix + '_' + fname
+            fpath = os.path.join(self.logdir, fname)
+            self.figures[figname]['fig'].savefig(fpath)
 
     # done
     def save_checkpoint(self, filepath=None):
