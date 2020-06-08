@@ -248,99 +248,115 @@ class DQN(Sepa):
 
     # done
     def optimize_model(self):
+        """ sample uniformly a batch from the memory and execute one SGD pass """
         if len(self.memory) < self.batch_size:
             return
         transitions = self.memory.sample(self.batch_size)
-        # todo consider all features to parse correctly
-        loader = DataLoader(
-            transitions,
-            batch_size=self.mini_batch_size,
-            shuffle=True,
-            follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']
+        # todo consider all features in follow_batch to parse correctly
+        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+
+        action_batch = batch.a
+
+        # Compute Q(s_t, a):
+        # the model computes Q(s_t), then we select the columns of the actions taken, i.e action_batch.
+        state_action_values = self.policy_net(
+            x_c=batch.x_c,
+            x_v=batch.x_v,
+            x_a=batch.x_a,
+            edge_index_c2v=batch.edge_index_c2v,
+            edge_index_a2v=batch.edge_index_a2v,
+            edge_attr_c2v=batch.edge_attr_c2v,
+            edge_attr_a2v=batch.edge_attr_a2v,
+            edge_index_a2a=batch.edge_index_a2a,
+            edge_attr_a2a=batch.edge_attr_a2a,
+            edge_index_dec=batch.edge_index_dec,  # transformer stuff
+            edge_attr_dec=batch.edge_attr_dec     # transformer stuff
         )
-        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'nx_c', 'nx_v', 'nx_a']).to(self.device)
-        for epoch in range(self.n_sgd_epochs):
-            for batch in loader:
-                batch = batch.to(self.device)
-                action_batch = batch.a
+        state_action_values = state_action_values.gather(1, action_batch.unsqueeze(1))
 
-                # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
-                # columns of actions taken. These are the actions which would've been taken
-                # for each batch state according to policy_net
-                state_action_values = self.policy_net(
-                    x_c=batch.x_c,
-                    x_v=batch.x_v,
-                    x_a=batch.x_a,
-                    edge_index_c2v=batch.edge_index_c2v,
-                    edge_index_a2v=batch.edge_index_a2v,
-                    edge_attr_c2v=batch.edge_attr_c2v,
-                    edge_attr_a2v=batch.edge_attr_a2v,
-                    edge_index_a2a=batch.edge_index_a2a,
-                    edge_attr_a2a=batch.edge_attr_a2a,
-                    edge_index_dec=batch.edge_index_dec,  # transformer stuff
-                    edge_attr_dec=batch.edge_attr_dec     # transformer stuff
-                )
-                state_action_values = state_action_values.gather(1, action_batch.unsqueeze(1))
-                # Compute V(s_{t+1}) for all next states.
-                # Expected values of actions for non_terminal_next_states are computed based
-                # on the "older" target_net; selecting their best reward with max(1)[0].
-                # This is merged based on the mask, such that we'll have either the expected
-                # state value or 0 in case the state was terminal.
-                # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
-                # next-state action-wise values
-                if self.use_transformer:
-                    # trick to parallelize the next state q_vals computation:
-                    # since the optimal target q values should be
-                    # independent of the inference order,
-                    # we infer each cut q-values like it was processed first in the inference loop.
-                    # thus, the edge_attr_dec is zeros, to indicate that each
-                    # cut is processed conditioning on "no-cut-selected"
-                    ns_edge_index_dec = batch.ns_edge_index_a2a
-                    ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
-                else:
-                    ns_edge_index_dec = None
-                    ns_edge_attr_dec = None
-                    
-                next_state_action_wise_values = self.target_net(
-                    x_c=batch.ns_x_c,
-                    x_v=batch.ns_x_v,
-                    x_a=batch.ns_x_a,
-                    edge_index_c2v=batch.ns_edge_index_c2v,
-                    edge_index_a2v=batch.ns_edge_index_a2v,
-                    edge_attr_c2v=batch.ns_edge_attr_c2v,
-                    edge_attr_a2v=batch.ns_edge_attr_a2v,
-                    edge_index_a2a=batch.ns_edge_index_a2a,
-                    edge_attr_a2a=batch.ns_edge_attr_a2a,
-                    edge_index_dec=ns_edge_index_dec,
-                    edge_attr_dec=ns_edge_attr_dec
-                ).max(1)[0].detach()
-                # aggregate the action-wise values using mean or max,
-                # and generate for each graph in the batch a single value
-                next_state_values = self.aggr_func(next_state_action_wise_values,   # source vector
-                                                   batch.ns_x_a_batch,              # target index of each element in source
-                                                   dim=0,                           # scattering dimension
-                                                   dim_size=self.mini_batch_size)   # output tensor size in dim after scattering
-                # override with zeros the values of terminal states which are zero by convention
-                next_state_values[batch.ns_terminal] = 0
-                # scatter the next state values graph-wise to update all action-wise rewards
-                next_state_values = next_state_values[batch.x_a_batch]
+        # Compute the Bellman target for all next states.
+        # Expected values of actions for non_terminal_next_states are computed based
+        # on the "older" target_net; selecting their best reward with max(1)[0] for DQN, or based on the policy_net
+        # prediction for DDQN.
+        # This is merged based on the mask, such that we'll have either the expected
+        # state value or 0 in case the state was terminal.
+        # The value of a state is computed as in BQN paper https://arxiv.org/pdf/1711.08946.pdf
 
-                # now compute the expected Q values for each action separately
-                reward_batch = batch.r
-                expected_state_action_values = (next_state_values * self.gamma ** self.nstep_learning) + reward_batch
+        # next-state action-wise values
+        if self.use_transformer:
+            # trick to parallelize the next state q_vals computation:
+            # since the optimal target q values should be
+            # independent of the inference order,
+            # we infer each cut q-values like it was processed first in the inference loop.
+            # thus, the edge_attr_dec is zeros, to indicate that each
+            # cut is processed conditioning on "no-cut-selected"
+            ns_edge_index_dec = batch.ns_edge_index_a2a
+            ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
+        else:
+            ns_edge_index_dec = None
+            ns_edge_attr_dec = None
 
-                # Compute Huber loss
-                loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-                self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
+        next_state_action_wise_target_q_values = self.target_net(
+            x_c=batch.ns_x_c,
+            x_v=batch.ns_x_v,
+            x_a=batch.ns_x_a,
+            edge_index_c2v=batch.ns_edge_index_c2v,
+            edge_index_a2v=batch.ns_edge_index_a2v,
+            edge_attr_c2v=batch.ns_edge_attr_c2v,
+            edge_attr_a2v=batch.ns_edge_attr_a2v,
+            edge_index_a2a=batch.ns_edge_index_a2a,
+            edge_attr_a2a=batch.ns_edge_attr_a2a,
+            edge_index_dec=ns_edge_index_dec,
+            edge_attr_dec=ns_edge_attr_dec
+        )
 
-                # Optimize the model
-                self.optimizer.zero_grad()
-                loss.backward()
-                for param in self.policy_net.parameters():
-                    param.grad.data.clamp_(-1, 1)
-                self.optimizer.step()
+        if self.hparams.get('update_rule', 'DQN') == 'DQN':
+            # y = r + gamma max_a' target_net(s', a')
+            max_next_state_action_wise_target_q_values = next_state_action_wise_target_q_values.max(1)[0].detach()
+        elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
+            # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
+            next_state_action_wise_policy_q_values = self.policy_net(
+                x_c=batch.ns_x_c,
+                x_v=batch.ns_x_v,
+                x_a=batch.ns_x_a,
+                edge_index_c2v=batch.ns_edge_index_c2v,
+                edge_index_a2v=batch.ns_edge_index_a2v,
+                edge_attr_c2v=batch.ns_edge_attr_c2v,
+                edge_attr_a2v=batch.ns_edge_attr_a2v,
+                edge_index_a2a=batch.ns_edge_index_a2a,
+                edge_attr_a2a=batch.ns_edge_attr_a2a,
+                edge_index_dec=ns_edge_index_dec,
+                edge_attr_dec=ns_edge_attr_dec
+            )
+            argmax_next_state_action_wise_policy_q_values = next_state_action_wise_policy_q_values.max(1)[1].detach()
+            max_next_state_action_wise_target_q_values = next_state_action_wise_target_q_values.gather(1, argmax_next_state_action_wise_policy_q_values).detach()
 
-        # don't forget to update target periodically in the outer loop
+        # aggregate the action-wise values using mean or max,
+        # and generate for each graph in the batch a single value
+        next_state_values = self.aggr_func(max_next_state_action_wise_target_q_values,   # source vector
+                                           batch.ns_x_a_batch,              # target index of each element in source
+                                           dim=0,                           # scattering dimension
+                                           dim_size=self.mini_batch_size)   # output tensor size in dim after scattering
+
+        # override with zeros the values of terminal states which are zero by convention
+        next_state_values[batch.ns_terminal] = 0
+        # scatter the next state values graph-wise to update all action-wise rewards
+        next_state_values = next_state_values[batch.x_a_batch]
+
+        # now compute the expected Q values for each action separately
+        reward_batch = batch.r
+        expected_state_action_values = (next_state_values * self.gamma ** self.nstep_learning) + reward_batch
+
+        # Compute Huber loss
+        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+        self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
+
+        # Optimize the model
+        self.optimizer.zero_grad()
+        loss.backward()
+        for param in self.policy_net.parameters():
+            param.grad.data.clamp_(-1, 1)
+        self.optimizer.step()
 
     def update_target(self):
         # Update the target network, copying all weights and biases in DQN
