@@ -8,7 +8,7 @@ from separators.mccormick_cycle_separator import MccormickCycleSeparator
 import pickle
 import os
 import torch
-from agents.dqn import DQN
+from agents.dqn import GDQN
 from utils.functions import get_normalized_areas
 import numpy as np
 from tqdm import tqdm
@@ -71,7 +71,7 @@ def experiment(hparams):
     graph_indices = torch.randperm(trainset['num_instances'])
 
     # dqn agent
-    dqn_agent = DQN(hparams=hparams)
+    dqn_agent = GDQN(hparams=hparams)
     dqn_agent.train()
 
     if hparams.get('resume_training', False):
