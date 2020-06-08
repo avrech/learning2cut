@@ -72,7 +72,7 @@ def experiment(hparams):
 
     # dqn agent
     dqn_agent = GDQN(hparams=hparams)
-    dqn_agent.train()
+    dqn_agent.set_training_mode()
 
     if hparams.get('resume_training', False):
         dqn_agent.load_checkpoint()
@@ -139,7 +139,7 @@ def experiment(hparams):
             dqn_agent.log_stats()
 
         # evaluate the model on the validation and test sets
-        dqn_agent.eval()
+        dqn_agent.set_eval_mode()
         for dataset_name, dataset in datasets.items():
             if dataset_name == 'trainset25':
                 continue
@@ -154,7 +154,7 @@ def experiment(hparams):
                         execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
                         dqn_agent.add_episode_subplot(inst_idx, seed_idx)
                 dqn_agent.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
-        dqn_agent.train()
+        dqn_agent.set_training_mode()
 
         if i_episode % hparams.get('checkpoint_interval', 100) == 0:
             dqn_agent.save_checkpoint()
@@ -204,4 +204,6 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    experiment(hparams)
+    # experiment(hparams)
+    dqn_standalone = GDQN(hparams=hparams)
+    dqn_standalone.train_single_thread()

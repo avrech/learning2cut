@@ -13,10 +13,13 @@ import torch.nn.functional as F
 from torch_geometric.data.batch import Batch
 from torch_scatter import scatter_mean, scatter_max, scatter_add
 from torch.utils.tensorboard import SummaryWriter
-from torch_geometric.data import DataLoader
+from tqdm import tqdm
 from utils.functions import get_normalized_areas
 from collections import namedtuple
 import matplotlib as mpl
+import pickle
+from utils.scip_models import maxcut_mccormic_model
+from separators.mccormick_cycle_separator import MccormickCycleSeparator
 mpl.rc('figure', max_open_warning=0)
 # mpl.rcParams['text.antialiased'] = False
 # mpl.use('agg')
@@ -61,8 +64,6 @@ class GDQN(Sepa):
         self.memory = ReplayMemory(hparams.get('memory_capacity', 1000000))
         self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
-        self.mini_batch_size = hparams.get('mini_batch_size', 8)
-        self.n_sgd_epochs = hparams.get('n_sgd_epochs', 10)
         self.gamma = hparams.get('gamma', 0.999)
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
@@ -130,6 +131,10 @@ class GDQN(Sepa):
         self.loss_moving_avg = 0
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
+
+        self.datasets = None
+        self.dataset_paths = None
+        self.initialize_training()
 
     # done
     def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
@@ -343,7 +348,7 @@ class GDQN(Sepa):
         max_target_next_q_values_aggr = self.aggr_func(max_target_next_q_values,   # source vector
                                            batch.ns_x_a_batch,              # target index of each element in source
                                            dim=0,                           # scattering dimension
-                                           dim_size=self.mini_batch_size)   # output tensor size in dim after scattering
+                                           dim_size=self.batch_size)   # output tensor size in dim after scattering
 
         # override with zeros the values of terminal states which are zero by convention
         max_target_next_q_values_aggr[batch.ns_terminal] = 0
@@ -373,7 +378,7 @@ class GDQN(Sepa):
         # to compute p,q norm take power p and compute sqrt q.
         td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch,  # target index of each element in source
                                                   dim=0,                           # scattering dimension
-                                                  dim_size=self.mini_batch_size))  # output tensor size in dim after scattering
+                                                  dim_size=self.batch_size))  # output tensor size in dim after scattering
 
         new_priorities = td_error_l2_norm.cpu().numpy().tolist()
         return loss.item(), new_priorities
@@ -544,12 +549,12 @@ class GDQN(Sepa):
             self.episode_stats['lp_iterations'][-1] = lp_iterations_limit
 
     # done
-    def eval(self):
+    def set_eval_mode(self):
         self.training = False
         self.policy_net.eval()
 
     # done
-    def train(self):
+    def set_training_mode(self):
         self.training = True
         self.policy_net.train()
 
@@ -841,3 +846,169 @@ class GDQN(Sepa):
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
         print('Loaded checkpoint from: ', self.checkpoint_filepath)
+
+    def initialize_training(self):
+        """ DQN main training loop """
+        hparams = self.hparams
+        # fix random seed for all experiment
+        if hparams.get('seed', None) is not None:
+            np.random.seed(hparams['seed'])
+            torch.manual_seed(hparams['seed'])
+
+        # datasets and baselines
+        dataset_paths = {}
+        datasets = hparams['datasets']
+        for dataset_name, dataset in datasets.items():
+            dataset_paths[dataset_name] = os.path.join(hparams['datadir'], dataset_name,
+                                                       "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(
+                                                           dataset['graph_size'], dataset['barabasi_albert_m'],
+                                                           dataset['weights'], dataset['dataset_generation_seed']))
+
+            # read all graphs with their baselines from disk
+            dataset['instances'] = []
+            for filename in tqdm(os.listdir(dataset_paths[dataset_name]), desc=f'Loading {dataset_name}'):
+                with open(os.path.join(dataset_paths[dataset_name], filename), 'rb') as f:
+                    G, baseline = pickle.load(f)
+                    if baseline['is_optimal']:
+                        dataset['instances'].append((G, baseline))
+                    else:
+                        print(filename, ' is not solved to optimality')
+            dataset['num_instances'] = len(dataset['instances'])
+
+        # for the validation and test datasets compute some metrics:
+        for dataset_name, dataset in datasets.items():
+            if dataset_name == 'trainset25':
+                continue
+            db_auc_list = []
+            gap_auc_list = []
+            for (_, baseline) in dataset['instances']:
+                optimal_value = baseline['optimal_value']
+                for scip_seed in dataset['scip_seed']:
+                    dualbound = baseline['rootonly_stats'][scip_seed]['dualbound']
+                    gap = baseline['rootonly_stats'][scip_seed]['gap']
+                    lpiter = baseline['rootonly_stats'][scip_seed]['lp_iterations']
+                    db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'],
+                                                      reference=optimal_value))
+                    gap_auc = sum(
+                        get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+                    baseline['rootonly_stats'][scip_seed]['db_auc'] = db_auc
+                    baseline['rootonly_stats'][scip_seed]['gap_auc'] = gap_auc
+                    db_auc_list.append(db_auc)
+                    gap_auc_list.append(gap_auc)
+            # compute stats for the whole dataset
+            db_auc_avg = np.mean(db_auc)
+            db_auc_std = np.std(db_auc)
+            gap_auc_avg = np.mean(gap_auc)
+            gap_auc_std = np.std(gap_auc)
+            dataset['stats'] = {}
+            dataset['stats']['db_auc_avg'] = db_auc_avg
+            dataset['stats']['db_auc_std'] = db_auc_std
+            dataset['stats']['gap_auc_avg'] = gap_auc_avg
+            dataset['stats']['gap_auc_std'] = gap_auc_std
+
+        self.datasets = datasets
+        self.dataset_paths = dataset_paths
+        # initialize agent
+        self.set_training_mode()
+        if hparams.get('resume_training', False):
+            self.load_checkpoint()
+
+    def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
+        # create SCIP model for G
+        hparams = self.hparams
+        model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts',
+                                                                            False))  # disable default cuts
+
+        # include cycle inequalities separator with high priority
+        cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
+        model.includeSepa(cycle_sepa, 'MLCycles',
+                          "Generate cycle inequalities for the MaxCut McCormic formulation",
+                          priority=1000000, freq=1)
+
+        # reset self to start a new episode
+        self.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline,
+                          dataset_name=dataset_name, scip_seed=scip_seed)
+
+        # include self, setting lower priority than the cycle inequalities separator
+        model.includeSepa(self, 'DQN', 'Cut selection agent',
+                          priority=-100000000, freq=1)
+
+        # set some model parameters, to avoid early branching.
+        # termination condition is either optimality or lp_iterations_limit.
+        # since there is no way to limit lp_iterations explicitly,
+        # it is enforced implicitly by the separators, which won't add any more cuts.
+        model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+        model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+
+        # set environment random seed
+        if scip_seed is None:
+            # set random scip seed
+            scip_seed = np.random.randint(1000000000)
+        model.setBoolParam('randomization/permutevars', True)
+        model.setIntParam('randomization/permutationseed', scip_seed)
+        model.setIntParam('randomization/randomseedshift', scip_seed)
+
+        if self.hparams.get('hide_scip_output', True):
+            model.hideOutput()
+
+        # gong! run episode
+        model.optimize()
+
+        # once episode is done
+        self.finish_episode()
+
+    def train_single_thread(self):
+        datasets = self.datasets
+        dataset_paths = self.dataset_paths
+        trainset = datasets['trainset25']
+        graph_indices = torch.randperm(trainset['num_instances'])
+        hparams = self.hparams
+
+        # infinite loop
+        for i_episode in range(self.i_episode + 1, hparams['num_episodes']):
+            # sample graph randomly
+            graph_idx = graph_indices[i_episode % len(graph_indices)]
+            G, baseline = trainset['instances'][graph_idx]
+            if hparams.get('debug', False):
+                filename = os.listdir(dataset_paths['trainset25'])[graph_idx]
+                filename = os.path.join(dataset_paths['trainset25'], filename)
+                print(f'instance no. {graph_idx}, filename: {filename}')
+
+            self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
+
+            if i_episode % hparams.get('backprop_interval', 10) == 0:
+                self.optimize_model()
+
+            if i_episode % hparams.get('target_update_interval', 1000) == 0:
+                self.update_target()
+
+            if i_episode % hparams.get('log_interval', 100) == 0:
+                self.log_stats()
+
+            # evaluate the model on the validation and test sets
+            self.set_eval_mode()
+            for dataset_name, dataset in datasets.items():
+                if dataset_name == 'trainset25':
+                    continue
+                if i_episode % dataset['eval_interval'] == 0:
+                    print('Evaluating ', dataset_name)
+                    self.init_figures(nrows=dataset['num_instances'],
+                                           ncols=len(dataset['scip_seed']),
+                                           col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+                                           row_labels=[f'inst {inst_idx}' for inst_idx in
+                                                       range(dataset['num_instances'])])
+                    for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+                        for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
+                            self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
+                                                 scip_seed=scip_seed)
+                            self.add_episode_subplot(inst_idx, seed_idx)
+                    self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
+            self.set_training_mode()
+
+            if i_episode % hparams.get('checkpoint_interval', 100) == 0:
+                self.save_checkpoint()
+
+            if i_episode % len(graph_indices) == 0:
+                graph_indices = torch.randperm(trainset['num_instances'])
+
+        return 0
