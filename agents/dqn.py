@@ -254,7 +254,10 @@ class DQN(Sepa):
         transitions = self.memory.sample(self.batch_size)
         # todo consider all features in follow_batch to parse correctly
         batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        self.sgd_step(batch)
 
+    def sgd_step(self, batch):
+        """ implement the basic DQN optimization step """
         action_batch = batch.a
 
         # Compute Q(s_t, a):
@@ -348,6 +351,7 @@ class DQN(Sepa):
         expected_state_action_values = (next_state_values * self.gamma ** self.nstep_learning) + reward_batch
 
         # Compute Huber loss
+        # todo - support weighting the losses as done in distributed RL
         loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
         self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
 
@@ -357,6 +361,10 @@ class DQN(Sepa):
         for param in self.policy_net.parameters():
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
+
+        # todo - for distributed learning return losses to update priorities
+        # for reference look in dqn_learner,
+        return None
 
     def update_target(self):
         # Update the target network, copying all weights and biases in DQN

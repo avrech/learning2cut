@@ -40,6 +40,9 @@ class DQNLearner(Learner):
         # todo: transition, weights, idxes = data
         transitions, weights, idxes = data
 
+        # todo - call DQN sgd_step
+
+
         # ORIGINAL CODE
         # states, actions, rewards, next_states, dones, weights, idxes = data
         # states = torch.FloatTensor(states).to(self.device)
