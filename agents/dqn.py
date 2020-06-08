@@ -132,10 +132,6 @@ class GDQN(Sepa):
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
 
-        self.datasets = None
-        self.dataset_paths = None
-        self.initialize_training()
-
     # done
     def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
         self.G = G
@@ -847,27 +843,22 @@ class GDQN(Sepa):
         self.target_net.to(self.device)
         print('Loaded checkpoint from: ', self.checkpoint_filepath)
 
-    def initialize_training(self):
+    def load_datasets(self):
         """ DQN main training loop """
         hparams = self.hparams
-        # fix random seed for all experiment
-        if hparams.get('seed', None) is not None:
-            np.random.seed(hparams['seed'])
-            torch.manual_seed(hparams['seed'])
 
         # datasets and baselines
-        dataset_paths = {}
         datasets = hparams['datasets']
         for dataset_name, dataset in datasets.items():
-            dataset_paths[dataset_name] = os.path.join(hparams['datadir'], dataset_name,
+            datasets[dataset_name]['datadir'] = os.path.join(hparams['datadir'], dataset_name,
                                                        "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(
                                                            dataset['graph_size'], dataset['barabasi_albert_m'],
                                                            dataset['weights'], dataset['dataset_generation_seed']))
 
             # read all graphs with their baselines from disk
             dataset['instances'] = []
-            for filename in tqdm(os.listdir(dataset_paths[dataset_name]), desc=f'Loading {dataset_name}'):
-                with open(os.path.join(dataset_paths[dataset_name], filename), 'rb') as f:
+            for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'Loading {dataset_name}'):
+                with open(os.path.join(datasets[dataset_name]['datadir'], filename), 'rb') as f:
                     G, baseline = pickle.load(f)
                     if baseline['is_optimal']:
                         dataset['instances'].append((G, baseline))
@@ -906,11 +897,17 @@ class GDQN(Sepa):
             dataset['stats']['gap_auc_avg'] = gap_auc_avg
             dataset['stats']['gap_auc_std'] = gap_auc_std
 
-        self.datasets = datasets
-        self.dataset_paths = dataset_paths
+        return datasets
+
+    def initialize_training(self):
+        # fix random seed for all experiment
+        if self.hparams.get('seed', None) is not None:
+            np.random.seed(self.hparams['seed'])
+            torch.manual_seed(self.hparams['seed'])
+
         # initialize agent
         self.set_training_mode()
-        if hparams.get('resume_training', False):
+        if self.hparams.get('resume_training', False):
             self.load_checkpoint()
 
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
@@ -958,8 +955,9 @@ class GDQN(Sepa):
         self.finish_episode()
 
     def train_single_thread(self):
-        datasets = self.datasets
-        dataset_paths = self.dataset_paths
+        self.initialize_training()
+        datasets = self.load_datasets()
+
         trainset = datasets['trainset25']
         graph_indices = torch.randperm(trainset['num_instances'])
         hparams = self.hparams
@@ -970,8 +968,8 @@ class GDQN(Sepa):
             graph_idx = graph_indices[i_episode % len(graph_indices)]
             G, baseline = trainset['instances'][graph_idx]
             if hparams.get('debug', False):
-                filename = os.listdir(dataset_paths['trainset25'])[graph_idx]
-                filename = os.path.join(dataset_paths['trainset25'], filename)
+                filename = os.listdir(datasets['trainset25']['datadir'])[graph_idx]
+                filename = os.path.join(datasets['trainset25']['datadir'], filename)
                 print(f'instance no. {graph_idx}, filename: {filename}')
 
             self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
