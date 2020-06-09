@@ -66,7 +66,7 @@ class DQNLearner(Learner, GDQN):
         # target_q = rewards + (1 - dones) * self.gamma ** self.num_step * bootstrap_q
         # weights = torch.FloatTensor(weights).to(self.device).mean()
         #
-        # loss1 = weights * F.mse_loss(curr_q1, target_q.detach())
+        # loss1 = weights * F.mse_loss(curr_q1, target_q.detach())  # importance sampling correction
         # loss2 = weights * F.mse_loss(curr_q2, target_q.detach())
         #
         # self.network_optimizer.zero_grad()

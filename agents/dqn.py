@@ -86,6 +86,7 @@ class GDQN(Sepa):
         # training stuff
         self.num_env_steps_done = 0
         self.num_sgd_steps_done = 0
+        self.num_policy_updates = 0
         self.i_episode = 0
         self.training = True
         self.walltime_offset = 0
@@ -122,6 +123,10 @@ class GDQN(Sepa):
         self.lp_iterations_limit = -1
 
         # logging
+        self.is_tester = True
+        self.is_worker = True
+        self.is_learner = True
+        # todo - set worker-specific logdir for distributed DQN
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
@@ -250,13 +255,18 @@ class GDQN(Sepa):
 
     # done
     def optimize_model(self):
-        """ sample uniformly a batch from the memory and execute one SGD pass """
+        """
+        Single threaded DQN policy update function.
+        Sample uniformly a batch from the memory and execute one SGD pass
+        todo - support PER
+        """
         if len(self.memory) < self.batch_size:
             return
         transitions = self.memory.sample(self.batch_size)
         self.sgd_step(transitions)
+        self.num_policy_updates += 1
 
-    def sgd_step(self, transitions):
+    def sgd_step(self, transitions, importance_sampling_weights=None):
         """ implement the basic DQN optimization step """
         # todo consider all features in follow_batch to parse correctly
         batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
@@ -357,8 +367,17 @@ class GDQN(Sepa):
         target_q_values = reward_batch + (self.gamma ** self.nstep_learning) * target_next_q_values_broadcast
 
         # Compute Huber loss
-        # todo - support weighting the losses as done in distributed RL
-        loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1))
+        # todo - support importance sampling correction - double check
+        if importance_sampling_weights is None:
+            # generate equal weights for all losses
+            importance_sampling_weights = torch.ones_like(q_values)
+        else:
+            # broadcast each transition importance sampling weight to all its related losses
+            importance_sampling_weights = importance_sampling_weights[batch.x_a_batch]
+        # multiply each action loss by its importance sampling correction weight and average
+        loss = (importance_sampling_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduce=False)).mean()
+
+        # loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1)) - original pytorch example
         self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
 
         # Optimize the model
@@ -368,16 +387,16 @@ class GDQN(Sepa):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-        # todo - for distributed learning return losses to update priorities
+        # todo - for distributed learning return losses to update priorities - double check
         # for transition, compute the norm of its TD-error
-        td_error = torch.abs(q_values - target_q_values).detach().view(-1)
+        td_error = torch.abs(q_values - target_q_values.unsqueeze(1)).detach()
         td_error = torch.clamp(td_error, min=1e-8)
         # to compute p,q norm take power p and compute sqrt q.
-        td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch,  # target index of each element in source
-                                                  dim=0,                           # scattering dimension
-                                                  dim_size=self.batch_size))  # output tensor size in dim after scattering
+        td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch, # target index of each element in source
+                                                  dim=0,                          # scattering dimension
+                                                  dim_size=self.batch_size))      # output tensor size in dim after scattering
 
-        new_priorities = td_error_l2_norm.cpu().numpy().tolist()
+        new_priorities = td_error_l2_norm.squeeze().cpu().numpy().tolist()
         self.num_sgd_steps_done += 1
         return loss.item(), new_priorities
 
@@ -661,53 +680,70 @@ class GDQN(Sepa):
         and at the end of every validation/test set evaluation
         save_best should be set to the best model according to the agent performnace on the validation set.
         If the model has shown its best so far, we save the model parameters and the dualbound/gap curves
+        The global_step in plots is by default the number of policy updates.
+        This global_step measure holds both for single threaded DQN and distributed DQN,
+        where self.num_policy_updates is updated in
+            single threaded DQN - every time optimize_model() is executed
+            distributed DQN - every time the workers' policy is updated
+        Tracking the global_step is essential for "resume-training".
+        TODO adapt function to run on learner and workers separately.
+            learner - plot loss
+            worker - plot auc etc.
+            test_worker - plot valid/test auc frac and figures
+            in single thread - these are all true.
+            need to separate workers' logdir in the distributed main script
         """
+        global_step = self.num_policy_updates
+        print(f'Global step: {global_step} | {self.dataset_name}\t|', end='')
         cur_time_sec = time() - self.start_time + self.walltime_offset
-        if plot_figures:
-            self.decorate_figures()
 
-        if save_best:
-            # self._save_if_best()
-            perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])  # todo bug with (-) ?
-            if perf > self.best_perf[self.dataset_name]:
-                self.best_perf[self.dataset_name] = perf
-                self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_name}_checkpoint.pt'))
-                self.save_figures(filename_prefix='best')
+        # todo tester
+        if self.is_tester:
+            if plot_figures:
+                self.decorate_figures()
 
-        if self.training:
-            print(f'Episode {self.i_episode} | ', end='')
-        else:
-            print(f'Eval {self.i_episode} | ', end='')
+            if save_best:
+                # self._save_if_best()
+                perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])  # todo bug with (-) ?
+                if perf > self.best_perf[self.dataset_name]:
+                    self.best_perf[self.dataset_name] = perf
+                    self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_name}_checkpoint.pt'))
+                    self.save_figures(filename_prefix='best')
 
-        # add episode figures (for validation and test sets only)
-        if plot_figures:
-            for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
-                self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
-                                       global_step=self.i_episode, walltime=cur_time_sec)
+            # add episode figures (for validation and test sets only)
+            if plot_figures:
+                for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+                    self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
+                                           global_step=global_step, walltime=cur_time_sec)
 
-        # plot normalized dualbound and gap auc
-        for k, vals in self.tmp_stats_buffer.items():
-            avg = np.mean(vals)
-            std = np.std(vals)
-            print('{}: {:.4f} | '.format(k, avg), end='')
-            self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=self.i_episode, walltime=cur_time_sec)
-            self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
-            self.tmp_stats_buffer[k] = []
+            # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
+            if len(self.test_stats_buffer['db_auc_imp']) > 0:
+                for k, vals in self.test_stats_buffer.items():
+                    avg = np.mean(vals)
+                    std = np.std(vals)
+                    print('{}: {:.4f} | '.format(k, avg), end='')
+                    self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
+                    self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
+                    self.test_stats_buffer[k] = []
 
-        # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
-        if len(self.test_stats_buffer['db_auc_imp']) > 0:
-            for k, vals in self.test_stats_buffer.items():
+        # todo worker
+        if self.is_worker:
+            # plot normalized dualbound and gap auc
+            for k, vals in self.tmp_stats_buffer.items():
                 avg = np.mean(vals)
                 std = np.std(vals)
                 print('{}: {:.4f} | '.format(k, avg), end='')
-                self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=self.i_episode, walltime=cur_time_sec)
-                self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=self.i_episode, walltime=cur_time_sec)
-                self.test_stats_buffer[k] = []
+                self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
+                self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
+                self.tmp_stats_buffer[k] = []
 
-        # log the average loss of the last training session
-        print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
-        self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=self.i_episode, walltime=cur_time_sec)
-        print(f'Step: {self.num_env_steps_done} | ', end='')
+        # todo learner
+        if self.is_learner:
+            # log the average loss of the last training session
+            print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
+            self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
+            print(f'Step: {self.num_env_steps_done} | ', end='')
+
 
         d = int(np.floor(cur_time_sec/(3600*24)))
         h = int(np.floor(cur_time_sec/3600) - 24*d)
@@ -810,6 +846,7 @@ class GDQN(Sepa):
             'optimizer_state_dict': self.optimizer.state_dict(),
             'num_env_steps_done': self.num_env_steps_done,
             'num_sgd_steps_done': self.num_sgd_steps_done,
+            'num_policy_updates': self.num_policy_updates,
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
             'best_perf': self.best_perf,
@@ -839,6 +876,7 @@ class GDQN(Sepa):
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.num_env_steps_done = checkpoint['num_env_steps_done']
         self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
+        self.num_policy_updates = checkpoint['num_policy_updates']
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
         self.best_perf = checkpoint['best_perf']
@@ -848,7 +886,7 @@ class GDQN(Sepa):
         print('Loaded checkpoint from: ', self.checkpoint_filepath)
 
     def load_datasets(self):
-        """ DQN main training loop """
+        """ load train/valid/test sets """
         hparams = self.hparams
 
         # datasets and baselines
@@ -976,10 +1014,11 @@ class GDQN(Sepa):
                 filename = os.path.join(datasets['trainset25']['datadir'], filename)
                 print(f'instance no. {graph_idx}, filename: {filename}')
 
+            # execute episode and collect experience
             self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
 
-            if i_episode % hparams.get('backprop_interval', 10) == 0:
-                self.optimize_model()
+            # perform 1 optimization step
+            self.optimize_model()
 
             if i_episode % hparams.get('target_update_interval', 1000) == 0:
                 self.update_target()
@@ -988,7 +1027,7 @@ class GDQN(Sepa):
                 self.log_stats()
 
             # evaluate periodically
-            self.evaluate(datasets, i_episode=i_episode)
+            self.evaluate(datasets)
 
             if i_episode % hparams.get('checkpoint_interval', 100) == 0:
                 self.save_checkpoint()
@@ -998,13 +1037,14 @@ class GDQN(Sepa):
 
         return 0
 
-    def evaluate(self, datasets, i_episode=0):
+    def evaluate(self, datasets):
         # evaluate the model on the validation and test sets
+        global_step = self.num_policy_updates
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
             if dataset_name == 'trainset25':
                 continue
-            if i_episode % dataset['eval_interval'] == 0:
+            if global_step % dataset['eval_interval'] == 0:
                 print('Evaluating ', dataset_name)
                 self.init_figures(nrows=dataset['num_instances'],
                                   ncols=len(dataset['scip_seed']),
