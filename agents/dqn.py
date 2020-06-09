@@ -24,7 +24,7 @@ mpl.rc('figure', max_open_warning=0)
 # mpl.rcParams['text.antialiased'] = False
 # mpl.use('agg')
 import matplotlib.pyplot as plt
-StateActionContext = namedtuple('StateActionContext', ('scip_state', 'action', 'transformer_context'))
+StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'action', 'q_values', 'transformer_context'))
 
 
 class ReplayMemory(object):
@@ -94,6 +94,7 @@ class GDQN(Sepa):
         self.last_time_sec = self.walltime_offset
 
         # file system paths
+        # todo - set worker-specific logdir for distributed DQN
         self.logdir = hparams.get('logdir', 'results')
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
 
@@ -106,7 +107,7 @@ class GDQN(Sepa):
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_context_list = []
+        self.state_action_qvalues_context_list = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -126,7 +127,6 @@ class GDQN(Sepa):
         self.is_tester = True
         self.is_worker = True
         self.is_learner = True
-        # todo - set worker-specific logdir for distributed DQN
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
@@ -148,7 +148,7 @@ class GDQN(Sepa):
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_context_list = []
+        self.state_action_qvalues_context_list = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -176,11 +176,13 @@ class GDQN(Sepa):
             eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
                             math.exp(-1. * self.num_env_steps_done / self.eps_decay)
             self.num_env_steps_done += 1
+
             if sample > eps_threshold:
+                # take greedy action
                 with torch.no_grad():
                     # t.max(1) will return largest column value of each row.
-                    # second column on max result is index of where max element was
-                    # found, so we pick action with the larger expected reward.
+                    # second column on max result is the index of where max element was found.
+                    # we pick action with the larger expected reward.
                     q_values = self.policy_net(
                         x_c=batch.x_c,
                         x_v=batch.x_v,
@@ -193,13 +195,12 @@ class GDQN(Sepa):
                         edge_attr_a2a=batch.edge_attr_a2a,
                     )
                     greedy_action = q_values.max(1)[1].detach().cpu().numpy().astype(np.bool)
-
                     if self.use_transformer:
                         # return also the decoder context to store for backprop
-                        decoder_context = self.policy_net.decoder_context
+                        greedy_action_decoder_context = self.policy_net.decoder_context
                     else:
-                        decoder_context = None
-                    return greedy_action, decoder_context
+                        greedy_action_decoder_context = None
+                    return greedy_action, q_values.detach().cpu(), greedy_action_decoder_context
 
             else:
                 # randomize action
@@ -226,15 +227,34 @@ class GDQN(Sepa):
                         edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
                         edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
 
-                    # finally, stack the decoder edge_attr and edge_index tensors,
-                    # and make a transformer context in order to generate later a Transition for training,
-                    # allowing by that fast parallel backprop
-                    edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
-                    edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
-                    random_decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
+                    # finally, stack the decoder edge_attr and edge_index tensors, and make a transformer context
+                    random_edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+                    random_edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
+                    random_action_decoder_context = TransformerDecoderContext(random_edge_index_dec, random_edge_attr_dec)
                 else:
-                    random_decoder_context = None
-                return random_action.numpy().astype(np.bool), random_decoder_context
+                    random_edge_attr_dec = None
+                    random_edge_index_dec = None
+                    random_action_decoder_context = None
+                # for prioritized experience replay we need the q_values to compute the initial priorities
+                # whether we take a random action or not.
+                # For transformer, we compute the random action q_values based on the random decoder context,
+                # and we do it in parallel like we do in sgd_step()
+                # For non-transformer model, it doesn't affect anything
+                q_values = self.policy_net(
+                    x_c=batch.x_c,
+                    x_v=batch.x_v,
+                    x_a=batch.x_a,
+                    edge_index_c2v=batch.edge_index_c2v,
+                    edge_index_a2v=batch.edge_index_a2v,
+                    edge_attr_c2v=batch.edge_attr_c2v,
+                    edge_attr_a2v=batch.edge_attr_a2v,
+                    edge_index_a2a=batch.edge_index_a2a,
+                    edge_attr_a2a=batch.edge_attr_a2a,
+                    edge_index_dec=random_edge_index_dec.to(self.device),
+                    edge_attr_dec=random_edge_attr_dec.to(self.device)
+                ).detach().cpu()
+                random_action = random_action.numpy().astype(np.bool)
+                return random_action, q_values, random_action_decoder_context
         else:
             # in test time, take greedy action
             with torch.no_grad():
@@ -250,8 +270,9 @@ class GDQN(Sepa):
                     edge_attr_a2a=batch.edge_attr_a2a
                 )
                 greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
-                # return None as decoder context, since it is used only in training
-                return greedy_action, None
+                # return None, None for q_values and decoder context,
+                # since they are used only while generating experience
+                return greedy_action, None, None
 
     # done
     def optimize_model(self):
@@ -259,6 +280,8 @@ class GDQN(Sepa):
         Single threaded DQN policy update function.
         Sample uniformly a batch from the memory and execute one SGD pass
         todo - support PER
+               importance sampling +
+               when recovering from failures wait like in Ape-X paper appendix
         """
         if len(self.memory) < self.batch_size:
             return
@@ -375,7 +398,7 @@ class GDQN(Sepa):
             # broadcast each transition importance sampling weight to all its related losses
             importance_sampling_weights = importance_sampling_weights[batch.x_a_batch]
         # multiply each action loss by its importance sampling correction weight and average
-        loss = (importance_sampling_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduce=False)).mean()
+        loss = (importance_sampling_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
 
         # loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1)) - original pytorch example
         self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
@@ -441,8 +464,8 @@ class GDQN(Sepa):
         # since the terminal state is not important.
         if available_cuts['ncuts'] > 0:
 
-            # select an action (and get the decoder context for a case we use transformer
-            action, decoder_context = self._select_action(cur_state)
+            # select an action, and get the decoder context for a case we use transformer and q_values for PER
+            action, q_values, decoder_context = self._select_action(cur_state)
             available_cuts['selected'] = action
             # force SCIP to take the selected cuts and discard the others
             if sum(action) > 0:
@@ -462,7 +485,7 @@ class GDQN(Sepa):
             # unless the instance is solved and the episode is done.
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
-            self.state_action_context_list.append(StateActionContext(cur_state, available_cuts, decoder_context))
+            self.state_action_qvalues_context_list.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
@@ -603,7 +626,7 @@ class GDQN(Sepa):
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
             # and store a transition (s_t, a_t, r_t, s_{t+n}
-            n_transitions = len(self.state_action_context_list)
+            n_transitions = len(self.state_action_qvalues_context_list)
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
@@ -617,8 +640,10 @@ class GDQN(Sepa):
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_context_list, R)):
-                next_state, _, _ = self.state_action_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None)
+            for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
+                # get the next n-step state and q values. if the episode already terminated,
+                # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
+                next_state, _, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
@@ -644,12 +669,35 @@ class GDQN(Sepa):
                                             transformer_decoder_context=transformer_decoder_context,
                                             reward=reward,
                                             scip_next_state=next_state)
+
+                # todo - compute initial priority for PER based on the policy q_values.
+                #        compute the TD error for each action in the current state as we do in sgd_step,
+                #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
+                selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
+                q_values = q_values.gather(1, selected_action)
+                # todo verify behavior with terminal state
+                if next_q_values is None:
+                    # next state is terminal, and its q_values are 0 by convention
+                    target_q_values = reward
+                else:
+                    max_next_q_values = next_q_values.max(1)[0]
+                    if self.hparams.get('value_aggr', 'mean') == 'max':
+                        max_next_q_values_aggr = max_next_q_values.max()
+                    if self.hparams.get('value_aggr', 'mean') == 'mean':
+                        max_next_q_values_aggr = max_next_q_values.mean()
+                    max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
+                    target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
+                td_error = torch.abs(q_values - target_q_values)
+                td_error = torch.clamp(td_error, min=1e-8)
+                # todo - support pq norm
+                initial_priority = torch.norm(td_error)  # default L2 norm
+                # todo - support PER
                 self.memory.push(transition)
 
         # compute some stats and store in buffer
         active_applied_ratio = []
         applied_available_ratio = []
-        for _, action, _ in self.state_action_context_list:
+        for _, action, _, _ in self.state_action_qvalues_context_list:
             normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
             approximately_zero = np.abs(normalized_slack) < 1e-6
@@ -1020,16 +1068,17 @@ class GDQN(Sepa):
             # perform 1 optimization step
             self.optimize_model()
 
-            if i_episode % hparams.get('target_update_interval', 1000) == 0:
+            if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
                 self.update_target()
 
-            if i_episode % hparams.get('log_interval', 100) == 0:
+            global_step = self.num_policy_updates
+            if global_step % hparams.get('log_interval', 100) == 0:
                 self.log_stats()
 
             # evaluate periodically
             self.evaluate(datasets)
 
-            if i_episode % hparams.get('checkpoint_interval', 100) == 0:
+            if global_step % hparams.get('checkpoint_interval', 100) == 0:
                 self.save_checkpoint()
 
             if i_episode % len(graph_indices) == 0:
@@ -1039,6 +1088,9 @@ class GDQN(Sepa):
 
     def evaluate(self, datasets):
         # evaluate the model on the validation and test sets
+        if self.num_policy_updates == 0:
+            # wait until the model starts learning
+            return
         global_step = self.num_policy_updates
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
