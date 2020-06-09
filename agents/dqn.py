@@ -678,7 +678,7 @@ class GDQN(Sepa):
                 # todo verify behavior with terminal state
                 if next_q_values is None:
                     # next state is terminal, and its q_values are 0 by convention
-                    target_q_values = reward
+                    target_q_values = torch.from_numpy(reward)
                 else:
                     max_next_q_values = next_q_values.max(1)[0]
                     if self.hparams.get('value_aggr', 'mean') == 'max':
