@@ -172,7 +172,7 @@ num_learners: 1
 #batch_size: 512
 #max_episode_steps: None
 param_update_interval: 50  # number of learner.sgd_steps between workers policy update
-#max_num_updates: 100000
+max_num_updates: 100000  # relevant to PER to increase beta across time
 #tau: 0.01
 #learning_rate: 0.0001
 #gamma: 0.95
