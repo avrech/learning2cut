@@ -1,24 +1,24 @@
 import random
+import torch
 from collections import deque
-from utils.data import Transition
 import numpy as np
 from torch_geometric.data.batch import Batch
 from utils.segtree import MinSegmentTree, SegmentTree, SumSegmentTree
-import torch
+from utils.data import Transition
 
 
 class ReplayBuffer(object):
-    def __init__(self, size):
+    def __init__(self, capacity):
         """
         Create Replay buffer of Transition objects
         Parameters
         ----------
-        size: int
+        capacity: int
             Max number of transitions to store in the buffer. When the buffer
             overflows the old memories are dropped.
         """
         self._storage = []
-        self._capacity = size
+        self._capacity = capacity
         self._next_idx = 0
 
         # helper Transition batch object, will be created automatically in the first sample() call
@@ -43,20 +43,6 @@ class ReplayBuffer(object):
         # todo support heap.pop to override the min prioritized data, must be synchronized with PER priority updates
         # increment the next index round robin
         self._next_idx = (self._next_idx + 1) % self._capacity
-
-    # def sample(self, batch_size):
-    #     """Sample a batch of experiences.
-    #     Parameters
-    #     ----------
-    #     batch_size: int
-    #         How many transitions to sample.
-    #     Returns
-    #     -------
-    #     batch: Batch
-    #         Batch of Transition objects
-    #     """
-    #     idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]  # todo can potentially sample the same transition twice
-    #     return self._encode_sample(idxes)
 
     def sample(self, batch_size):
         assert batch_size <= len(self._storage)
@@ -242,3 +228,28 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             self._it_min[idx] = priority ** self._alpha
 
             self._max_priority = max(self._max_priority, priority)
+
+
+# from pytorch dqn tutorial
+class ReplayMemory(object):
+    """
+    Stores transitions of type utils.data.Transition in a single huge list
+    """
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.memory = []
+        self.position = 0
+
+    def push(self, transition):
+        """Saves a transition."""
+        if len(self.memory) < self.capacity:
+            # extend the memory for storing the new transition
+            self.memory.append(None)
+        self.memory[self.position] = transition
+        self.position = (self.position + 1) % self.capacity
+
+    def sample(self, batch_size):
+        return random.sample(self.memory, batch_size)
+
+    def __len__(self):
+        return len(self.memory)

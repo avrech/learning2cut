@@ -19,36 +19,13 @@ from collections import namedtuple
 import matplotlib as mpl
 import pickle
 from utils.scip_models import maxcut_mccormic_model
+from utils.buffer import ReplayBuffer, PrioritizedReplayBuffer
 from separators.mccormick_cycle_separator import MccormickCycleSeparator
 mpl.rc('figure', max_open_warning=0)
 # mpl.rcParams['text.antialiased'] = False
 # mpl.use('agg')
 import matplotlib.pyplot as plt
 StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'action', 'q_values', 'transformer_context'))
-
-
-class ReplayMemory(object):
-    """
-    Stores transitions of type utils.data.Transition in a single huge list
-    """
-    def __init__(self, capacity):
-        self.capacity = capacity
-        self.memory = []
-        self.position = 0
-
-    def push(self, transition):
-        """Saves a transition."""
-        if len(self.memory) < self.capacity:
-            # extend the memory for storing the new transition
-            self.memory.append(None)
-        self.memory[self.position] = transition
-        self.position = (self.position + 1) % self.capacity
-
-    def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
-
-    def __len__(self):
-        return len(self.memory)
 
 
 class GDQN(Sepa):
@@ -61,7 +38,11 @@ class GDQN(Sepa):
         self.hparams = hparams
 
         # DQN stuff
-        self.memory = ReplayMemory(hparams.get('memory_capacity', 1000000))
+        self.use_per = hparams.get('use_per', True)
+        if self.use_per:
+            self.memory = PrioritizedReplayBuffer(hparams.get('memory_capacity', 1000000), alpha=hparams.get('priority_alpha', 0.6))
+        else:
+            self.memory = ReplayBuffer(hparams.get('memory_capacity', 1000000))
         self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.gamma = hparams.get('gamma', 0.999)
@@ -285,15 +266,28 @@ class GDQN(Sepa):
         """
         if len(self.memory) < self.batch_size:
             return
-        transitions = self.memory.sample(self.batch_size)
-        self.sgd_step(transitions)
+        if self.use_per:
+            # todo sample with beta
+            beta = 0.4
+            batch, weights, idxes = self.memory.sample(self.batch_size, beta)
+            new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights)
+            # update priorities
+            self.memory.update_priorities(idxes, new_priorities)
+
+        else:
+            batch = self.memory.sample(self.batch_size)
+            self.sgd_step(batch=batch)
+
         self.num_policy_updates += 1
 
-    def sgd_step(self, transitions, importance_sampling_weights=None):
+    def sgd_step(self, batch, importance_sampling_correction_weights=None):
         """ implement the basic DQN optimization step """
         # todo consider all features in follow_batch to parse correctly
-        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
+        # old replay buffer returned transitions as separated Transition objects
+        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+
+        batch = batch.to(self.device)
         action_batch = batch.a
 
         # Compute Q(s, a):
@@ -391,14 +385,14 @@ class GDQN(Sepa):
 
         # Compute Huber loss
         # todo - support importance sampling correction - double check
-        if importance_sampling_weights is None:
-            # generate equal weights for all losses
-            importance_sampling_weights = torch.ones_like(q_values)
-        else:
+        if self.use_per:
             # broadcast each transition importance sampling weight to all its related losses
-            importance_sampling_weights = importance_sampling_weights[batch.x_a_batch]
-        # multiply each action loss by its importance sampling correction weight and average
-        loss = (importance_sampling_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
+            importance_sampling_correction_weights = importance_sampling_correction_weights[batch.x_a_batch]
+            # multiply each action loss by its importance sampling correction weight and average
+            loss = (importance_sampling_correction_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
+        else:
+            # generate equal weights for all losses
+            loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1))
 
         # loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1)) - original pytorch example
         self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
@@ -411,17 +405,20 @@ class GDQN(Sepa):
         self.optimizer.step()
 
         # todo - for distributed learning return losses to update priorities - double check
-        # for transition, compute the norm of its TD-error
-        td_error = torch.abs(q_values - target_q_values.unsqueeze(1)).detach()
-        td_error = torch.clamp(td_error, min=1e-8)
-        # to compute p,q norm take power p and compute sqrt q.
-        td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch, # target index of each element in source
-                                                  dim=0,                          # scattering dimension
-                                                  dim_size=self.batch_size))      # output tensor size in dim after scattering
+        if self.use_per:
+            # for transition, compute the norm of its TD-error
+            td_error = torch.abs(q_values - target_q_values.unsqueeze(1)).detach()
+            td_error = torch.clamp(td_error, min=1e-8)
+            # to compute p,q norm take power p and compute sqrt q.
+            td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch, # target index of each element in source
+                                                      dim=0,                          # scattering dimension
+                                                      dim_size=self.batch_size))      # output tensor size in dim after scattering
 
-        new_priorities = td_error_l2_norm.squeeze().cpu().numpy().tolist()
-        self.num_sgd_steps_done += 1
-        return loss.item(), new_priorities
+            new_priorities = td_error_l2_norm.squeeze().cpu().numpy().tolist()
+            self.num_sgd_steps_done += 1
+            return new_priorities
+        else:
+            return None
 
     def update_target(self):
         # Update the target network, copying all weights and biases in DQN
@@ -670,29 +667,31 @@ class GDQN(Sepa):
                                             reward=reward,
                                             scip_next_state=next_state)
 
-                # todo - compute initial priority for PER based on the policy q_values.
-                #        compute the TD error for each action in the current state as we do in sgd_step,
-                #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
-                selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
-                q_values = q_values.gather(1, selected_action)
-                # todo verify behavior with terminal state
-                if next_q_values is None:
-                    # next state is terminal, and its q_values are 0 by convention
-                    target_q_values = torch.from_numpy(reward)
+                if self.use_per:
+                    # todo - compute initial priority for PER based on the policy q_values.
+                    #        compute the TD error for each action in the current state as we do in sgd_step,
+                    #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
+                    selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
+                    q_values = q_values.gather(1, selected_action)
+                    # todo verify behavior with terminal state
+                    if next_q_values is None:
+                        # next state is terminal, and its q_values are 0 by convention
+                        target_q_values = torch.from_numpy(reward)
+                    else:
+                        max_next_q_values = next_q_values.max(1)[0]
+                        if self.hparams.get('value_aggr', 'mean') == 'max':
+                            max_next_q_values_aggr = max_next_q_values.max()
+                        if self.hparams.get('value_aggr', 'mean') == 'mean':
+                            max_next_q_values_aggr = max_next_q_values.mean()
+                        max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
+                        target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
+                    td_error = torch.abs(q_values - target_q_values)
+                    td_error = torch.clamp(td_error, min=1e-8)
+                    # todo - support pq norm
+                    initial_priority = torch.norm(td_error)  # default L2 norm
+                    # todo - support PER
                 else:
-                    max_next_q_values = next_q_values.max(1)[0]
-                    if self.hparams.get('value_aggr', 'mean') == 'max':
-                        max_next_q_values_aggr = max_next_q_values.max()
-                    if self.hparams.get('value_aggr', 'mean') == 'mean':
-                        max_next_q_values_aggr = max_next_q_values.mean()
-                    max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
-                    target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
-                td_error = torch.abs(q_values - target_q_values)
-                td_error = torch.clamp(td_error, min=1e-8)
-                # todo - support pq norm
-                initial_priority = torch.norm(td_error)  # default L2 norm
-                # todo - support PER
-                self.memory.push(transition)
+                    self.memory.add(transition)
 
         # compute some stats and store in buffer
         active_applied_ratio = []
