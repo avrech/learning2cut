@@ -269,25 +269,24 @@ class GDQN(Sepa):
         if self.use_per:
             # todo sample with beta
             beta = 0.4
-            batch, weights, idxes = self.memory.sample(self.batch_size, beta)
-            new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights)
+            transitions, weights, idxes = self.memory.sample(self.batch_size, beta)
+            new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=weights)
             # update priorities
             self.memory.update_priorities(idxes, new_priorities)
 
         else:
-            batch = self.memory.sample(self.batch_size)
-            self.sgd_step(batch=batch)
+            transitions = self.memory.sample(self.batch_size)
+            self.sgd_step(transitions)
 
         self.num_policy_updates += 1
 
-    def sgd_step(self, batch, importance_sampling_correction_weights=None):
+    def sgd_step(self, transitions, importance_sampling_correction_weights=None):
         """ implement the basic DQN optimization step """
         # todo consider all features in follow_batch to parse correctly
 
         # old replay buffer returned transitions as separated Transition objects
-        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
-        batch = batch.to(self.device)
         action_batch = batch.a
 
         # Compute Q(s, a):
@@ -689,7 +688,8 @@ class GDQN(Sepa):
                     td_error = torch.clamp(td_error, min=1e-8)
                     # todo - support pq norm
                     initial_priority = torch.norm(td_error)  # default L2 norm
-                    # todo - support PER
+                    # todo - support PER, local buffer and remote PER
+                    self.memory.add(transition, initial_priority)
                 else:
                     self.memory.add(transition)
 

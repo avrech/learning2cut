@@ -21,10 +21,10 @@ class ReplayBuffer(object):
         self._capacity = capacity
         self._next_idx = 0
 
-        # helper Transition batch object, will be created automatically in the first sample() call
-        # this dummy batch will be used in order to decode encoded samples,
-        # and convert back from tuple of np.arrays to Batch of Transition objects
-        self._dummy_batch = None
+        # # helper Transition batch object, will be created automatically in the first sample() call
+        # # this dummy batch will be used in order to decode encoded samples,
+        # # and convert back from tuple of np.arrays to Batch of Transition objects
+        # self._dummy_batch = None
 
     def __len__(self):
         return len(self._storage)
@@ -48,24 +48,26 @@ class ReplayBuffer(object):
         assert batch_size <= len(self._storage)
         # sample batch_size unique transitions
         transitions = random.sample(self._storage, batch_size)
-        # create a batch object
-        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
-        if self._dummy_batch is None:
-            # create dummy_batch
-            self._dummy_batch = batch.clone()
-
-        return batch
+        return transitions
+        # # create a batch object
+        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        # if self._dummy_batch is None:
+        #     # create dummy_batch
+        #     self._dummy_batch = batch.clone()
+        #
+        # return batch
 
     def get_batch(self, idxes):
         # read transitions from storage
         transitions = self._storage[idxes]
-        # create a batch object
-        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
-        if self._dummy_batch is None:
-            # create dummy_batch
-            self._dummy_batch = batch.clone()
-
-        return batch
+        return transitions
+        # # create a batch object
+        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        # if self._dummy_batch is None:
+        #     # create dummy_batch
+        #     self._dummy_batch = batch.clone()
+        #
+        # return batch
 
     def _encode_sample(self, batch):
         """
