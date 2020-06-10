@@ -6,9 +6,11 @@ from torch_geometric.data.batch import Batch
 from utils.segtree import MinSegmentTree, SegmentTree, SumSegmentTree
 import torch
 
+
 class ReplayBuffer(object):
     def __init__(self, size):
-        """Create Replay buffer.
+        """
+        Create Replay buffer of Transition objects
         Parameters
         ----------
         size: int
@@ -18,6 +20,11 @@ class ReplayBuffer(object):
         self._storage = []
         self._capacity = size
         self._next_idx = 0
+
+        # helper Transition batch object, will be created automatically in the first sample() call
+        # this dummy batch will be used in order to decode encoded samples,
+        # and convert back from tuple of np.arrays to Batch of Transition objects
+        self._dummy_batch = None
 
     def __len__(self):
         return len(self._storage)
@@ -33,7 +40,7 @@ class ReplayBuffer(object):
             # extend the memory for storing the new data
             self._storage.append(None)
         self._storage[self._next_idx] = transition
-        # todo support heap.pop to override the min prioritized data
+        # todo support heap.pop to override the min prioritized data, must be synchronized with PER priority updates
         # increment the next index round robin
         self._next_idx = (self._next_idx + 1) % self._capacity
 
@@ -57,7 +64,41 @@ class ReplayBuffer(object):
         transitions = random.sample(self._storage, batch_size)
         # create a batch object
         batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        if self._dummy_batch is None:
+            # create dummy_batch
+            self._dummy_batch = batch.clone()
+
         return batch
+
+    def get_batch(self, idxes):
+        # read transitions from storage
+        transitions = self._storage[idxes]
+        # create a batch object
+        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        if self._dummy_batch is None:
+            # create dummy_batch
+            self._dummy_batch = batch.clone()
+
+        return batch
+
+    def _encode_sample(self, batch):
+        """
+        Returns a tuple of standard np.array objects,
+        self._dummy_batch keys are used to encode the batch as tuple of numpy arrays,
+        and similarly to decode an encoded batch
+        """
+        encoded_batch = (batch[k].numpy() for k in self._dummy_batch.keys)
+        return encoded_batch
+
+    def _decode_sample(self, encoded_batch):
+        """
+        Returns the original torch_geometric Batch of Transitions.
+        Useful for decoding samples on the learner side.
+        """
+        decoded_batch = self._dummy_batch.clone()
+        for k, np_array in zip(self._dummy_batch.keys, encoded_batch):
+            decoded_batch[k] = torch.from_numpy(np_array)
+        return decoded_batch
 
     def __len__(self):
         return len(self._storage)
@@ -94,10 +135,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         """See ReplayBuffer.store_effect"""
         idx = self._next_idx
         super().add(transition)
-        # todo consider to update here the initial priority
-        #  because it is not safe to build on later update in another place
+        # update here the initial priority
+        # because it is not safe to build on later update in another place
         # safe code:
-        self.update_priorities([idx], [initial_priority])
+        self.update_priorities([idx], [initial_priority]) # todo verify
         # old and unsafe:
         # self._it_sum[idx] = self._max_priority ** self._alpha
         # self._it_min[idx] = self._max_priority ** self._alpha
@@ -127,26 +168,16 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             (0 - no corrections, 1 - full correction)
         Returns
         -------
-        obs_batch: np.array
-            batch of observations
-        act_batch: np.array
-            batch of actions executed given obs_batch
-        rew_batch: np.array
-            rewards received as results of executing act_batch
-        next_obs_batch: np.array
-            next set of observations seen after executing act_batch
-        done_mask: np.array
-            done_mask[i] = 1 if executing act_batch[i] resulted in
-            the end of an episode and 0 otherwise.
-        weights: np.array
-            Array of shape (batch_size,) and dtype np.float32
+        batch: torch_geometric Batch of Transition
+            The batch object used in DQN.sgd_step()
+        weights: torch.tensor
+            Array of shape (batch_size,) and dtype torch.float32
             denoting importance weight of each sampled transition
         idxes: np.array
             Array of shape (batch_size,) and dtype np.int32
             idexes in buffer of sampled experiences
         """
         assert beta > 0
-
         idxes = self._sample_proportional(batch_size)
 
         weights = []
@@ -157,38 +188,38 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             p_sample = self._it_sum[idx] / self._it_sum.sum()
             weight = (p_sample * len(self._storage)) ** (-beta)
             weights.append(weight / max_weight)
-        weights = np.array(weights)
-        # todo encode sample in a single transition object
-        encoded_sample = self._encode_sample(idxes, weights)
-        # return tuple(list(encoded_sample) + [weights, idxes])
-        return encoded_sample
 
-    def _encode_sample(self, idxes, weights):
-        """
-        ReplayBuffer returned object is Batch.
-        This object can be used directly in DQN.sgd_step()
+        weights = torch.tensor(weights, dtype=torch.float32)
+        # encoded_sample = self._encode_sample(idxes, weights) - old code
+        batch = self.get_batch(idxes)
+        # return a tuple of batch, importance sampling correction weights and idxes to update later the priorities
+        return batch, weights, idxes
 
-        For distributed setting, we need to serialize it into numpy arrays,
-        and this will be done in the child classes.
-        The batch object keys can be used to encode the batch as tuple of numpy arrays:
-        # break batch into tuple of np.arrays
-        encoded_sample = (batch[k].numpy() for k in batch.keys)
-        in order rebuild a Batch object from such a tuple,
-        we need a dummy Batch() built from 2 arbitrary transition objects, dummy_batch, and then
-        for k, np_array in zip(dummy_batch.keys, encoded_sample):
-            dummy_batch[k] = torch.from_numpy(np_array)
-        the resulting dummy_batch is identical to the original batch,
-        and specifically it keeps its transition samples order,
-        so the related priorities and weights can be used properly.
+    def _encode_sample(self, sample):
         """
-        # read transitions from storage
-        transitions = self._storage[idxes]
-        # create a batch object
-        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
-        # todo store the importance sampling correction weights and corresponding idxes in batch
-        batch['per_weight'] = torch.from_numpy(weights)
-        batch['per_index'] = torch.from_numpy(idxes)
-        return batch
+        For distributed setting, we need to serialize sample into numpy arrays.
+        Let
+            batch, weights, idxes = sample
+        The batch is encoded by the base ReplayBuffer class which handles this data type,
+        weights are straightforwardly converted into and from numpy arrays,
+        and idxes remain np.array since they are used only in the replay buffer, and need not be changed.
+        """
+        # # read transitions from storage
+        # transitions = self._storage[idxes]
+        # # create a batch object
+        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        batch, weights, idxes = sample
+        # idxes are already stored as np.array, so need only to encode weights and batch
+        # batch is encoded using the base class
+        encoded_batch = super()._encode_sample(batch)
+        encoded_weights = weights.numpy()
+        return encoded_batch, encoded_weights, idxes
+
+    def _decode_sample(self, encoded_sample):
+        encoded_batch, encoded_weights, idxes = encoded_sample
+        batch = super()._decode_sample(encoded_batch)
+        weights = torch.from_numpy(encoded_weights)
+        return batch, weights, idxes
 
     def update_priorities(self, idxes, priorities):
         """Update priorities of sampled transitions.
