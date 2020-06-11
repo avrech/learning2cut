@@ -71,7 +71,7 @@ class GDQN(Sepa):
         # training stuff
         self.num_env_steps_done = 0
         self.num_sgd_steps_done = 0
-        self.num_policy_updates = 0
+        self.num_param_updates = 0
         self.i_episode = 0
         self.training = True
         self.walltime_offset = 0
@@ -113,7 +113,7 @@ class GDQN(Sepa):
         self.lp_iterations_limit = -1
 
         # logging
-        self.is_tester = True
+        self.is_tester = True  # todo set in distributed setting
         self.is_worker = True
         self.is_learner = True
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
@@ -285,8 +285,9 @@ class GDQN(Sepa):
         else:
             transitions = self.memory.sample(self.batch_size)
             self.sgd_step(transitions)
+        self.num_param_updates += 1  # todo - update in learner every time param_server is updated.
+                                      #  in distributed setting it is different than num_sgd_steps_done.
 
-        self.num_policy_updates += 1
 
     def sgd_step(self, transitions, importance_sampling_correction_weights=None):
         """ implement the basic DQN optimization step """
@@ -411,6 +412,7 @@ class GDQN(Sepa):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
+        self.num_sgd_steps_done += 1
         # todo - for distributed learning return losses to update priorities - double check
         if self.use_per:
             # for transition, compute the norm of its TD-error
@@ -422,7 +424,7 @@ class GDQN(Sepa):
                                                       dim_size=self.batch_size))      # output tensor size in dim after scattering
 
             new_priorities = td_error_l2_norm.squeeze().cpu().numpy().tolist()
-            self.num_sgd_steps_done += 1
+
             return new_priorities
         else:
             return None
@@ -755,7 +757,7 @@ class GDQN(Sepa):
             in single thread - these are all true.
             need to separate workers' logdir in the distributed main script
         """
-        global_step = self.num_policy_updates
+        global_step = self.num_param_updates
         print(f'Global step: {global_step} | {self.dataset_name}\t|', end='')
         cur_time_sec = time() - self.start_time + self.walltime_offset
 
@@ -908,7 +910,7 @@ class GDQN(Sepa):
             'optimizer_state_dict': self.optimizer.state_dict(),
             'num_env_steps_done': self.num_env_steps_done,
             'num_sgd_steps_done': self.num_sgd_steps_done,
-            'num_policy_updates': self.num_policy_updates,
+            'num_policy_updates': self.num_param_updates,
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
             'best_perf': self.best_perf,
@@ -938,7 +940,7 @@ class GDQN(Sepa):
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.num_env_steps_done = checkpoint['num_env_steps_done']
         self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
-        self.num_policy_updates = checkpoint['num_policy_updates']
+        self.num_param_updates = checkpoint['num_policy_updates']
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
         self.best_perf = checkpoint['best_perf']
@@ -1066,10 +1068,10 @@ class GDQN(Sepa):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
-        if self.num_policy_updates == 0:
+        if self.num_param_updates == 0:
             # wait until the model starts learning
             return
-        global_step = self.num_policy_updates
+        global_step = self.num_param_updates
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
             if dataset_name == 'trainset25':
@@ -1120,16 +1122,16 @@ class GDQN(Sepa):
             if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
                 self.update_target()
 
-            if self.num_policy_updates > 0:
-                global_step = self.num_policy_updates
+            if self.num_param_updates > 0:
+                global_step = self.num_param_updates
                 if global_step % hparams.get('log_interval', 100) == 0:
                     self.log_stats()
 
-                # evaluate periodically
-                self.evaluate()
-
                 if global_step % hparams.get('checkpoint_interval', 100) == 0:
                     self.save_checkpoint()
+
+                # evaluate periodically
+                self.evaluate()
 
         return 0
 

@@ -5,9 +5,9 @@ from distributed.param_server import ParameterServer
 import argparse
 import yaml
 import os
+import math
 
-
-def test_distributed_functionality(self):
+if __name__ == '__main__':
     """
     Tests the following functionality:
     1. Worker -> PER packets:
@@ -21,9 +21,8 @@ def test_distributed_functionality(self):
 
     Learner -> ParamServer -> Worker packets are not tested, since we didn't touch this type of packets.
     """
-
     parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', type=str, default='results',
+    parser.add_argument('--logdir', type=str, default='results/distributed_functionality_test',
                         help='path to save results')
     parser.add_argument('--datadir', type=str, default='data/maxcut',
                         help='path to generate/read data')
@@ -60,7 +59,9 @@ def test_distributed_functionality(self):
 
 
     workers = [DQNWorker(worker_id=worker_id, cfg=hparams, common_config=hparams, worker_brain=None) for worker_id in range(2)]
+    test_worker = DQNWorker(worker_id='Tester', cfg=hparams, common_config=hparams, worker_brain=None)
     learner = DQNLearner(hparams=hparams)
+    # todo ensure workers and learner are assigned correct is_<role>
     per_server = PrioritizedReplayBufferServer(buffer_cfg=hparams, comm_cfg=hparams)
     param_server = ParameterServer()
 
@@ -73,72 +74,82 @@ def test_distributed_functionality(self):
         for worker in workers:
             local_buffer = worker.collect_data()
 
-        # self.local_buffer is full enough. encode Worker->PER packet and send
-        worker_to_per_message = DQNWorker.pack_message_to_per(self.local_buffer)  # todo serialize
-        # flush the local buffer
-        self.local_buffer = []
-        # the packet should be sent here and received on the listening socket.
+            # self.local_buffer is full enough. encode Worker->PER packet and send
+            worker_to_per_message = DQNWorker.pack_message_to_per(local_buffer)  # todo serialize
+            # flush the local buffer
+            worker.local_buffer = []
+            # the packet should be sent here and received on the listening socket.
 
-        # PER SERVER SIDE
-        # worker2per_packet from worker should be received here.
-        # unpack Worker->PER packet and push into PER
-        buffer = PERServer.unpack_message_from_worker(worker_to_per_message)
-        # push into memory
-        self.memory.add_buffer(buffer)
+            # PER SERVER SIDE
+            # worker2per_packet from worker should be received here.
+            # unpack Worker->PER packet and push into PER
+            unpacked_buffer = per_server.unpack_message_from_worker(worker_to_per_message)
+            # push into memory
+            per_server.add_buffer(unpacked_buffer)
 
         # encode PER->Learner packet and send to Learner
-        if len(self.memory) >= self.batch_size:
+        if len(per_server._storage) >= per_server.batch_size:
             # todo sample with beta
-            beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * math.exp(
-                -1. * self.num_sgd_steps_done / self.priority_beta_decay)
-            transitions, weights, idxes = self.memory.sample(self.batch_size, beta)
+            beta = per_server.priority_beta_end - (per_server.priority_beta_end - per_server.priority_beta_start) * math.exp(
+                -1. * per_server.num_sgd_steps_done / per_server.priority_beta_decay)
+            transitions, weights, idxes = per_server.sample(self.batch_size, beta)
 
-            per_to_learner_message = PERServer.pack_message_to_leaner((transitions, weights, idxes))
+            per_to_learner_message = per_server.pack_message_to_leaner((transitions, weights, idxes))
 
             # the message should be sent here and received on the Learner side
 
             # LEARNER SIDE
-            unpacked_transitions, unpacked_weights, unpacked_idxes = DQNLearner.unpack_message_from_per(
-                per_to_learner_message)
+            # decode packet on Learner and perform SGD step
+            unpacked_transitions, unpacked_weights, unpacked_idxes = learner.unpack_message_from_per(per_to_learner_message)
             # perform sgd step and return new priorities to per server
-            new_priorities = self.sgd_step(transitions=unpacked_transitions,
-                                           importance_sampling_correction_weights=unpacked_weights)
+            new_priorities = learner.sgd_step(transitions=unpacked_transitions, importance_sampling_correction_weights=unpacked_weights)
             # send back to per the new priorities together with the corresponding idxes
             learner_to_per_message = DQNLearner.pack_message_to_per((new_priorities, unpacked_idxes))
             # the message should be sent here and received on the per side
 
             # PER SERVER SIDE
-            new_priorities_from_learner, idxes_from_learner = PERServer.unpack_message_from_learner(
-                learner_to_per_message)
+            new_priorities_from_learner, idxes_from_learner = per_server.unpack_message_from_learner(learner_to_per_message)
             # update priorities
-            self.memory.update_priorities(idxes_from_learner, new_priorities_from_learner)
+            per_server.update_priorities(idxes_from_learner, new_priorities_from_learner)
 
+        if learner.num_sgd_steps_done % hparams['param_update_interval'] == 0:
             # LEARNER SIDE
             # pack new params to parameter server and send
-            learner_to_param_server_message = DQNLearner.pack_message_to_param_server()
+            learner_to_param_server_message = learner.pack_message_to_param_server()
+            learner.num_param_updates += 1
 
-            self.num_policy_updates += 1
+            # PARAM SERVER SIDE
+            new_params = param_server.unpack_message_from_learner(learner_to_param_server_message)
+            param_server.update_params(new_params) # todo - verify
+            param_server.num_param_updates += 1
+            param_server_to_worker_message = param_server.pack_message_to_worker
+            # the new params should be broadcasted here to all workers.
 
-        # decode packet on Learner and perform SGD step
+            # WORKER SIDE
+            for worker in workers:
+                unpacked_new_params = worker.unpack_message_from_param_server(param_server_to_worker_message)
+                worker.update_params(unpacked_new_params)
+                worker.num_param_updates += 1
+            unpacked_new_params = test_worker.unpack_message_from_param_server(param_server_to_worker_message)
+            test_worker.update_params(unpacked_new_params)
+            test_worker.num_param_updates += 1
 
-        # send back new_priorities to PER, and update
+        # update learner target policy periodically
+        if learner.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
+            learner.update_target()
 
-        # # perform 1 optimization step
-        # self.optimize_model()
-
-        # this part is the same as in train_single_thread()
-        if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
-            self.update_target()
-
-        if self.num_policy_updates > 0:
-            global_step = self.num_policy_updates
+        global_step = learner.num_param_updates
+        if learner.num_param_updates > 0:
             if global_step % hparams.get('log_interval', 100) == 0:
-                self.log_stats()
+                learner.log_stats()
 
-            # evaluate periodically
-            self.evaluate()
-
-            if global_step % hparams.get('checkpoint_interval', 100) == 0:
-                self.save_checkpoint()
+        # TEST WORKER SIDE
+        test_worker.evaluate()
+        if global_step % hparams.get('checkpoint_interval', 100) == 0:
+            learner.save_checkpoint()
+            per_server.save_checkpoint()
+            test_worker.save_checkpoint()
+            for worker in workers:
+                worker.save_checkpoint()
 
     return 0
