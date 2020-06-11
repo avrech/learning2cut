@@ -1,35 +1,34 @@
 from typing import Deque
-
 import pyarrow as pa
 import ray
 import zmq
-
-from common.utils.buffer import PrioritizedReplayBuffer
+from utils.buffer import PrioritizedReplayBuffer
 
 
 @ray.remote
-class PrioritizedReplayBufferServer(object):
-    def __init__(self, buffer_cfg: dict, comm_cfg: dict):
-        self.cfg = buffer_cfg
+class PrioritizedReplayBufferServer(PrioritizedReplayBuffer):
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
 
-        # unpack buffer configs
-        self.max_num_updates = self.cfg["max_num_updates"]
-        self.priority_alpha = self.cfg["priority_alpha"]
-        self.priority_beta = self.cfg["priority_beta_start"]
-        self.priority_beta_end = self.cfg["priority_beta_end"]
-        self.priority_beta_increment = (
-            self.priority_beta_end - self.priority_beta
-        ) / self.max_num_updates
+        # # unpack buffer configs
+        # self.max_num_updates = self.cfg["max_num_updates"]
+        # self.priority_alpha = self.cfg["priority_alpha"]
+        # self.priority_beta = self.cfg["priority_beta_start"]
+        # self.priority_beta_end = self.cfg["priority_beta_end"]
+        # self.priority_beta_increment = (
+        #     self.priority_beta_end - self.priority_beta
+        # ) / self.max_num_updates
 
-        self.batch_size = self.cfg["batch_size"]
+        # self.batch_size = self.cfg["batch_size"]
 
-        self.buffer = PrioritizedReplayBuffer(
-            self.cfg["buffer_max_size"], self.priority_alpha
-        )
+        # self.buffer = PrioritizedReplayBuffer(
+        #     self.cfg["buffer_max_size"], self.priority_alpha
+        # )
 
         # unpack communication configs
-        self.repreq_port = comm_cfg["repreq_port"]
-        self.pullpush_port = comm_cfg["pullpush_port"]
+        self.repreq_port = config["repreq_port"]
+        self.pullpush_port = config["pullpush_port"]
 
         # initialize zmq sockets
         print("[Buffer]: initializing sockets..")
@@ -46,34 +45,47 @@ class PrioritizedReplayBufferServer(object):
         self.pull_socket = context.socket(zmq.PULL)
         self.pull_socket.bind(f"tcp://127.0.0.1:{self.pullpush_port}")
 
+    def get_batch_packet(self):
+        batch = self.sample()
+        # batch = self.encode_sample(sample)  # todo data remained encoded from worker
+        batch_packet = pa.serialize(batch).to_buffer()
+        return batch_packet
+
+    @staticmethod
+    def unpack_priorities(priorities_packet):
+        idxes, priorities = pa.deserialize(priorities_packet)
+        return idxes, priorities
+
     def send_batch_recv_priors(self):
+        batch_packet = self.get_batch_packet()
         # send batch and request priorities (blocking recv)
-        batch = self.buffer.sample(self.batch_size, self.priority_beta)
-        batch_id = pa.serialize(batch).to_buffer()
-        self.rep_socket.send(batch_id)
+        self.rep_socket.send(batch_packet)
 
         # receive and update priorities
-        new_priors_id = self.rep_socket.recv()
-        idxes, new_priorities = pa.deserialize(new_priors_id)
-        self.buffer.update_priorities(idxes, new_priorities)
+        new_priors_packet = self.rep_socket.recv()
+        idxes, new_priorities = self.unpack_priorities(new_priors_packet)
+        self.update_priorities(idxes, new_priorities)
 
-    def recv_data(self):
-        new_replay_data_id = False
+    @staticmethod
+    def unpack_replay_data(replay_data_packet):
+        encoded_replay_data = pa.deserialize(replay_data_packet)
+        return encoded_replay_data
+
+    def recv_replay_data(self):
+        new_replay_data_packet = False
         try:
-            new_replay_data_id = self.pull_socket.recv(zmq.DONTWAIT)
+            new_replay_data_packet = self.pull_socket.recv(zmq.DONTWAIT)
         except zmq.Again:
             pass
 
-        if new_replay_data_id:
-            new_replay_data = pa.deserialize(new_replay_data_id)
-            for replay_data, priorities in new_replay_data:
-                self.buffer.add(*replay_data)
-                self.buffer.update_priorities([len(self.buffer) - 1], priorities)  # todo not safe and not correct.
+        if new_replay_data_packet:
+            new_replay_data = self.unpack_replay_data(new_replay_data_packet)
+            for replay_data, initial_priority in new_replay_data:
+                self.add(replay_data, initial_priority)
 
     def run(self):
         while True:
-            self.recv_data()
+            self.recv_replay_data()
             if len(self.buffer) > self.batch_size:
                 self.send_batch_recv_priors()
-            else:
-                pass
+

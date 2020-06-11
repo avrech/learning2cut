@@ -1,5 +1,5 @@
 # NOTES:
-# All intervals are measured in num_policy_updates,
+# All intervals are measured in num_param_updates,
 # except target_update_interval and param_update_interval which are measured in number of sgd steps done on the learner.
 # SINGLE THREAD SETTING:
 # - num_policy_updates equals to the number of episodes done and to the number of sgd steps done.
@@ -20,7 +20,7 @@ gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
 eps_decay: 100000
-memory_capacity: 50000
+replay_buffer_capacity: 65536
 dqn_objective: db_auc
 empty_action_penalty: 0
 

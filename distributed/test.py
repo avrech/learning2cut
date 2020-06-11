@@ -1,4 +1,4 @@
-from distributed.worker import DQNWorker
+from distributed.worker import GDQNWorker
 from distributed.dqn_learner import DQNLearner
 from distributed.per_server import PrioritizedReplayBufferServer
 from distributed.param_server import ParameterServer
@@ -58,8 +58,8 @@ if __name__ == '__main__':
 
 
 
-    workers = [DQNWorker(worker_id=worker_id, cfg=hparams, common_config=hparams, worker_brain=None) for worker_id in range(2)]
-    test_worker = DQNWorker(worker_id='Tester', cfg=hparams, common_config=hparams, worker_brain=None)
+    workers = [GDQNWorker(worker_id=worker_id, cfg=hparams, common_config=hparams, worker_brain=None) for worker_id in range(2)]
+    test_worker = GDQNWorker(worker_id='Tester', cfg=hparams, common_config=hparams, worker_brain=None)
     learner = DQNLearner(hparams=hparams)
     # todo ensure workers and learner are assigned correct is_<role>
     per_server = PrioritizedReplayBufferServer(buffer_cfg=hparams, comm_cfg=hparams)
@@ -75,7 +75,7 @@ if __name__ == '__main__':
             local_buffer = worker.collect_data()
 
             # self.local_buffer is full enough. encode Worker->PER packet and send
-            worker_to_per_message = DQNWorker.pack_message_to_per(local_buffer)  # todo serialize
+            worker_to_per_message = GDQNWorker.pack_message_to_per(local_buffer)  # todo serialize
             # flush the local buffer
             worker.local_buffer = []
             # the packet should be sent here and received on the listening socket.
@@ -88,7 +88,7 @@ if __name__ == '__main__':
             per_server.add_buffer(unpacked_buffer)
 
         # encode PER->Learner packet and send to Learner
-        if len(per_server._storage) >= per_server.batch_size:
+        if len(per_server.storage) >= per_server.batch_size:
             # todo sample with beta
             beta = per_server.priority_beta_end - (per_server.priority_beta_end - per_server.priority_beta_start) * math.exp(
                 -1. * per_server.num_sgd_steps_done / per_server.priority_beta_decay)

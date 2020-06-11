@@ -5,6 +5,7 @@ import numpy as np
 from torch_geometric.data.batch import Batch
 from utils.segtree import MinSegmentTree, SegmentTree, SumSegmentTree
 from utils.data import Transition
+import math
 
 
 class ReplayBuffer(object):
@@ -17,12 +18,12 @@ class ReplayBuffer(object):
             Max number of transitions to store in the buffer. When the buffer
             overflows the old memories are dropped.
         """
-        self._storage = []
-        self._capacity = capacity
-        self._next_idx = 0
+        self.storage = []
+        self.capacity = capacity
+        self.next_idx = 0
 
     def __len__(self):
-        return len(self._storage)
+        return len(self.storage)
 
     def add(self, data: Transition):
         """
@@ -31,13 +32,13 @@ class ReplayBuffer(object):
         :param kwargs:
         :return:
         """
-        if len(self._storage) < self._capacity:
+        if len(self.storage) < self.capacity:
             # extend the memory for storing the new data
-            self._storage.append(None)
-        self._storage[self._next_idx] = data
+            self.storage.append(None)
+        self.storage[self.next_idx] = data
         # todo support heap.pop to override the min prioritized data, must be synchronized with PER priority updates
         # increment the next index round robin
-        self._next_idx = (self._next_idx + 1) % self._capacity
+        self.next_idx = (self.next_idx + 1) % self.capacity
 
     def add_buffer(self, buffer):
         # push all transitions from local_buffer into memory
@@ -45,12 +46,12 @@ class ReplayBuffer(object):
             self.add(data)
 
     def sample(self, batch_size):
-        assert batch_size <= len(self._storage)
+        assert batch_size <= len(self.storage)
         # sample batch_size unique transitions
-        transitions = random.sample(self._storage, batch_size)
+        transitions = random.sample(self.storage, batch_size)
         return transitions
 
-    def _encode_sample(self, sample):
+    def encode_sample(self, sample):
         """
         Returns a tuple of standard np.array objects,
         """
@@ -59,7 +60,7 @@ class ReplayBuffer(object):
             encoded_sample.append(transition.to_numpy_tuple())
         return encoded_sample
 
-    def _decode_sample(self, encoded_sample):
+    def decode_sample(self, encoded_sample):
         """
         Returns the original torch_geometric Batch of Transitions.
         Useful for decoding samples on the learner side.
@@ -70,11 +71,11 @@ class ReplayBuffer(object):
         return decoded_sample
 
     def __len__(self):
-        return len(self._storage)
+        return len(self.storage)
 
 
 class PrioritizedReplayBuffer(ReplayBuffer):
-    def __init__(self, capacity, alpha):
+    def __init__(self, config={}):
         """Create Prioritized Replay buffer.
         Parameters
         ----------
@@ -88,17 +89,32 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         --------
         ReplayBuffer.__init__
         """
-        super(PrioritizedReplayBuffer, self).__init__(capacity)
-        assert alpha >= 0
-        self._alpha = alpha
+        super(PrioritizedReplayBuffer, self).__init__(config.get('replay_buffer_capacity', 2 ** 16))
+        self.config = config
+        self.batch_size = config.get('batch_size', 128)
+        self._alpha = config.get('priority_alpha', 0.4)
+        assert self._alpha >= 0
 
         it_capacity = 1
-        while it_capacity < capacity:
+        while it_capacity < self.capacity:
             it_capacity *= 2
 
         self._it_sum = SumSegmentTree(it_capacity)
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
+
+        # unpack buffer configs
+        # self.max_num_updates = self.cfg["max_num_updates"]
+        # self.priority_beta = self.cfg["priority_beta_start"]
+        # self.priority_beta_end = self.cfg["priority_beta_end"]
+        # self.priority_beta_increment = (self.priority_beta_end - self.priority_beta) / self.max_num_updates
+
+        self.priority_beta_start = config.get('priority_beta_start', 0.4)
+        self.priority_beta_end = config.get('priority_beta_end', 1.0)
+        self.priority_beta_decay = config.get('priority_beta_decay', 10000)
+        self.num_sgd_steps_done = 0
+        # beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * \
+        #        math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
 
     def add(self, data: tuple([Transition, float])):
         """
@@ -107,7 +123,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         :return:
         """
         transition, initial_priority = data
-        idx = self._next_idx
+        idx = self.next_idx
         super().add(transition)
         # update here the initial priority
         # because it is not safe to build on later update in another place
@@ -125,7 +141,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
     def _sample_proportional(self, batch_size):
         """ todo ask Chris what is going on here """
         res = []
-        p_total = self._it_sum.sum(0, len(self._storage) - 1)
+        p_total = self._it_sum.sum(0, len(self.storage) - 1)
         every_range_len = p_total / batch_size
         for i in range(batch_size):
             mass = random.random() * every_range_len + i * every_range_len
@@ -133,7 +149,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             res.append(idx)
         return res
 
-    def sample(self, batch_size, beta):
+    def sample(self, batch_size=None, beta=None):
         """Sample a batch of experiences.
         compared to ReplayBuffer.sample
         it also returns importance weights and idxes
@@ -142,9 +158,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         ----------
         batch_size: int
             How many transitions to sample.
-        beta: float
+        beta: float (Optional)
             To what degree to use importance weights
             (0 - no corrections, 1 - full correction)
+            By default scheduled to start at 0.4, and slowly converge to 1 in exponential rate.
         Returns
         -------
         batch: torch_geometric Batch of Transition
@@ -156,25 +173,34 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             Array of shape (batch_size,) and dtype np.int32
             idexes in buffer of sampled experiences
         """
+        if batch_size is None:
+            batch_size = self.batch_size
+        if beta is None:
+            beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * \
+                   math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
+
         assert beta > 0
         idxes = self._sample_proportional(batch_size)
 
         weights = []
         p_min = self._it_min.min() / self._it_sum.sum()
-        max_weight = (p_min * len(self._storage)) ** (-beta)
+        max_weight = (p_min * len(self.storage)) ** (-beta)
 
         for idx in idxes:
             p_sample = self._it_sum[idx] / self._it_sum.sum()
-            weight = (p_sample * len(self._storage)) ** (-beta)
+            weight = (p_sample * len(self.storage)) ** (-beta)
             weights.append(weight / max_weight)
 
         weights = torch.tensor(weights, dtype=torch.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
-        transitions = [self._storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
+        transitions = [self.storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
+
+        self.num_sgd_steps_done += 1  # increment global counter to decay beta across training
         # return a tuple of batch, importance sampling correction weights and idxes to update later the priorities
         return transitions, weights, idxes
 
-    def _encode_sample(self, sample):
+    @staticmethod
+    def encode_sample(sample):
         """
         For distributed setting, we need to serialize sample into numpy arrays.
         Let
@@ -186,13 +212,14 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         transitions, weights, idxes = sample
         # idxes are already stored as np.array, so need only to encode weights and batch
         # transitions are encoded using the base class
-        encoded_transitions = super()._encode_sample(transitions)
+        encoded_transitions = super().encode_sample(transitions)
         encoded_weights = weights.numpy()
         return encoded_transitions, encoded_weights, idxes
 
-    def _decode_sample(self, encoded_sample):
+    @staticmethod
+    def decode_sample(encoded_sample):
         encoded_transitions, encoded_weights, idxes = encoded_sample
-        transitions = super()._decode_sample(encoded_transitions)
+        transitions = super().decode_sample(encoded_transitions)
         weights = torch.from_numpy(encoded_weights)
         return transitions, weights, idxes
 
@@ -212,7 +239,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         assert len(idxes) == len(priorities)
         for idx, priority in zip(idxes, priorities):
             assert priority > 0
-            assert 0 <= idx < len(self._storage)
+            assert 0 <= idx < len(self.storage)
             self._it_sum[idx] = priority ** self._alpha
             self._it_min[idx] = priority ** self._alpha
 

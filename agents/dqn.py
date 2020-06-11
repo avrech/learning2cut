@@ -40,12 +40,9 @@ class GDQN(Sepa):
         # DQN stuff
         self.use_per = hparams.get('use_per', True)
         if self.use_per:
-            self.memory = PrioritizedReplayBuffer(hparams.get('memory_capacity', 1000000), alpha=hparams.get('priority_alpha', 0.6))
-            self.priority_beta_start = hparams.get('priority_beta_start', 0.4)
-            self.priority_beta_end = hparams.get('priority_beta_end', 1.0)
-            self.priority_beta_decay = hparams.get('priority_beta_decay', 10000)
+            self.memory = PrioritizedReplayBuffer(config=hparams)
         else:
-            self.memory = ReplayBuffer(hparams.get('memory_capacity', 1000000))
+            self.memory = ReplayBuffer(hparams.get('replay_buffer_capacity', 2**16))
 
         self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
@@ -81,12 +78,6 @@ class GDQN(Sepa):
         self.trainset = None
         self.graph_indices = None
 
-
-        # file system paths
-        # todo - set worker-specific logdir for distributed DQN
-        self.logdir = hparams.get('logdir', 'results')
-        self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
-
         # instance specific data needed to be reset every episode
         self.G = None
         self.x = None
@@ -116,6 +107,10 @@ class GDQN(Sepa):
         self.is_tester = True  # todo set in distributed setting
         self.is_worker = True
         self.is_learner = True
+        # file system paths
+        # todo - set worker-specific logdir for distributed DQN
+        self.logdir = hparams.get('logdir', 'results')
+        self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
@@ -126,6 +121,8 @@ class GDQN(Sepa):
         self.loss_moving_avg = 0
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
+        # initialize (set seed and load checkpoint
+        self.initialize_training()
 
     # done
     def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
@@ -276,7 +273,7 @@ class GDQN(Sepa):
             return
         if self.use_per:
             # todo sample with beta
-            beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
+
             transitions, weights, idxes = self.memory.sample(self.batch_size, beta)
             new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=weights)
             # update priorities
@@ -286,8 +283,7 @@ class GDQN(Sepa):
             transitions = self.memory.sample(self.batch_size)
             self.sgd_step(transitions)
         self.num_param_updates += 1  # todo - update in learner every time param_server is updated.
-                                      #  in distributed setting it is different than num_sgd_steps_done.
-
+                                     #  in distributed setting it is different than num_sgd_steps_done.
 
     def sgd_step(self, transitions, importance_sampling_correction_weights=None):
         """ implement the basic DQN optimization step """
@@ -806,7 +802,7 @@ class GDQN(Sepa):
             # log the average loss of the last training session
             print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
             self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
-            print(f'Step: {self.num_env_steps_done} | ', end='')
+            print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
 
 
         d = int(np.floor(cur_time_sec/(3600*24)))
@@ -1091,7 +1087,6 @@ class GDQN(Sepa):
         self.set_training_mode()
 
     def train_single_thread(self):
-        self.initialize_training()
         datasets = self.load_datasets()
         trainset = self.trainset
         graph_indices = self.graph_indices
@@ -1113,7 +1108,7 @@ class GDQN(Sepa):
             if i_episode % len(graph_indices) == 0:
                 graph_indices = torch.randperm(trainset['num_instances'])
 
-            # push experience into memory and flush local buffer
+            # push experience into memory
             self.memory.add_buffer(trajectory)
 
             # perform 1 optimization step
@@ -1134,18 +1129,3 @@ class GDQN(Sepa):
                 self.evaluate()
 
         return 0
-
-    def gdqn_collect_data(self):
-        local_buffer = []
-        trainset = self.datasets['trainset25']
-        while len(local_buffer) < self.hparams.get('local_buffer_size'):
-            # sample graph randomly
-            graph_idx = self.graph_indices[self.i_episode + 1 % len(self.graph_indices)]
-            G, baseline = trainset['instances'][graph_idx]
-
-            # execute episodes, collect experience and append to local_buffer
-            trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
-            local_buffer += trajectory
-            if self.i_episode + 1 % len(self.graph_indices) == 0:
-                self.graph_indices = torch.randperm(trainset['num_instances'])
-        return local_buffer
