@@ -2,6 +2,37 @@ import torch
 import numpy as np
 from torch_geometric.data.data import Data
 from torch_geometric.utils import dense_to_sparse, add_remaining_self_loops
+from collections import namedtuple
+TransitionNumpyTuple = namedtuple(
+    'TransitionTuple',
+    (
+        'x_c',
+        'x_v',
+        'x_a',
+        'edge_index_c2v',
+        'edge_attr_c2v',
+        'edge_index_a2v',
+        'edge_attr_a2v',
+        'edge_index_a2a',
+        'edge_attr_a2a',
+        'edge_index_dec',
+        'edge_attr_dec',
+        'stats',
+        'a',
+        'r',
+        'ns_x_c',
+        'ns_x_v',
+        'ns_x_a',
+        'ns_edge_index_c2v',
+        'ns_edge_attr_c2v',
+        'ns_edge_index_a2v',
+        'ns_edge_attr_a2v',
+        'ns_edge_index_a2a',
+        'ns_edge_attr_a2a',
+        'ns_stats',
+        'ns_terminal',
+    )
+)
 
 
 class Transition(Data):
@@ -83,6 +114,13 @@ class Transition(Data):
             return self.ns_x_a.size(0)
         else:
             return super(Transition, self).__inc__(key, value)
+
+    def to_numpy_tuple(self):
+        return TransitionNumpyTuple(*(self[k].numpy() for k in self.keys))
+
+    @staticmethod
+    def from_numpy_tuple(transition_numpy_tuple):
+        return Transition(*(torch.from_numpy(np_array) for np_array in transition_numpy_tuple))
 
 
 def get_transition(scip_state,

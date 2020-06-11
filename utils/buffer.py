@@ -51,7 +51,7 @@ class ReplayBuffer(object):
         """
         encoded_sample = []
         for transition in sample:
-            encoded_sample.append((sample[k].numpy() for k in transition.keys))
+            encoded_sample.append(transition.to_numpy_tuple())
         return encoded_sample
 
     def _decode_sample(self, encoded_sample):
@@ -59,10 +59,10 @@ class ReplayBuffer(object):
         Returns the original torch_geometric Batch of Transitions.
         Useful for decoding samples on the learner side.
         """
-        decoded_batch = self._dummy_batch.clone()
-        for k, np_array in zip(self._dummy_batch.keys, encoded_batch):
-            decoded_batch[k] = torch.from_numpy(np_array)
-        return decoded_batch
+        decoded_sample = []
+        for transition_numpy_tuple in encoded_sample:
+            decoded_sample.append(Transition.from_numpy_tuple(transition_numpy_tuple))
+        return decoded_sample
 
     def __len__(self):
         return len(self._storage)
@@ -155,7 +155,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
         weights = torch.tensor(weights, dtype=torch.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
-        transitions = self._storage[idxes]
+        transitions = [self._storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
         # return a tuple of batch, importance sampling correction weights and idxes to update later the priorities
         return transitions, weights, idxes
 

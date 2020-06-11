@@ -386,7 +386,7 @@ class GDQN(Sepa):
         # todo - support importance sampling correction - double check
         if self.use_per:
             # broadcast each transition importance sampling weight to all its related losses
-            importance_sampling_correction_weights = importance_sampling_correction_weights[batch.x_a_batch]
+            importance_sampling_correction_weights = importance_sampling_correction_weights.to(self.device)[batch.x_a_batch]
             # multiply each action loss by its importance sampling correction weight and average
             loss = (importance_sampling_correction_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
         else:
@@ -687,7 +687,7 @@ class GDQN(Sepa):
                     td_error = torch.abs(q_values - target_q_values)
                     td_error = torch.clamp(td_error, min=1e-8)
                     # todo - support pq norm
-                    initial_priority = torch.norm(td_error)  # default L2 norm
+                    initial_priority = torch.norm(td_error).item()  # default L2 norm
                     # todo - support PER, local buffer and remote PER
                     self.memory.add(transition, initial_priority)
                 else:
