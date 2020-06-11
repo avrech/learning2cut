@@ -180,7 +180,7 @@ max_num_updates: 100000  # relevant to PER to increase beta across time
 #eps_decay: 0.95
 
 # Buffer parameters
-buffer_max_size: 1000000
+#buffer_max_size: 1000000
 use_per: True
 priority_alpha: 0.6
 priority_beta: 0.4
@@ -188,7 +188,7 @@ priority_beta_start: 0.4
 priority_beta_end: 1.0
 priority_beta_decay: 100000  # exponentially increase to priority_beta_end like decreasing eps_greedy
 worker_buffer_size: 1000
-
+local_buffer_size: 50  # todo tune this parameter on the real distributed program
 # Communication configs
 pubsub_port: 5555
 repreq_port: 5556

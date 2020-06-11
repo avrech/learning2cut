@@ -305,32 +305,35 @@ class DQNWorker(Worker, GDQN):
         #  - replace by execute episode
         #  - or more generally dqn experiment loop.
         """Fill worker buffer until some stopping criterion is satisfied"""
-        local_buffer = []
-        nstep_queue = deque(maxlen=self.num_step)
-
-        while len(local_buffer) < self.worker_buffer_size:
-            episode_reward = 0
-            done = False
-            state = self.env.reset()
-            while not done:
-                action = self.select_action(state)
-                transition = self.environment_step(state, action)
-                next_state = transition[-2]
-                done = transition[-1]
-                reward = transition[-3]
-                episode_reward = episode_reward + reward
-
-                nstep_queue.append(transition)
-                if (len(nstep_queue) == self.num_step) or done:
-                    nstep_data, priorities = self.preprocess_data(nstep_queue)
-                    local_buffer.append([nstep_data, priorities])
-
-                state = next_state
-
-            if verbose:
-                print(f"Worker {self.worker_id}: {episode_reward}")
-
+        local_buffer = self.gdqn_collect_data()
         return local_buffer
+
+        # local_buffer = []
+        # nstep_queue = deque(maxlen=self.num_step)
+        #
+        # while len(local_buffer) < self.worker_buffer_size:
+        #     episode_reward = 0
+        #     done = False
+        #     state = self.env.reset()
+        #     while not done:
+        #         action = self.select_action(state)
+        #         transition = self.environment_step(state, action)
+        #         next_state = transition[-2]
+        #         done = transition[-1]
+        #         reward = transition[-3]
+        #         episode_reward = episode_reward + reward
+        #
+        #         nstep_queue.append(transition)
+        #         if (len(nstep_queue) == self.num_step) or done:
+        #             nstep_data, priorities = self.preprocess_data(nstep_queue)
+        #             local_buffer.append([nstep_data, priorities])
+        #
+        #         state = next_state
+        #
+        #     if verbose:
+        #         print(f"Worker {self.worker_id}: {episode_reward}")
+        #
+        # return local_buffer
 
 
 """

@@ -46,6 +46,7 @@ class GDQN(Sepa):
             self.priority_beta_decay = hparams.get('priority_beta_decay', 10000)
         else:
             self.memory = ReplayBuffer(hparams.get('memory_capacity', 1000000))
+
         self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.gamma = hparams.get('gamma', 0.999)
@@ -76,6 +77,10 @@ class GDQN(Sepa):
         self.walltime_offset = 0
         self.start_time = time()
         self.last_time_sec = self.walltime_offset
+        self.datasets = None
+        self.trainset = None
+        self.graph_indices = None
+
 
         # file system paths
         # todo - set worker-specific logdir for distributed DQN
@@ -535,10 +540,12 @@ class GDQN(Sepa):
 
         # compute rewards and other stats for the whole episode,
         # and if in training session, push transitions into memory
-        self._compute_rewards_and_stats()
+        trajectory = self._compute_rewards_and_stats()
         # increase the number of episodes done
         if self.training:
             self.i_episode += 1
+
+        return trajectory
 
     # done
     def sepaexeclp(self):
@@ -622,6 +629,7 @@ class GDQN(Sepa):
         else:
             raise NotImplementedError
 
+        trajectory = []
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
             # and store a transition (s_t, a_t, r_t, s_{t+n}
@@ -692,9 +700,11 @@ class GDQN(Sepa):
                     # todo - support pq norm
                     initial_priority = torch.norm(td_error).item()  # default L2 norm
                     # todo - support PER, local buffer and remote PER
-                    self.memory.add(transition, initial_priority)
+                    trajectory.append((transition, initial_priority))
+                    # self.memory.add((transition, initial_priority))
                 else:
-                    self.memory.add(transition)
+                    trajectory.append(transition)
+                    # self.memory.add(transition)
 
         # compute some stats and store in buffer
         active_applied_ratio = []
@@ -720,6 +730,8 @@ class GDQN(Sepa):
             # this is evaluation round.
             self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
             self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+
+        return trajectory
 
     # done
     def log_stats(self, save_best=False, plot_figures=False):
@@ -989,6 +1001,9 @@ class GDQN(Sepa):
             dataset['stats']['gap_auc_avg'] = gap_auc_avg
             dataset['stats']['gap_auc_std'] = gap_auc_std
 
+        self.datasets = datasets
+        self.trainset = self.datasets['trainset25']
+        self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 
     def initialize_training(self):
@@ -1044,9 +1059,12 @@ class GDQN(Sepa):
         model.optimize()
 
         # once episode is done
-        self.finish_episode()
+        trajectory = self.finish_episode()
+        return trajectory
 
-    def evaluate(self, datasets):
+    def evaluate(self, datasets=None):
+        if datasets is None:
+            datasets = self.datasets
         # evaluate the model on the validation and test sets
         if self.num_policy_updates == 0:
             # wait until the model starts learning
@@ -1073,9 +1091,8 @@ class GDQN(Sepa):
     def train_single_thread(self):
         self.initialize_training()
         datasets = self.load_datasets()
-
-        trainset = datasets['trainset25']
-        graph_indices = torch.randperm(trainset['num_instances'])
+        trainset = self.trainset
+        graph_indices = self.graph_indices
         hparams = self.hparams
 
         # training infinite loop
@@ -1089,7 +1106,13 @@ class GDQN(Sepa):
                 print(f'instance no. {graph_idx}, filename: {filename}')
 
             # execute episode and collect experience
-            self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
+            trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
+
+            if i_episode % len(graph_indices) == 0:
+                graph_indices = torch.randperm(trainset['num_instances'])
+
+            # push experience into memory and flush local buffer
+            self.memory.add_buffer(trajectory)
 
             # perform 1 optimization step
             self.optimize_model()
@@ -1103,80 +1126,24 @@ class GDQN(Sepa):
                     self.log_stats()
 
                 # evaluate periodically
-                self.evaluate(datasets)
+                self.evaluate()
 
                 if global_step % hparams.get('checkpoint_interval', 100) == 0:
                     self.save_checkpoint()
 
-            if i_episode % len(graph_indices) == 0:
-                graph_indices = torch.randperm(trainset['num_instances'])
-
         return 0
 
-    def test_distributed_functionality(self):
-        """
-        Tests the following functionality:
-        1. Worker -> PER packets:
-            a. store transitions in local buffer.
-            b. encode local buffer periodically and send to PER.
-            c. decode worker's packet and push transitions into the PER storage
-        2. PER <-> Learner packets:
-            a. encode transitions batch and send to Learner
-            b. decode PER->Learner packet and perform SGD
-            c. send back encoded new_priorities to PER, decode on PER side, and update priorities
-
-        Learner -> ParamServer -> Worker packets are not tested, since we didn't touch this type of packets.
-        """
-        self.initialize_training()
-        datasets = self.load_datasets()
-
-        trainset = datasets['trainset25']
-        graph_indices = torch.randperm(trainset['num_instances'])
-        hparams = self.hparams
-
-        # training infinite loop
-        for i_episode in range(self.i_episode + 1, hparams['num_episodes']):
+    def gdqn_collect_data(self):
+        local_buffer = []
+        trainset = self.datasets['trainset25']
+        while len(local_buffer) < self.hparams.get('local_buffer_size'):
             # sample graph randomly
-            graph_idx = graph_indices[i_episode % len(graph_indices)]
+            graph_idx = self.graph_indices[self.i_episode + 1 % len(self.graph_indices)]
             G, baseline = trainset['instances'][graph_idx]
-            if hparams.get('debug', False):
-                filename = os.listdir(datasets['trainset25']['datadir'])[graph_idx]
-                filename = os.path.join(datasets['trainset25']['datadir'], filename)
-                print(f'instance no. {graph_idx}, filename: {filename}')
 
-            # execute episodes, collect experience and store in self.local_buffer
-            self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
-
-            # if self.local_buffer is full enough, encode Worker->PER packet and send
-
-            # decode Worker->PER packet and push into PER
-
-            # encode PER->Learner packet and send to Learner
-
-            # decode packet on Learner and perform SGD step
-
-            # send back new_priorities to PER, and update
-
-            # # perform 1 optimization step
-            # self.optimize_model()
-
-            # this part is the same as in train_single_thread()
-            if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
-                self.update_target()
-
-            if self.num_policy_updates > 0:
-                global_step = self.num_policy_updates
-                if global_step % hparams.get('log_interval', 100) == 0:
-                    self.log_stats()
-
-                # evaluate periodically
-                self.evaluate(datasets)
-
-                if global_step % hparams.get('checkpoint_interval', 100) == 0:
-                    self.save_checkpoint()
-
-            if i_episode % len(graph_indices) == 0:
-                graph_indices = torch.randperm(trainset['num_instances'])
-
-        return 0
-
+            # execute episodes, collect experience and append to local_buffer
+            trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
+            local_buffer += trajectory
+            if self.i_episode + 1 % len(self.graph_indices) == 0:
+                self.graph_indices = torch.randperm(trainset['num_instances'])
+        return local_buffer

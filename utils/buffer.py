@@ -24,20 +24,25 @@ class ReplayBuffer(object):
     def __len__(self):
         return len(self._storage)
 
-    def add(self, transition: Transition):
+    def add(self, data: Transition):
         """
         append data to storage list, overriding the oldest elements (round robin)
-        :param transition: Transition object
+        :param data: Transition object
         :param kwargs:
         :return:
         """
         if len(self._storage) < self._capacity:
             # extend the memory for storing the new data
             self._storage.append(None)
-        self._storage[self._next_idx] = transition
+        self._storage[self._next_idx] = data
         # todo support heap.pop to override the min prioritized data, must be synchronized with PER priority updates
         # increment the next index round robin
         self._next_idx = (self._next_idx + 1) % self._capacity
+
+    def add_buffer(self, buffer):
+        # push all transitions from local_buffer into memory
+        for data in buffer:
+            self.add(data)
 
     def sample(self, batch_size):
         assert batch_size <= len(self._storage)
@@ -95,8 +100,13 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
 
-    def add(self, transition, initial_priority):
-        """See ReplayBuffer.store_effect"""
+    def add(self, data: tuple([Transition, float])):
+        """
+        Push Transition into storage and update its initial priority.
+        :param data: Tuple containing Transition and initial_priority float
+        :return:
+        """
+        transition, initial_priority = data
         idx = self._next_idx
         super().add(transition)
         # update here the initial priority
@@ -106,6 +116,11 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         # old and unsafe:
         # self._it_sum[idx] = self._max_priority ** self._alpha
         # self._it_min[idx] = self._max_priority ** self._alpha
+
+    def add_buffer(self, buffer):
+        # push all transitions from local_buffer into memory
+        for data in buffer:
+            self.add(data)
 
     def _sample_proportional(self, batch_size):
         """ todo ask Chris what is going on here """

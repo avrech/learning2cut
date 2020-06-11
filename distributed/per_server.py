@@ -8,7 +8,7 @@ from common.utils.buffer import PrioritizedReplayBuffer
 
 
 @ray.remote
-class PrioritizedReplayBufferHelper(object):
+class PrioritizedReplayBufferServer(object):
     def __init__(self, buffer_cfg: dict, comm_cfg: dict):
         self.cfg = buffer_cfg
 
