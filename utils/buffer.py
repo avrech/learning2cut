@@ -21,11 +21,6 @@ class ReplayBuffer(object):
         self._capacity = capacity
         self._next_idx = 0
 
-        # # helper Transition batch object, will be created automatically in the first sample() call
-        # # this dummy batch will be used in order to decode encoded samples,
-        # # and convert back from tuple of np.arrays to Batch of Transition objects
-        # self._dummy_batch = None
-
     def __len__(self):
         return len(self._storage)
 
@@ -49,36 +44,17 @@ class ReplayBuffer(object):
         # sample batch_size unique transitions
         transitions = random.sample(self._storage, batch_size)
         return transitions
-        # # create a batch object
-        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
-        # if self._dummy_batch is None:
-        #     # create dummy_batch
-        #     self._dummy_batch = batch.clone()
-        #
-        # return batch
 
-    def get_batch(self, idxes):
-        # read transitions from storage
-        transitions = self._storage[idxes]
-        return transitions
-        # # create a batch object
-        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
-        # if self._dummy_batch is None:
-        #     # create dummy_batch
-        #     self._dummy_batch = batch.clone()
-        #
-        # return batch
-
-    def _encode_sample(self, batch):
+    def _encode_sample(self, sample):
         """
         Returns a tuple of standard np.array objects,
-        self._dummy_batch keys are used to encode the batch as tuple of numpy arrays,
-        and similarly to decode an encoded batch
         """
-        encoded_batch = (batch[k].numpy() for k in self._dummy_batch.keys)
-        return encoded_batch
+        encoded_sample = []
+        for transition in sample:
+            encoded_sample.append((sample[k].numpy() for k in transition.keys))
+        return encoded_sample
 
-    def _decode_sample(self, encoded_batch):
+    def _decode_sample(self, encoded_sample):
         """
         Returns the original torch_geometric Batch of Transitions.
         Useful for decoding samples on the learner side.
@@ -179,9 +155,9 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
         weights = torch.tensor(weights, dtype=torch.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
-        batch = self.get_batch(idxes)
+        transitions = self._storage[idxes]
         # return a tuple of batch, importance sampling correction weights and idxes to update later the priorities
-        return batch, weights, idxes
+        return transitions, weights, idxes
 
     def _encode_sample(self, sample):
         """
@@ -192,22 +168,18 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         weights are straightforwardly converted into and from numpy arrays,
         and idxes remain np.array since they are used only in the replay buffer, and need not be changed.
         """
-        # # read transitions from storage
-        # transitions = self._storage[idxes]
-        # # create a batch object
-        # batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
-        batch, weights, idxes = sample
+        transitions, weights, idxes = sample
         # idxes are already stored as np.array, so need only to encode weights and batch
-        # batch is encoded using the base class
-        encoded_batch = super()._encode_sample(batch)
+        # transitions are encoded using the base class
+        encoded_transitions = super()._encode_sample(transitions)
         encoded_weights = weights.numpy()
-        return encoded_batch, encoded_weights, idxes
+        return encoded_transitions, encoded_weights, idxes
 
     def _decode_sample(self, encoded_sample):
-        encoded_batch, encoded_weights, idxes = encoded_sample
-        batch = super()._decode_sample(encoded_batch)
+        encoded_transitions, encoded_weights, idxes = encoded_sample
+        transitions = super()._decode_sample(encoded_transitions)
         weights = torch.from_numpy(encoded_weights)
-        return batch, weights, idxes
+        return transitions, weights, idxes
 
     def update_priorities(self, idxes, priorities):
         """Update priorities of sampled transitions.
