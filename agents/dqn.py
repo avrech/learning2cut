@@ -41,6 +41,9 @@ class GDQN(Sepa):
         self.use_per = hparams.get('use_per', True)
         if self.use_per:
             self.memory = PrioritizedReplayBuffer(hparams.get('memory_capacity', 1000000), alpha=hparams.get('priority_alpha', 0.6))
+            self.priority_beta_start = hparams.get('priority_beta_start', 0.4)
+            self.priority_beta_end = hparams.get('priority_beta_end', 1.0)
+            self.priority_beta_decay = hparams.get('priority_beta_decay', 10000)
         else:
             self.memory = ReplayBuffer(hparams.get('memory_capacity', 1000000))
         self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
@@ -268,7 +271,7 @@ class GDQN(Sepa):
             return
         if self.use_per:
             # todo sample with beta
-            beta = 0.4
+            beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
             transitions, weights, idxes = self.memory.sample(self.batch_size, beta)
             new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=weights)
             # update priorities
@@ -1043,6 +1046,30 @@ class GDQN(Sepa):
         # once episode is done
         self.finish_episode()
 
+    def evaluate(self, datasets):
+        # evaluate the model on the validation and test sets
+        if self.num_policy_updates == 0:
+            # wait until the model starts learning
+            return
+        global_step = self.num_policy_updates
+        self.set_eval_mode()
+        for dataset_name, dataset in datasets.items():
+            if dataset_name == 'trainset25':
+                continue
+            if global_step % dataset['eval_interval'] == 0:
+                self.init_figures(nrows=dataset['num_instances'],
+                                  ncols=len(dataset['scip_seed']),
+                                  col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+                                  row_labels=[f'inst {inst_idx}' for inst_idx in
+                                              range(dataset['num_instances'])])
+                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+                    for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
+                        self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
+                                             scip_seed=scip_seed)
+                        self.add_episode_subplot(inst_idx, seed_idx)
+                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
+        self.set_training_mode()
+
     def train_single_thread(self):
         self.initialize_training()
         datasets = self.load_datasets()
@@ -1070,42 +1097,86 @@ class GDQN(Sepa):
             if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
                 self.update_target()
 
-            global_step = self.num_policy_updates
-            if global_step % hparams.get('log_interval', 100) == 0:
-                self.log_stats()
+            if self.num_policy_updates > 0:
+                global_step = self.num_policy_updates
+                if global_step % hparams.get('log_interval', 100) == 0:
+                    self.log_stats()
 
-            # evaluate periodically
-            self.evaluate(datasets)
+                # evaluate periodically
+                self.evaluate(datasets)
 
-            if global_step % hparams.get('checkpoint_interval', 100) == 0:
-                self.save_checkpoint()
+                if global_step % hparams.get('checkpoint_interval', 100) == 0:
+                    self.save_checkpoint()
 
             if i_episode % len(graph_indices) == 0:
                 graph_indices = torch.randperm(trainset['num_instances'])
 
         return 0
 
-    def evaluate(self, datasets):
-        # evaluate the model on the validation and test sets
-        if self.num_policy_updates == 0:
-            # wait until the model starts learning
-            return
-        global_step = self.num_policy_updates
-        self.set_eval_mode()
-        for dataset_name, dataset in datasets.items():
-            if dataset_name == 'trainset25':
-                continue
-            if global_step % dataset['eval_interval'] == 0:
-                print('Evaluating ', dataset_name)
-                self.init_figures(nrows=dataset['num_instances'],
-                                  ncols=len(dataset['scip_seed']),
-                                  col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
-                                  row_labels=[f'inst {inst_idx}' for inst_idx in
-                                              range(dataset['num_instances'])])
-                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
-                    for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
-                        self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
-                                             scip_seed=scip_seed)
-                        self.add_episode_subplot(inst_idx, seed_idx)
-                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
-        self.set_training_mode()
+    def test_distributed_functionality(self):
+        """
+        Tests the following functionality:
+        1. Worker -> PER packets:
+            a. store transitions in local buffer.
+            b. encode local buffer periodically and send to PER.
+            c. decode worker's packet and push transitions into the PER storage
+        2. PER <-> Learner packets:
+            a. encode transitions batch and send to Learner
+            b. decode PER->Learner packet and perform SGD
+            c. send back encoded new_priorities to PER, decode on PER side, and update priorities
+
+        Learner -> ParamServer -> Worker packets are not tested, since we didn't touch this type of packets.
+        """
+        self.initialize_training()
+        datasets = self.load_datasets()
+
+        trainset = datasets['trainset25']
+        graph_indices = torch.randperm(trainset['num_instances'])
+        hparams = self.hparams
+
+        # training infinite loop
+        for i_episode in range(self.i_episode + 1, hparams['num_episodes']):
+            # sample graph randomly
+            graph_idx = graph_indices[i_episode % len(graph_indices)]
+            G, baseline = trainset['instances'][graph_idx]
+            if hparams.get('debug', False):
+                filename = os.listdir(datasets['trainset25']['datadir'])[graph_idx]
+                filename = os.path.join(datasets['trainset25']['datadir'], filename)
+                print(f'instance no. {graph_idx}, filename: {filename}')
+
+            # execute episodes, collect experience and store in self.local_buffer
+            self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
+
+            # if self.local_buffer is full enough, encode Worker->PER packet and send
+
+            # decode Worker->PER packet and push into PER
+
+            # encode PER->Learner packet and send to Learner
+
+            # decode packet on Learner and perform SGD step
+
+            # send back new_priorities to PER, and update
+
+            # # perform 1 optimization step
+            # self.optimize_model()
+
+            # this part is the same as in train_single_thread()
+            if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
+                self.update_target()
+
+            if self.num_policy_updates > 0:
+                global_step = self.num_policy_updates
+                if global_step % hparams.get('log_interval', 100) == 0:
+                    self.log_stats()
+
+                # evaluate periodically
+                self.evaluate(datasets)
+
+                if global_step % hparams.get('checkpoint_interval', 100) == 0:
+                    self.save_checkpoint()
+
+            if i_episode % len(graph_indices) == 0:
+                graph_indices = torch.randperm(trainset['num_instances'])
+
+        return 0
+
