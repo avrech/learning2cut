@@ -21,6 +21,7 @@ import pickle
 from utils.scip_models import maxcut_mccormic_model
 from utils.buffer import ReplayBuffer, PrioritizedReplayBuffer
 from separators.mccormick_cycle_separator import MccormickCycleSeparator
+from copy import deepcopy
 mpl.rc('figure', max_open_warning=0)
 # mpl.rcParams['text.antialiased'] = False
 # mpl.use('agg')
@@ -122,6 +123,7 @@ class GDQN(Sepa):
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
         # initialize (set seed and load checkpoint
+        self.initialize_training()
         self.initialize_training()
 
     # done
@@ -950,7 +952,7 @@ class GDQN(Sepa):
         hparams = self.hparams
 
         # datasets and baselines
-        datasets = hparams['datasets']
+        datasets = deepcopy(hparams['datasets'])
         for dataset_name, dataset in datasets.items():
             datasets[dataset_name]['datadir'] = os.path.join(hparams['datadir'], dataset_name,
                                                        "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(

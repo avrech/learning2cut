@@ -134,7 +134,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         # self._it_min[idx] = self._max_priority ** self._alpha
 
     def add_buffer(self, buffer):
-        # push all transitions from local_buffer into memory
+        # push all (transitions, initial_priority) tuples from buffer into memory
         for data in buffer:
             self.add(data)
 

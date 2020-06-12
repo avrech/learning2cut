@@ -24,7 +24,6 @@ class Worker(ABC):
         self.worker_id = worker_id
         self.cfg = hparams
         self.device = hparams.get("worker_device", 'cpu')
-        self.policy_net = None  # todo - assigned in child class GDQN
 
         # unpack communication configs
         self.pubsub_port = hparams["pubsub_port"]
@@ -61,9 +60,15 @@ class Worker(ABC):
         """Specifically for the performance-testing worker"""
         pass
 
-    def synchronize(self, new_params: list):
+    @abstractmethod
+    def get_model(self):
+        pass
+
+    def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with parameter server"""
-        for param, new_param in zip(self.policy_net.parameters(), new_params):
+        new_params = pa.deserialize(new_params_packet)
+        model = self.get_model()
+        for param, new_param in zip(model.parameters(), new_params):
             new_param = torch.FloatTensor(new_param).to(self.device)
             param.data.copy_(new_param)
 
@@ -81,8 +86,9 @@ class Worker(ABC):
         self.push_socket = context.socket(zmq.PUSH)
         self.push_socket.connect(f"tcp://127.0.0.1:{self.pullpush_port}")
 
+    @staticmethod
     @abstractmethod
-    def pack_replay_data(self, replay_data):
+    def pack_replay_data(replay_data):
         """
         Pack replay_data as standard python objects list, tuple, numpy.array
         """
@@ -93,15 +99,14 @@ class Worker(ABC):
         self.push_socket.send(replay_data_packet)
 
     def receive_new_params(self):
-        new_params_id = False
+        new_params_packet = False
         try:
-            new_params_id = self.sub_socket.recv(zmq.DONTWAIT)
+            new_params_packet = self.sub_socket.recv(zmq.DONTWAIT)
         except zmq.Again:
             return False
 
-        if new_params_id:
-            new_params = pa.deserialize(new_params_id)
-            self.synchronize(new_params)
+        if new_params_packet:
+            self.synchronize_params(new_params_packet)
             return True
 
     def run(self):
@@ -234,6 +239,8 @@ class GDQNWorker(Worker, GDQN):
                 # todo - verify behavior
                 self.evaluate(datasets)
                 update_step = update_step + update_interval
+                # todo checkpoint
+                self.save_checkpoint()
 
     def preprocess_data(self, nstepqueue: Deque) -> tuple:
         print('not relevant - do nothing!')
@@ -259,7 +266,8 @@ class GDQNWorker(Worker, GDQN):
                 self.graph_indices = torch.randperm(trainset['num_instances'])
         return local_buffer
 
-    def pack_replay_data(self, replay_data: [(Transition, np.ndarray)]):
+    @staticmethod
+    def pack_replay_data(replay_data: [(Transition, np.ndarray)]):
         """
         Convert a list of (Transition, initial_weights) to list of (TransitionNumpyTuple, initial_priorities.numpy())
         :param replay_data: list of (Transition, initial_priorities)
@@ -276,3 +284,7 @@ class GDQNWorker(Worker, GDQN):
         if updated:
             self.num_param_updates += 1
         return updated
+
+    def get_model(self):
+        return self.policy_net
+
