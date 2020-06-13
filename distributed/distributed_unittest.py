@@ -1,10 +1,9 @@
 from distributed.worker import GDQNWorker
-from distributed.dqn_learner import GDQNLearner, PriorityMessage
+from distributed.dqn_learner import GDQNLearner
 from distributed.per_server import PrioritizedReplayBufferServer
 import argparse
 import yaml
 import os
-from copy import deepcopy
 
 if __name__ == '__main__':
     """

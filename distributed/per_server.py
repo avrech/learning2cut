@@ -97,4 +97,4 @@ class PrioritizedReplayBufferServer(PrioritizedReplayBuffer):
 class RayPrioritizedReplayBufferServer(PrioritizedReplayBufferServer):
     """ Ray remote actor wrapper for PrioritizedReplayBufferServer """
     def __init__(self, config):
-        super(RayPrioritizedReplayBufferServer, self).__init__(config)
+        super().__init__(config)

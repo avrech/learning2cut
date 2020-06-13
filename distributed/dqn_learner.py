@@ -4,17 +4,13 @@ from agents.dqn import GDQN
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from copy import deepcopy
-from typing import Union
 import numpy as np
 import pyarrow as pa
 import torch
 import zmq
 from utils.data import Transition
-from collections import namedtuple
 import os
 from torch.utils.tensorboard import SummaryWriter
-PriorityMessage = namedtuple('PriorityMessage', ('idxes', 'new_priorities'))
 
 
 class Learner(ABC):
@@ -93,7 +89,7 @@ class Learner(ABC):
         self.replay_data_queue.append(batch)
 
     @staticmethod
-    def pack_priorities(priorities_message: PriorityMessage):
+    def pack_priorities(priorities_message):
         priorities_packet = pa.serialize(priorities_message).to_buffer()
         return priorities_packet
 
@@ -162,5 +158,5 @@ class GDQNLearner(Learner, GDQN):
 @ray.remote(num_gpus=1)
 class RayGDQNLearner(GDQNLearner):
     """ Ray remote actor wrapper """
-    def __init__(self, hparams, **kwargs):
-        super(RayGDQNLearner, self).__init__(hparams=hparams)
+    def __init__(self, hparams, use_gpu=True, gpu_id=None):
+        super().__init__(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id)

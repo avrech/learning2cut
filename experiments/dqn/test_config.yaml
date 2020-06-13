@@ -166,7 +166,7 @@ datasets:
 model: Apex-DQN
 learner_device: cuda
 worker_device: cpu
-num_workers: 10
+num_workers: 2
 num_learners: 1
 #num_step: 3
 #batch_size: 512

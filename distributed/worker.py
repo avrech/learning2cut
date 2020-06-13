@@ -100,12 +100,15 @@ class Worker(ABC):
             self.synchronize_params(new_params_packet)
             return True
 
+    @abstractmethod
     def run(self):
-        while True:
-            replay_data = self.collect_data()
-            self.send_replay_data(replay_data)
-            self.receive_new_params()
-            # todo - consider checkpointing
+        """ Worker's main training loop """
+        pass
+
+    @abstractmethod
+    def test_run(self):
+        """ Test worker's evaluation loop """
+        pass
 
 
 class GDQNWorker(Worker, GDQN):
@@ -139,6 +142,15 @@ class GDQNWorker(Worker, GDQN):
 
     def write_log(self):
         print("TODO: include Tensorboard..")
+
+    def run(self):
+        self.initialize_training()
+        self.load_datasets()
+        while True:
+            replay_data = self.collect_data()
+            self.send_replay_data(replay_data)
+            self.receive_new_params()
+            # todo - consider checkpointing
 
     def test_run(self):
         # self.eps_greedy = 0
@@ -212,6 +224,11 @@ class RayGDQNWorker(GDQNWorker):
                  worker_id,
                  hparams,
                  is_tester=False,
-                 **kwargs
+                 use_gpu=False,
+                 gpu_id=None
                  ):
-        super(RayGDQNWorker, self).__init__(worker_id=worker_id, hparams=hparams, is_tester=is_tester)
+        super().__init__(worker_id=worker_id,
+                         hparams=hparams,
+                         is_tester=is_tester,
+                         use_gpu=use_gpu,
+                         gpu_id=gpu_id)
