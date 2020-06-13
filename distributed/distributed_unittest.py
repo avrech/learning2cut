@@ -1,10 +1,10 @@
 from distributed.worker import GDQNWorker
-from distributed.dqn_learner import DQNLearner, PriorityMessage
+from distributed.dqn_learner import GDQNLearner, PriorityMessage
 from distributed.per_server import PrioritizedReplayBufferServer
 import argparse
 import yaml
 import os
-
+from copy import deepcopy
 
 if __name__ == '__main__':
     """
@@ -21,11 +21,11 @@ if __name__ == '__main__':
     Learner -> ParamServer -> Worker packets are not tested, since we didn't touch this type of packets.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', type=str, default='results/distributed_functionality_test',
+    parser.add_argument('--logdir', type=str, default='unittest_results',
                         help='path to save results')
-    parser.add_argument('--datadir', type=str, default='data/maxcut',
+    parser.add_argument('--datadir', type=str, default='../experiments/dqn/data/maxcut',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='experiment_config.yaml',
+    parser.add_argument('--configfile', type=str, default='../experiments/dqn/test_config.yaml',
                         help='general experiment settings')
     parser.add_argument('--resume-training', action='store_true',
                         help='set to load the last training status from checkpoint file')
@@ -45,9 +45,10 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    workers = [GDQNWorker(worker_id=worker_id, hparams=hparams) for worker_id in range(2)]
-    test_worker = GDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True)
-    learner = DQNLearner(hparams=hparams)
+    # modify hparams to fit workers and learner
+    workers = [GDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(2)]
+    test_worker = GDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True, use_gpu=False)
+    learner = GDQNLearner(hparams=hparams, use_gpu=True, gpu_id=args.gpu_id)
     replay_server = PrioritizedReplayBufferServer(config=hparams)
 
     for worker in workers:
@@ -84,7 +85,7 @@ if __name__ == '__main__':
             # perform sgd step and return new priorities to replay server
             batch_new_priorities = learner.sgd_step(transitions=batch_transitions, importance_sampling_correction_weights=batch_weights)
             # send back to per the new priorities together with the corresponding idxes
-            new_priorities_packet = DQNLearner.pack_priorities(PriorityMessage(batch_idxes, batch_new_priorities))
+            new_priorities_packet = GDQNLearner.pack_priorities((batch_idxes, batch_new_priorities))
             # priorities_packet should be sent here and received on the per side
 
             # PER SERVER SIDE
@@ -92,7 +93,7 @@ if __name__ == '__main__':
             # update priorities
             replay_server.update_priorities(idxes, new_priorities)
 
-        if learner.num_sgd_steps_done % hparams['param_update_interval'] == 0:
+        if learner.num_sgd_steps_done > 0 and learner.num_sgd_steps_done % hparams['param_update_interval'] == 0:
             # LEARNER SIDE
             # pack new params and broadcast to all workers
             public_params_packet = learner.get_params_packet()
@@ -110,7 +111,7 @@ if __name__ == '__main__':
             received_new_params = False
 
         # update learner target policy periodically
-        if learner.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
+        if learner.num_sgd_steps_done > 0 and learner.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
             learner.update_target()
 
         global_step = learner.num_param_updates
@@ -122,7 +123,7 @@ if __name__ == '__main__':
             test_worker.evaluate()
             # frequently checkpoint all components
             learner.save_checkpoint()
-            replay_server.save_checkpoint()
+            # todo replay_server.save_checkpoint()
             test_worker.save_checkpoint()
             for worker in workers:
                 worker.save_checkpoint()

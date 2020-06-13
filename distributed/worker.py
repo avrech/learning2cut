@@ -1,29 +1,20 @@
 """ Worker class copied and modified from https://github.com/cyoon1729/distributedRL """
 import time
-from abc import ABC, abstractmethod
-from collections import deque
-from typing import Deque
-import numpy as np
-import pyarrow as pa
-import torch
-import torch.nn as nn
-import zmq
 import ray
+import pyarrow as pa
+from abc import ABC, abstractmethod
+import torch
+import zmq
 from agents.dqn import GDQN
-from utils.data import Transition
 import os
 from torch.utils.tensorboard import SummaryWriter
 
 
 class Worker(ABC):
-    def __init__(self,
-                 worker_id: int,
-                 hparams: dict,
-                 **kwargs
-    ):
+    def __init__(self, worker_id, hparams, **kwargs):
+        super(Worker, self).__init__(hparams=hparams, **kwargs)
         self.worker_id = worker_id
         self.cfg = hparams
-        self.device = hparams.get("worker_device", 'cpu')
 
         # unpack communication configs
         self.pubsub_port = hparams["pubsub_port"]
@@ -41,17 +32,17 @@ class Worker(ABC):
         pass
 
     @abstractmethod
-    def select_action(self, state: np.ndarray) -> np.ndarray:
+    def select_action(self, state):
         """Select action with worker's brain"""
         pass
 
     @abstractmethod
-    def preprocess_data(self, **kwargs) -> list:
+    def preprocess_data(self, **kwargs):
         """Preprocess collected data if necessary (e.g. n-step)"""
         pass
 
     @abstractmethod
-    def collect_data(self) -> list:
+    def collect_data(self):
         """Run environment and collect data until stopping criterion satisfied"""
         pass
 
@@ -117,91 +108,16 @@ class Worker(ABC):
             # todo - consider checkpointing
 
 
-class ApeXWorker(Worker):
-    """Abstract class for ApeX distrbuted workers """
-
-    def __init__(self,
-                 worker_id: int,
-                 worker_brain: nn.Module,
-                 cfg: dict,
-                 comm_cfg: dict
-                 ):
-        super().__init__(worker_id, worker_brain, cfg, comm_cfg)
-        self.nstep_queue = deque(maxlen=self.cfg["num_step"])
-        self.worker_buffer_size = self.cfg["worker_buffer_size"]
-        self.gamma = self.cfg["gamma"]
-        self.num_step = self.cfg["num_step"]
-
-    def preprocess_data(self, nstepqueue: Deque) -> tuple:
-        # todo - replace by compute_reward_and stats
-        discounted_reward = 0
-        _, _, _, last_state, done = nstepqueue[-1]
-        for transition in list(reversed(nstepqueue)):
-            state, action, reward, _, _ = transition
-            discounted_reward = reward + self.gamma * discounted_reward
-        nstep_data = (state, action, discounted_reward, last_state, done)
-
-        q_value = self.policy_net.forward(
-            torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        )[0][action]
-
-        bootstrap_q = torch.max(
-            self.policy_net.forward(
-                torch.FloatTensor(last_state).unsqueeze(0).to(self.device)
-            ),
-            1,
-        )
-
-        target_q_value = (
-            discounted_reward + self.gamma ** self.num_step * bootstrap_q[0]
-        )
-
-        priority_value = torch.abs(target_q_value - q_value).detach().view(-1)
-        priority_value = torch.clamp(priority_value, min=1e-8)
-        priority_value = priority_value.cpu().numpy().tolist()
-
-        return nstep_data, priority_value
-
-    def collect_data(self, verbose=False):
-        # todo - replace by execute episode or more generally dqn experiment loop.
-        """Fill worker buffer until some stopping criterion is satisfied"""
-        local_buffer = []
-        nstep_queue = deque(maxlen=self.num_step)
-
-        while len(local_buffer) < self.worker_buffer_size:
-            episode_reward = 0
-            done = False
-            state = self.env.reset()
-            while not done:
-                action = self.select_action(state)
-                transition = self.environment_step(state, action)
-                next_state = transition[-2]
-                done = transition[-1]
-                reward = transition[-3]
-                episode_reward = episode_reward + reward
-
-                nstep_queue.append(transition)
-                if (len(nstep_queue) == self.num_step) or done:
-                    nstep_data, priorities = self.preprocess_data(nstep_queue)
-                    local_buffer.append([nstep_data, priorities])
-
-                state = next_state
-
-            if verbose:
-                print(f"Worker {self.worker_id}: {episode_reward}")
-
-        return local_buffer
-
-
-@ray.remote
 class GDQNWorker(Worker, GDQN):
     def __init__(self,
                  worker_id,
                  hparams,
                  is_tester=False,
+                 use_gpu=False,
+                 gpu_id=None,
                  **kwargs
                  ):
-        super().__init__(worker_id=worker_id, hparams=hparams)
+        super(GDQNWorker, self).__init__(worker_id=worker_id, hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id, **kwargs)
         # set GDQN instance role
         self.is_learner = False
         self.is_worker = not is_tester
@@ -211,11 +127,11 @@ class GDQNWorker(Worker, GDQN):
         self.writer = SummaryWriter(log_dir=self.logdir)
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
 
-    def select_action(self, state: np.ndarray) -> np.ndarray:
+    def select_action(self, state):
         print('not relevant - do nothing!')
         raise NotImplementedError
 
-    def environment_step(self, state: np.ndarray, action: np.ndarray) -> tuple:
+    def environment_step(self, state, action):
         # next_state, reward, done, _ = self.env.step(action)
         # return (state, action, reward, next_state, done)
         print('not relevant - do nothing!')
@@ -242,7 +158,7 @@ class GDQNWorker(Worker, GDQN):
                 # todo checkpoint
                 self.save_checkpoint()
 
-    def preprocess_data(self, nstepqueue: Deque) -> tuple:
+    def preprocess_data(self, nstepqueue):
         print('not relevant - do nothing!')
         raise NotImplementedError
 
@@ -267,10 +183,10 @@ class GDQNWorker(Worker, GDQN):
         return local_buffer
 
     @staticmethod
-    def pack_replay_data(replay_data: [(Transition, np.ndarray)]):
+    def pack_replay_data(replay_data):
         """
         Convert a list of (Transition, initial_weights) to list of (TransitionNumpyTuple, initial_priorities.numpy())
-        :param replay_data: list of (Transition, initial_priorities)
+        :param replay_data: list of (Transition, float initial_priority)
         :return:
         """
         replay_data_packet = []
@@ -280,7 +196,7 @@ class GDQNWorker(Worker, GDQN):
         return replay_data_packet
 
     def receive_new_params(self):
-        updated = super().receive_new_params()
+        updated = super(GDQNWorker, self).receive_new_params()
         if updated:
             self.num_param_updates += 1
         return updated
@@ -288,3 +204,14 @@ class GDQNWorker(Worker, GDQN):
     def get_model(self):
         return self.policy_net
 
+
+@ray.remote
+class RayGDQNWorker(GDQNWorker):
+    """ Ray remote actor wrapper for GDQNWorker """
+    def __init__(self,
+                 worker_id,
+                 hparams,
+                 is_tester=False,
+                 **kwargs
+                 ):
+        super(RayGDQNWorker, self).__init__(worker_id=worker_id, hparams=hparams, is_tester=is_tester)

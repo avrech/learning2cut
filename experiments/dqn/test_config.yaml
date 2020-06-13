@@ -1,5 +1,5 @@
 # NOTES:
-# All intervals are measured in num_policy_updates,
+# All intervals are measured in num_param_updates,
 # except target_update_interval and param_update_interval which are measured in number of sgd steps done on the learner.
 # SINGLE THREAD SETTING:
 # - num_policy_updates equals to the number of episodes done and to the number of sgd steps done.
@@ -9,7 +9,7 @@
 # - num_policy_updates equals to the number of workers' policy updates, which happen every param_update_interval
 # - the hard datasets can be evaluated on the tester in the same frequency as the easy datasets.
 # DQN ALGORITHM HPARAMS
-batch_size: 4 # 1024
+batch_size: 4
 lr: 0.001
 weight_decay: 0.0001
 nstep_learning: 8 # 1, 8
@@ -20,7 +20,7 @@ gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
 eps_decay: 100000
-memory_capacity: 50000
+replay_buffer_capacity: 65536
 dqn_objective: db_auc
 empty_action_penalty: 0
 
@@ -171,8 +171,8 @@ num_learners: 1
 #num_step: 3
 #batch_size: 512
 #max_episode_steps: None
-param_update_interval: 50  # number of learner.sgd_steps between workers policy update
-#max_num_updates: 100000
+param_update_interval: 5  # number of learner.sgd_steps between workers policy update
+max_num_updates: 100000  # relevant to PER to increase beta across time
 #tau: 0.01
 #learning_rate: 0.0001
 #gamma: 0.95
@@ -180,14 +180,15 @@ param_update_interval: 50  # number of learner.sgd_steps between workers policy 
 #eps_decay: 0.95
 
 # Buffer parameters
-buffer_max_size: 1000000
+#buffer_max_size: 1000000
 use_per: True
 priority_alpha: 0.6
 priority_beta: 0.4
 priority_beta_start: 0.4
 priority_beta_end: 1.0
+priority_beta_decay: 100000  # exponentially increase to priority_beta_end like decreasing eps_greedy
 worker_buffer_size: 1000
-
+local_buffer_size: 50  # todo tune this parameter on the real distributed program
 # Communication configs
 pubsub_port: 5555
 repreq_port: 5556

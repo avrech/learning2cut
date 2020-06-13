@@ -1,14 +1,12 @@
-from typing import Deque
-import pyarrow as pa
 import ray
+import pyarrow as pa
 import zmq
 from utils.buffer import PrioritizedReplayBuffer
 
 
-@ray.remote
 class PrioritizedReplayBufferServer(PrioritizedReplayBuffer):
     def __init__(self, config):
-        super().__init__(config)
+        super(PrioritizedReplayBufferServer, self).__init__(config)
         self.config = config
 
         # # unpack buffer configs
@@ -46,7 +44,12 @@ class PrioritizedReplayBufferServer(PrioritizedReplayBuffer):
         self.pull_socket.bind(f"tcp://127.0.0.1:{self.pullpush_port}")
 
     def get_batch_packet(self):
-        batch = self.sample()
+        transitions, weights, idxes = self.sample()
+        # weights returned as torch.tensor by default.
+        # transitions remain Transition.to_numpy_tuple() object,
+        # idxes are list.
+        # need only to convert weights to standard numpy array
+        batch = (transitions, weights.numpy(), idxes)
         # batch = self.encode_sample(sample)  # todo data remained encoded from worker
         batch_packet = pa.serialize(batch).to_buffer()
         return batch_packet
@@ -89,3 +92,9 @@ class PrioritizedReplayBufferServer(PrioritizedReplayBuffer):
             if len(self.buffer) > self.batch_size:
                 self.send_batch_recv_priors()
 
+
+@ray.remote
+class RayPrioritizedReplayBufferServer(PrioritizedReplayBufferServer):
+    """ Ray remote actor wrapper for PrioritizedReplayBufferServer """
+    def __init__(self, config):
+        super(RayPrioritizedReplayBufferServer, self).__init__(config)

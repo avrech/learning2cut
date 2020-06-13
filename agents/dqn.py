@@ -1,4 +1,4 @@
-from pyscipopt import  Sepa, SCIP_RESULT
+from pyscipopt import Sepa, SCIP_RESULT
 from time import time
 import numpy as np
 from utils.data import get_transition
@@ -30,11 +30,12 @@ StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'act
 
 
 class GDQN(Sepa):
-    def __init__(self, name='DQN', hparams={}, **kwargs):
+    def __init__(self, name='DQN', hparams={}, use_gpu=True, gpu_id=None, **kwargs):
         """
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
         """
+        super(GDQN, self).__init__()
         self.name = name
         self.hparams = hparams
 
@@ -44,15 +45,15 @@ class GDQN(Sepa):
             self.memory = PrioritizedReplayBuffer(config=hparams)
         else:
             self.memory = ReplayBuffer(hparams.get('replay_buffer_capacity', 2**16))
-
-        self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
+        cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
+        self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.gamma = hparams.get('gamma', 0.999)
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
         self.eps_decay = hparams.get('eps_decay', 200)
-        self.policy_net = TQnet(hparams=hparams).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
-        self.target_net = TQnet(hparams=hparams).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
+        self.policy_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
+        self.target_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
@@ -123,7 +124,6 @@ class GDQN(Sepa):
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
         # initialize (set seed and load checkpoint
-        self.initialize_training()
         self.initialize_training()
 
     # done

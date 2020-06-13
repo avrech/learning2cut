@@ -409,10 +409,11 @@ class CutConv(MessagePassing):
 
 # transformer Q network
 class TQnet(torch.nn.Module):
-    def __init__(self, hparams={}):
+    def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
         super(TQnet, self).__init__()
         self.hparams = hparams
-        self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None else "cpu")
+        cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
+        self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         ###########
         # Encoder #
         ###########

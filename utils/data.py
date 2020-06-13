@@ -116,11 +116,11 @@ class Transition(Data):
             return super(Transition, self).__inc__(key, value)
 
     def to_numpy_tuple(self):
-        return TransitionNumpyTuple(*(self[k].numpy() for k in self.keys))
+        return tuple([self[k].numpy() for k in self.keys])
 
     @staticmethod
     def from_numpy_tuple(transition_numpy_tuple):
-        return Transition(*(torch.from_numpy(np_array) for np_array in transition_numpy_tuple))
+        return Transition(*[torch.from_numpy(np_array) for np_array in transition_numpy_tuple])
 
 
 def get_transition(scip_state,

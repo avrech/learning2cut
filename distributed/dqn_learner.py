@@ -18,11 +18,8 @@ PriorityMessage = namedtuple('PriorityMessage', ('idxes', 'new_priorities'))
 
 
 class Learner(ABC):
-    def __init__(
-        self,
-        hparams={},
-        **kwargs
-    ):
+    def __init__(self, hparams={}, **kwargs):
+        super(Learner, self).__init__(hparams=hparams, **kwargs)
         self.cfg = hparams
         self.replay_data_queue = deque(maxlen=1000)
 
@@ -54,10 +51,11 @@ class Learner(ABC):
     @staticmethod
     def params_to_numpy(model: torch.nn.Module):
         params = []
-        new_model = deepcopy(model)
-        state_dict = new_model.cpu().state_dict()
-        for param in list(state_dict):
-            params.append(state_dict[param].numpy())
+        # todo - why deepcopy fails on TypeError: can't pickle torch._C.ScriptFunction objects
+        # new_model = deepcopy(model)
+        # state_dict = new_model.cpu().state_dict()
+        for param in model.state_dict().values():
+            params.append(param.cpu().numpy())
         return params
 
     def initialize_sockets(self):
@@ -117,11 +115,10 @@ class Learner(ABC):
                 self.publish_params()
 
 
-@ray.remote(num_gpus=1)
-class DQNLearner(Learner, GDQN):
-    def __init__(self, hparams, **kwargs):
+class GDQNLearner(Learner, GDQN):
+    def __init__(self, hparams, use_gpu=True, gpu_id=None, **kwargs):
         # brain, cfg: dict, comm_config: dict - old distributedRL stuff
-        super().__init__(brain=None, cfg=hparams, comm_config=hparams, hparams=hparams)
+        super(GDQNLearner, self).__init__(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id, **kwargs)
         # set GDQN instance role
         self.is_learner = True
         self.is_worker = False
@@ -130,6 +127,9 @@ class DQNLearner(Learner, GDQN):
         self.logdir = os.path.join(self.logdir, 'learner')
         self.writer = SummaryWriter(log_dir=self.logdir)
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
+        # self.device = torch.device(f"cuda:{hparams['gpu_id']}" if torch.cuda.is_available() and hparams.get('gpu_id', None) is not None and hparams.get('learner_device', 'cpu') =='cuda' else "cpu")
+        # self.policy_net = self.policy_net.to(self.device)
+        # self.target_net = self.target_net.to(self.device)
 
     def write_log(self):
         # todo - call DQN.log_stats() or modify to log the relevant metrics
@@ -157,3 +157,10 @@ class DQNLearner(Learner, GDQN):
 
     def get_model(self):
         return self.policy_net
+
+
+@ray.remote(num_gpus=1)
+class RayGDQNLearner(GDQNLearner):
+    """ Ray remote actor wrapper """
+    def __init__(self, hparams, **kwargs):
+        super(RayGDQNLearner, self).__init__(hparams=hparams)

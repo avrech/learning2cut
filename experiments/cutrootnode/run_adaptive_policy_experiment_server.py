@@ -3,7 +3,6 @@ Launch multiple experiment configurations in parallel on distributed resources.
 Requires a folder in ./ containing experiment.py, data_generator,py and config_fixed_max_rounds.yaml
 See example in ./variability
 """
-from importlib import import_module
 from argparse import ArgumentParser
 import numpy as np
 import yaml
