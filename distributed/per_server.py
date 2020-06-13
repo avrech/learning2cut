@@ -83,13 +83,13 @@ class PrioritizedReplayBufferServer(PrioritizedReplayBuffer):
 
         if new_replay_data_packet:
             new_replay_data = self.unpack_replay_data(new_replay_data_packet)
-            for replay_data, initial_priority in new_replay_data:
-                self.add(replay_data, initial_priority)
+            for transition_and_priority_tuple in new_replay_data:
+                self.add(transition_and_priority_tuple)
 
     def run(self):
         while True:
             self.recv_replay_data()
-            if len(self.buffer) > self.batch_size:
+            if len(self.storage) > self.batch_size:
                 self.send_batch_recv_priors()
 
 
