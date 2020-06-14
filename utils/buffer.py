@@ -2,7 +2,6 @@ import random
 import torch
 from collections import deque
 import numpy as np
-from torch_geometric.data.batch import Batch
 from utils.segtree import MinSegmentTree, SegmentTree, SumSegmentTree
 from utils.data import Transition
 import math
@@ -40,7 +39,7 @@ class ReplayBuffer(object):
         # increment the next index round robin
         self.next_idx = (self.next_idx + 1) % self.capacity
 
-    def add_buffer(self, buffer):
+    def add_data_list(self, buffer):
         # push all transitions from local_buffer into memory
         for data in buffer:
             self.add(data)
@@ -50,25 +49,6 @@ class ReplayBuffer(object):
         # sample batch_size unique transitions
         transitions = random.sample(self.storage, batch_size)
         return transitions
-
-    def encode_sample(self, sample):
-        """
-        Returns a tuple of standard np.array objects,
-        """
-        encoded_sample = []
-        for transition in sample:
-            encoded_sample.append(transition.to_numpy_tuple())
-        return encoded_sample
-
-    def decode_sample(self, encoded_sample):
-        """
-        Returns the original torch_geometric Batch of Transitions.
-        Useful for decoding samples on the learner side.
-        """
-        decoded_sample = []
-        for transition_numpy_tuple in encoded_sample:
-            decoded_sample.append(Transition.from_numpy_tuple(transition_numpy_tuple))
-        return decoded_sample
 
     def __len__(self):
         return len(self.storage)
@@ -102,6 +82,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self._it_sum = SumSegmentTree(it_capacity)
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
+        self._next_unique_id = 0
+        self._data_unique_ids = np.zeros((self.capacity,))
 
         # unpack buffer configs
         # self.max_num_updates = self.cfg["max_num_updates"]
@@ -125,15 +107,16 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         transition, initial_priority = data
         idx = self.next_idx
         super().add(transition)
-        # update here the initial priority
-        # because it is not safe to build on later update in another place
-        # safe code:
-        self.update_priorities([idx], [initial_priority]) # todo verify
-        # old and unsafe:
-        # self._it_sum[idx] = self._max_priority ** self._alpha
-        # self._it_min[idx] = self._max_priority ** self._alpha
+        # assign unique id to data
+        # such that new arriving data won't be updated with outdated new_priorities arriving from the learner.
+        # (highly important in distributed setting)
+        self._data_unique_ids[idx] = self._next_unique_id
+        # update the initial priority
+        self.update_priorities([idx], [initial_priority], [self._next_unique_id])  # todo verify
+        # increment _next_unique_id
+        self._next_unique_id = self._next_unique_id + 1  # todo handle int overflow
 
-    def add_buffer(self, buffer):
+    def add_data_list(self, buffer):
         # push all (transitions, initial_priority) tuples from buffer into memory
         for data in buffer:
             self.add(data)
@@ -172,6 +155,9 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         idxes: np.array
             Array of shape (batch_size,) and dtype np.int32
             idexes in buffer of sampled experiences
+        time_stamps: np.array
+            Array of shape (batch_size,) and dtype int
+            the write_time_stamps of the sampled transitions
         """
         if batch_size is None:
             batch_size = self.batch_size
@@ -191,39 +177,17 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             weight = (p_sample * len(self.storage)) ** (-beta)
             weights.append(weight / max_weight)
 
-        weights = torch.tensor(weights, dtype=torch.float32)
+        weights = np.array(weights, dtype=np.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
         transitions = [self.storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
 
         self.num_sgd_steps_done += 1  # increment global counter to decay beta across training
-        # return a tuple of batch, importance sampling correction weights and idxes to update later the priorities
-        return transitions, weights, idxes
+        data_ids = self._data_unique_ids[idxes]
 
-    @staticmethod
-    def encode_sample(sample):
-        """
-        For distributed setting, we need to serialize sample into numpy arrays.
-        Let
-            batch, weights, idxes = sample
-        The batch is encoded by the base ReplayBuffer class which handles this data type,
-        weights are straightforwardly converted into and from numpy arrays,
-        and idxes remain np.array since they are used only in the replay buffer, and need not be changed.
-        """
-        transitions, weights, idxes = sample
-        # idxes are already stored as np.array, so need only to encode weights and batch
-        # transitions are encoded using the base class
-        encoded_transitions = super().encode_sample(transitions)
-        encoded_weights = weights.numpy()
-        return encoded_transitions, encoded_weights, idxes
+        # return a tuple of transitions, importance sampling correction weights, idxes to update later the priorities and data unique ids
+        return transitions, weights, idxes, data_ids
 
-    @staticmethod
-    def decode_sample(encoded_sample):
-        encoded_transitions, encoded_weights, idxes = encoded_sample
-        transitions = super().decode_sample(encoded_transitions)
-        weights = torch.from_numpy(encoded_weights)
-        return transitions, weights, idxes
-
-    def update_priorities(self, idxes, priorities):
+    def update_priorities(self, idxes, priorities, data_ids):
         """Update priorities of sampled transitions.
         sets priority of transition at index idxes[i] in buffer
         to priorities[i].
@@ -237,12 +201,22 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             variable `idxes`.
         """
         assert len(idxes) == len(priorities)
-        for idx, priority in zip(idxes, priorities):
-            assert priority > 0
-            assert 0 <= idx < len(self.storage)
+        assert len(idxes) == len(data_ids)
+        # assert all(time_stamps <= self._time_stamp)
+        assert all(priorities > 0)
+        assert all(0 <= idxes) and all(idxes < len(self.storage))
+
+        for idx, priority, data_id in zip(idxes, priorities, data_ids):
+            if data_id != self._data_unique_ids[idx]:
+                # data_id will be equal to self._data_unique_ids[idx] for newly added data,
+                # and for returned priorities whose corresponding stored data hasn't been overridden between
+                # sending the batch to the learner and receiving the updated priorities.
+                # in a case those two unique ids are not equal,
+                # the position idx in the storage was overridden by a new replay data,
+                # so the current priority is not relevant any more and can be discarded
+                continue
             self._it_sum[idx] = priority ** self._alpha
             self._it_min[idx] = priority ** self._alpha
-
             self._max_priority = max(self._max_priority, priority)
 
 

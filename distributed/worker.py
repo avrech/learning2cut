@@ -90,11 +90,21 @@ class Worker(ABC):
         self.push_socket.send(replay_data_packet)
 
     def receive_new_params(self):
+        """
+        receive the new publicly published params.
+        for a case several param packets are waiting,
+        receive all of them and take the latest one.
+        """
         new_params_packet = False
-        try:
-            new_params_packet = self.sub_socket.recv(zmq.DONTWAIT)
-        except zmq.Again:
-            return False
+        while True:
+            try:  # pull from socket all pending packets
+                new_params_packet = self.sub_socket.recv(zmq.DONTWAIT)
+            except zmq.Again:  # until no packet is waiting
+                # and then
+                if new_params_packet:
+                    break  # and go to synchronize
+                else:  # no params received. return
+                    return False
 
         if new_params_packet:
             self.synchronize_params(new_params_packet)
@@ -216,19 +226,19 @@ class GDQNWorker(Worker, GDQN):
     def get_model(self):
         return self.policy_net
 
-
-@ray.remote
-class RayGDQNWorker(GDQNWorker):
-    """ Ray remote actor wrapper for GDQNWorker """
-    def __init__(self,
-                 worker_id,
-                 hparams,
-                 is_tester=False,
-                 use_gpu=False,
-                 gpu_id=None
-                 ):
-        super().__init__(worker_id=worker_id,
-                         hparams=hparams,
-                         is_tester=is_tester,
-                         use_gpu=use_gpu,
-                         gpu_id=gpu_id)
+#
+# @ray.remote
+# class RayGDQNWorker(GDQNWorker):
+#     """ Ray remote actor wrapper for GDQNWorker """
+#     def __init__(self,
+#                  worker_id,
+#                  hparams,
+#                  is_tester=False,
+#                  use_gpu=False,
+#                  gpu_id=None
+#                  ):
+#         super().__init__(worker_id=worker_id,
+#                          hparams=hparams,
+#                          is_tester=is_tester,
+#                          use_gpu=use_gpu,
+#                          gpu_id=gpu_id)

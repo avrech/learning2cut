@@ -1,6 +1,6 @@
 from distributed.worker import GDQNWorker
 from distributed.dqn_learner import GDQNLearner
-from distributed.per_server import PrioritizedReplayBufferServer
+from distributed.per_server import PrioritizedReplayServer
 import argparse
 import yaml
 import os
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     workers = [GDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(2)]
     test_worker = GDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True, use_gpu=False)
     learner = GDQNLearner(hparams=hparams, use_gpu=True, gpu_id=args.gpu_id)
-    replay_server = PrioritizedReplayBufferServer(config=hparams)
+    replay_server = PrioritizedReplayServer(config=hparams)
 
     for worker in workers:
         worker.initialize_training()
@@ -71,7 +71,7 @@ if __name__ == '__main__':
             # unpack replay data and push into PER
             unpacked_buffer = replay_server.unpack_replay_data(replay_data_packet)
             # push into memory
-            replay_server.add_buffer(unpacked_buffer)
+            replay_server.add_data_list(unpacked_buffer)
 
         # encode PER->Learner packet and send to Learner
         if len(replay_server) >= replay_server.batch_size:

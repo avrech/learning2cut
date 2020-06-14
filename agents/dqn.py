@@ -276,10 +276,10 @@ class GDQN(Sepa):
         if self.use_per:
             # todo sample with beta
 
-            transitions, weights, idxes = self.memory.sample(self.batch_size, beta)
-            new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=weights)
+            transitions, weights, idxes, time_stamps = self.memory.sample(self.batch_size)
+            new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights))
             # update priorities
-            self.memory.update_priorities(idxes, new_priorities)
+            self.memory.update_priorities(idxes, new_priorities, time_stamps)
 
         else:
             transitions = self.memory.sample(self.batch_size)
@@ -1111,7 +1111,7 @@ class GDQN(Sepa):
                 graph_indices = torch.randperm(trainset['num_instances'])
 
             # push experience into memory
-            self.memory.add_buffer(trajectory)
+            self.memory.add_data_list(trajectory)
 
             # perform 1 optimization step
             self.optimize_model()
