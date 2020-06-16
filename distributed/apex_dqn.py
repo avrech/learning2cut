@@ -13,7 +13,7 @@ def run_learner_io(learner):
 
 @ray.remote
 def run_learner_optimize_model(learner):
-    learner.run_optimize_model()
+    learner.run_optimize_model.remote()
 
 
 class ApeXDQN:
@@ -33,7 +33,7 @@ class ApeXDQN:
     def spawn(self):
         # wrap all actor classes with ray.remote to make them running remotely
         ray_worker = ray.remote(GDQNWorker)
-        ray_learner = ray.remote(GDQNLearner, num_gpus=int(self.use_gpu), num_cpus=2)
+        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(GDQNLearner)
         ray_replay_buffer = ray.remote(PrioritizedReplayServer)
 
         # Spawn all components
@@ -45,10 +45,11 @@ class ApeXDQN:
     def train(self):
         print("Running main training loop...")
 
-        ray.wait(
+        ready_ids, remaining_ids = ray.wait(
             [worker.run.remote() for worker in self.workers] +
             # run the learner io and optimize_model methods in two parallel sub-processes
             [run_learner_io.remote(self.learner), run_learner_optimize_model.remote(self.learner)] +
             [self.replay_server.run.remote()] +
             [self.test_worker.test_run.remote()]
         )
+        print('finished')

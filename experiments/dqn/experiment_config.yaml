@@ -166,12 +166,12 @@ datasets:
 model: Apex-DQN
 learner_device: cuda
 worker_device: cpu
-num_workers: 10
+num_workers:2
 num_learners: 1
 #num_step: 3
 #batch_size: 512
 #max_episode_steps: None
-param_update_interval: 50  # number of learner.sgd_steps between workers policy update
+param_update_interval: 100  # number of learner.sgd_steps between workers policy update
 max_num_updates: 100000  # relevant to PER to increase beta across time
 #tau: 0.01
 #learning_rate: 0.0001
@@ -190,6 +190,9 @@ priority_beta_decay: 100000  # exponentially increase to priority_beta_end like 
 worker_buffer_size: 1000
 local_buffer_size: 50  # todo tune this parameter on the real distributed program
 # Communication configs
-pubsub_port: 5555
-repreq_port: 5556
-pullpush_port: 5557
+params_pubsub_port: 5555
+#repreq_port: 5556
+#pullpush_port: 5557
+replay_server_2_learner_port: 5556
+learner_2_replay_server_port: 5557
+workers_2_replay_server_port: 5558

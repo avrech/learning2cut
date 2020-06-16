@@ -20,18 +20,28 @@ class Learner(ABC):
         self.replay_data_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_priorities_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_params_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
+        self.update_step = 0
 
         # unpack communication configs
         self.param_update_interval = self.cfg.get("param_update_interval", 50)
-        self.repreq_port = hparams["repreq_port"]
-        self.pubsub_port = hparams["pubsub_port"]
 
         # initialize zmq sockets
         print("[Learner]: initializing sockets..")
-        self.pub_socket = None
-        self.rep_socket = None
-        self.initialize_sockets()
-        self.update_step = 0
+        # for receiving batch from replay server
+        context = zmq.Context()
+        self.replay_server_2_learner_port = self.cfg["replay_server_2_learner_port"]
+        self.replay_server_2_learner_socket = context.socket(zmq.PULL)
+        self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
+        # for sending back new priorities to replay server
+        context = zmq.Context()
+        self.learner_2_replay_server_port = self.cfg["learner_2_replay_server_port"]
+        self.learner_2_replay_server_socket = context.socket(zmq.PUSH)
+        self.learner_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
+        # for publishing new params to workers
+        context = zmq.Context()
+        self.params_pubsub_port = hparams["params_pubsub_port"]
+        self.params_pub_socket = context.socket(zmq.PUB)
+        self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
 
     @abstractmethod
     def write_log(self):
@@ -56,17 +66,6 @@ class Learner(ABC):
             params.append(param.cpu().numpy())
         return params
 
-    def initialize_sockets(self):
-        # For sending new params to workers
-        context = zmq.Context()
-        self.pub_socket = context.socket(zmq.PUB)
-        self.pub_socket.bind(f"tcp://127.0.0.1:{self.pubsub_port}")
-
-        # For receiving batch from, sending new priorities to Buffer # write another with PUSH/PULL for non PER version
-        context = zmq.Context()
-        self.rep_socket = context.socket(zmq.REP)
-        self.rep_socket.bind(f"tcp://127.0.0.1:{self.repreq_port}")
-
     def get_params_packet(self):
         model = self.get_model()
         params = self.params_to_numpy(model)
@@ -76,7 +75,7 @@ class Learner(ABC):
     def publish_params(self):
         if len(self.new_params_queue) > 0:
             params_packet = self.new_params_queue.popleft()
-            self.pub_socket.send(params_packet)
+            self.params_pub_socket.send(params_packet)
 
     def push_new_params_to_queue(self):
         params_packet = self.get_params_packet()
@@ -92,10 +91,10 @@ class Learner(ABC):
 
     def recv_batch(self, blocking=True):
         if blocking:
-            batch_packet = self.rep_socket.recv()
+            batch_packet = self.replay_server_2_learner_socket.recv()
         else:
             try:
-                batch_packet = self.rep_socket.recv(zmq.DONTWAIT)
+                batch_packet = self.replay_server_2_learner_socket.recv(zmq.DONTWAIT)
             except zmq.Again:
                 return
         batch = self.unpack_batch_packet(batch_packet)
@@ -110,7 +109,7 @@ class Learner(ABC):
         if len(self.new_priorities_queue) > 0:
             new_priorities = self.new_priorities_queue.popleft()
             new_priors_packet = self.pack_priorities(new_priorities)
-            self.rep_socket.send(new_priors_packet)
+            self.learner_2_replay_server_socket.send(new_priors_packet)
 
     def run(self):
         time.sleep(3)
@@ -199,11 +198,3 @@ class GDQNLearner(Learner, GDQN):
 
     def get_model(self):
         return self.policy_net
-
-
-# # todo replace this with RayGDQNLearner = ray.remote(num_gpus=1, num_cpus=2)(GDQNLearner) in run script
-# @ray.remote(num_gpus=1, num_cpus=2)
-# class RayGDQNLearner(GDQNLearner):
-#     """ Ray remote actor wrapper """
-#     def __init__(self, hparams, use_gpu=True, gpu_id=None):
-#         super().__init__(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id)

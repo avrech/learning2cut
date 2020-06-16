@@ -16,15 +16,24 @@ class Worker(ABC):
         self.worker_id = worker_id
         self.cfg = hparams
 
-        # unpack communication configs
-        self.pubsub_port = hparams["pubsub_port"]
-        self.pullpush_port = hparams["pullpush_port"]
-
         # initialize zmq sockets
+        # use socket.connect() instead of .bind() because workers are the least stable part in the system
+        # (not supposed to but rather suspected to be)
         print(f"[Worker {self.worker_id}]: initializing sockets..")
-        self.sub_socket = None
-        self.push_socket = None
-        self.initialize_sockets()
+        # for receiving params from learner
+        context = zmq.Context()
+        self.params_pubsub_port = hparams["params_pubsub_port"]
+        self.params_sub_socket = context.socket(zmq.SUB)
+        self.params_sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        self.params_sub_socket.setsockopt(zmq.CONFLATE, 1)
+        self.params_sub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+
+        # for sending replay data to buffer
+        # for receiving replay data from workers
+        context = zmq.Context()
+        self.workers_2_replay_server_port = hparams["workers_2_replay_server_port"]
+        self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
+        self.worker_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
 
     @abstractmethod
     def write_log(self):
@@ -63,20 +72,6 @@ class Worker(ABC):
             new_param = torch.FloatTensor(new_param).to(self.device)
             param.data.copy_(new_param)
 
-    def initialize_sockets(self):
-        # for receiving params from learner
-        context = zmq.Context()
-        self.sub_socket = context.socket(zmq.SUB)
-        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
-        self.sub_socket.setsockopt(zmq.CONFLATE, 1)
-        self.sub_socket.connect(f"tcp://127.0.0.1:{self.pubsub_port}")
-
-        # for sending replay data to buffer
-        time.sleep(1)
-        context = zmq.Context()
-        self.push_socket = context.socket(zmq.PUSH)
-        self.push_socket.connect(f"tcp://127.0.0.1:{self.pullpush_port}")
-
     @staticmethod
     @abstractmethod
     def pack_replay_data(replay_data):
@@ -87,7 +82,7 @@ class Worker(ABC):
 
     def send_replay_data(self, replay_data):
         replay_data_packet = self.pack_replay_data(replay_data)
-        self.push_socket.send(replay_data_packet)
+        self.worker_2_replay_server_socket.send(replay_data_packet)
 
     def receive_new_params(self):
         """
@@ -98,7 +93,7 @@ class Worker(ABC):
         new_params_packet = False
         while True:
             try:  # pull from socket all pending packets
-                new_params_packet = self.sub_socket.recv(zmq.DONTWAIT)
+                new_params_packet = self.params_sub_socket.recv(zmq.DONTWAIT)
             except zmq.Again:  # until no packet is waiting
                 # and then
                 if new_params_packet:
@@ -161,6 +156,10 @@ class GDQNWorker(Worker, GDQN):
             self.send_replay_data(replay_data)
             self.receive_new_params()
             # todo - consider checkpointing
+            if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
+                self.log_stats()
+            if self.num_param_updates > 0 and self.num_param_updates % self.hparams['checkpoint_interval'] == 0:
+                self.save_checkpoint()
 
     def test_run(self):
         # self.eps_greedy = 0
@@ -225,20 +224,3 @@ class GDQNWorker(Worker, GDQN):
 
     def get_model(self):
         return self.policy_net
-
-#
-# @ray.remote
-# class RayGDQNWorker(GDQNWorker):
-#     """ Ray remote actor wrapper for GDQNWorker """
-#     def __init__(self,
-#                  worker_id,
-#                  hparams,
-#                  is_tester=False,
-#                  use_gpu=False,
-#                  gpu_id=None
-#                  ):
-#         super().__init__(worker_id=worker_id,
-#                          hparams=hparams,
-#                          is_tester=is_tester,
-#                          use_gpu=use_gpu,
-#                          gpu_id=gpu_id)

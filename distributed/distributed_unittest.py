@@ -80,17 +80,17 @@ if __name__ == '__main__':
 
             # LEARNER SIDE
             # unpack batch_packet
-            batch_transitions, batch_weights, batch_idxes = learner.unpack_batch_packet(batch_packet)
+            batch_transitions, batch_weights, batch_idxes, batch_ids = learner.unpack_batch_packet(batch_packet)
             # perform sgd step and return new priorities to replay server
             batch_new_priorities = learner.sgd_step(transitions=batch_transitions, importance_sampling_correction_weights=batch_weights)
             # send back to per the new priorities together with the corresponding idxes
-            new_priorities_packet = GDQNLearner.pack_priorities((batch_idxes, batch_new_priorities))
+            new_priorities_packet = GDQNLearner.pack_priorities((batch_idxes, batch_new_priorities, batch_ids))
             # priorities_packet should be sent here and received on the per side
 
             # PER SERVER SIDE
-            idxes, new_priorities = replay_server.unpack_priorities(new_priorities_packet)
+            idxes, new_priorities, data_ids = replay_server.unpack_priorities(new_priorities_packet)
             # update priorities
-            replay_server.update_priorities(idxes, new_priorities)
+            replay_server.update_priorities(idxes, new_priorities, data_ids=data_ids)
 
         if learner.num_sgd_steps_done > 0 and learner.num_sgd_steps_done % hparams['param_update_interval'] == 0:
             # LEARNER SIDE

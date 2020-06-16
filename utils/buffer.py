@@ -112,7 +112,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         # (highly important in distributed setting)
         self._data_unique_ids[idx] = self._next_unique_id
         # update the initial priority
-        self.update_priorities([idx], [initial_priority], [self._next_unique_id])  # todo verify
+        self.update_priorities(np.array([idx]), np.array([initial_priority]), np.array([self._next_unique_id]))  # todo verify
         # increment _next_unique_id
         self._next_unique_id = self._next_unique_id + 1  # todo handle int overflow
 
@@ -166,7 +166,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
                    math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
 
         assert beta > 0
-        idxes = self._sample_proportional(batch_size)
+        idxes = np.array(self._sample_proportional(batch_size))
 
         weights = []
         p_min = self._it_min.min() / self._it_sum.sum()

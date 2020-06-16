@@ -421,7 +421,7 @@ class GDQN(Sepa):
                                                       dim=0,                          # scattering dimension
                                                       dim_size=self.batch_size))      # output tensor size in dim after scattering
 
-            new_priorities = td_error_l2_norm.squeeze().cpu().numpy().tolist()
+            new_priorities = td_error_l2_norm.squeeze().cpu().numpy()
 
             return new_priorities
         else:

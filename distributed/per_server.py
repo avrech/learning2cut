@@ -11,24 +11,23 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.pending_priority_requests_cnt = 0
         self.max_pending_requests = config.get('max_pending_requests', 10)
 
-        # communication configs
-        self.repreq_port = config["repreq_port"]
-        self.pullpush_port = config["pullpush_port"]
-
         # initialize zmq sockets
-        print("[Buffer]: initializing sockets..")
-        self.initialize_sockets()
-
-    def initialize_sockets(self):
-        # for sending batch to learner and retrieving new priorities
+        print("[ReplayServer]: initializing sockets..")
+        # for sending a batch to learner
         context = zmq.Context()
-        self.rep_socket = context.socket(zmq.REQ)
-        self.rep_socket.connect(f"tcp://127.0.0.1:{self.repreq_port}")
-
+        self.replay_server_2_learner_port = config["replay_server_2_learner_port"]
+        self.replay_server_2_learner_socket = context.socket(zmq.PUSH)
+        self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
+        # for receiving new priorities from learner
+        context = zmq.Context()
+        self.learner_2_replay_server_port = config["learner_2_replay_server_port"]
+        self.learner_2_replay_server_socket = context.socket(zmq.PULL)
+        self.learner_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
         # for receiving replay data from workers
         context = zmq.Context()
-        self.pull_socket = context.socket(zmq.PULL)
-        self.pull_socket.bind(f"tcp://127.0.0.1:{self.pullpush_port}")
+        self.workers_2_replay_server_port = config["workers_2_replay_server_port"]
+        self.workers_2_replay_server_socket = context.socket(zmq.PULL)
+        self.workers_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
 
     def get_batch_packet(self):
         transitions, weights, idxes, data_ids = self.sample()
@@ -42,20 +41,20 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
 
     @staticmethod
     def unpack_priorities(priorities_packet):
-        idxes, priorities = pa.deserialize(priorities_packet)
-        return idxes, priorities
+        unpacked_priorities = pa.deserialize(priorities_packet)
+        return unpacked_priorities  # idxes, priorities, data_ids
 
     def send_batch_recv_priorities(self):
         # send batches to learner up to max_pending_requests
         while self.pending_priority_requests_cnt < self.max_pending_requests:
             batch_packet = self.get_batch_packet()
-            self.rep_socket.send(batch_packet)
+            self.replay_server_2_learner_socket.send(batch_packet)
             self.pending_priority_requests_cnt += 1
 
         # receive and update priorities (non-blocking) until no more priorities received
         while True:
             try:
-                new_priorities_packet = self.rep_socket.recv(zmq.DONTWAIT)
+                new_priorities_packet = self.learner_2_replay_server_socket.recv(zmq.DONTWAIT)
             except zmq.Again:
                 break  # no priority packets received. break and return.
             idxes, new_priorities, batch_ids = self.unpack_priorities(new_priorities_packet)
@@ -72,7 +71,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         # try at most num_workers times, to balance between the number of workers and the network load.
         for _ in range(self.config['num_workers']):
             try:
-                new_replay_data_packet = self.pull_socket.recv(zmq.DONTWAIT)
+                new_replay_data_packet = self.workers_2_replay_server_socket.recv(zmq.DONTWAIT)
             except zmq.Again:
                 break
 
@@ -86,11 +85,3 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             self.recv_replay_data()
             if len(self.storage) > self.batch_size * 10:  # x10 because we don't want to make the learner overfitting at the beginning
                 self.send_batch_recv_priorities()
-
-
-
-# @ray.remote  # todo - replace with remote wrapper
-# class RayPrioritizedReplayServer(PrioritizedReplayServer):
-#     """ Ray remote actor wrapper for PrioritizedReplayBufferServer """
-#     def __init__(self, config):
-#         super().__init__(config)

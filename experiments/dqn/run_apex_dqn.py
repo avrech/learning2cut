@@ -1,4 +1,3 @@
-import ray
 from distributed.apex_dqn import ApeXDQN
 import argparse
 import yaml
@@ -34,8 +33,6 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    ray.init()
-
-    apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
+    apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
     apex.spawn()
     apex.train()
