@@ -4,7 +4,7 @@ and DQN agent select which cuts to apply.
 The model optimizes for the dualbound integral.
 """
 import os
-from agents.dqn import GDQN
+from agents.cut_dqn_agent import CutDQNAgent
 
 if __name__ == '__main__':
     import argparse
@@ -47,5 +47,5 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    dqn_standalone = GDQN(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
+    dqn_standalone = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
     dqn_standalone.train_single_thread()

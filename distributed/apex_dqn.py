@@ -1,7 +1,7 @@
 import ray
-from distributed.per_server import PrioritizedReplayServer
-from distributed.worker import GDQNWorker
-from distributed.dqn_learner import GDQNLearner
+from distributed.replay_server import PrioritizedReplayServer
+from distributed.cut_dqn_worker import CutDQNWorker
+from distributed.cut_dqn_learner import CutDQNLearner
 
 ray.init()
 
@@ -32,14 +32,15 @@ class ApeXDQN:
 
     def spawn(self):
         # wrap all actor classes with ray.remote to make them running remotely
-        ray_worker = ray.remote(GDQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(GDQNLearner)
+        ray_worker = ray.remote(CutDQNWorker)
+        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
         ray_replay_buffer = ray.remote(PrioritizedReplayServer)
 
         # Spawn all components
         self.workers = [ray_worker.remote(n, hparams=self.cfg) for n in range(1, self.num_workers + 1)]
         self.test_worker = ray_worker.remote('Test', hparams=self.cfg, is_tester=True)
-        self.learner = ray_learner.remote(hparams=self.cfg, use_gpu=self.use_gpu, use_ray_gpu_id=self.use_gpu)
+        gpu_id = ray.get_gpu_ids()[0]  # set the visible gpu id for the specific learner instance
+        self.learner = ray_learner.remote(hparams=self.cfg, use_gpu=self.use_gpu, gpu_id=gpu_id)
         self.replay_server = ray_replay_buffer.remote(config=self.cfg)
 
     def train(self):

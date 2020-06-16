@@ -166,6 +166,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
                    math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
 
         assert beta > 0
+        assert len(self.storage) >= batch_size
+        
         idxes = np.array(self._sample_proportional(batch_size))
 
         weights = []

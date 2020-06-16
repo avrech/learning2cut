@@ -29,13 +29,13 @@ import matplotlib.pyplot as plt
 StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'action', 'q_values', 'transformer_context'))
 
 
-class GDQN(Sepa):
+class CutDQNAgent(Sepa):
     def __init__(self, name='DQN', hparams={}, use_gpu=True, gpu_id=None, **kwargs):
         """
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
         """
-        super(GDQN, self).__init__()
+        super(CutDQNAgent, self).__init__()
         self.name = name
         self.hparams = hparams
 
@@ -69,7 +69,7 @@ class GDQN(Sepa):
 
         # training stuff
         self.num_env_steps_done = 0
-        self.num_sgd_steps_done = 0
+        self.num_learning_steps_done = 0
         self.num_param_updates = 0
         self.i_episode = 0
         self.training = True
@@ -284,8 +284,9 @@ class GDQN(Sepa):
         else:
             transitions = self.memory.sample(self.batch_size)
             self.sgd_step(transitions)
-        self.num_param_updates += 1  # todo - update in learner every time param_server is updated.
-                                     #  in distributed setting it is different than num_sgd_steps_done.
+        self.num_param_updates += 1
+        if self.num_learning_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
+            self.update_target()
 
     def sgd_step(self, transitions, importance_sampling_correction_weights=None):
         """ implement the basic DQN optimization step """
@@ -410,7 +411,7 @@ class GDQN(Sepa):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-        self.num_sgd_steps_done += 1
+        self.num_learning_steps_done += 1
         # todo - for distributed learning return losses to update priorities - double check
         if self.use_per:
             # for transition, compute the norm of its TD-error
@@ -734,7 +735,7 @@ class GDQN(Sepa):
         return trajectory
 
     # done
-    def log_stats(self, save_best=False, plot_figures=False):
+    def log_stats(self, save_best=False, plot_figures=False, global_step=None):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
@@ -755,11 +756,12 @@ class GDQN(Sepa):
             in single thread - these are all true.
             need to separate workers' logdir in the distributed main script
         """
-        global_step = self.num_param_updates
+        if global_step is None:
+            global_step = self.num_param_updates
+
         print(f'Global step: {global_step} | {self.dataset_name}\t|', end='')
         cur_time_sec = time() - self.start_time + self.walltime_offset
 
-        # todo tester
         if self.is_tester:
             if plot_figures:
                 self.decorate_figures()
@@ -788,7 +790,6 @@ class GDQN(Sepa):
                     self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                     self.test_stats_buffer[k] = []
 
-        # todo worker
         if self.is_worker:
             # plot normalized dualbound and gap auc
             for k, vals in self.tmp_stats_buffer.items():
@@ -799,12 +800,11 @@ class GDQN(Sepa):
                 self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                 self.tmp_stats_buffer[k] = []
 
-        # todo learner
         if self.is_learner:
             # log the average loss of the last training session
             print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
             self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
-            print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
+            print(f'SGD Step: {self.num_learning_steps_done} | ', end='')
 
 
         d = int(np.floor(cur_time_sec/(3600*24)))
@@ -907,8 +907,8 @@ class GDQN(Sepa):
             'target_net_state_dict': self.target_net.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'num_env_steps_done': self.num_env_steps_done,
-            'num_sgd_steps_done': self.num_sgd_steps_done,
-            'num_policy_updates': self.num_param_updates,
+            'num_learning_steps_done': self.num_learning_steps_done,
+            'num_param_updates': self.num_param_updates,
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
             'best_perf': self.best_perf,
@@ -937,8 +937,8 @@ class GDQN(Sepa):
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.num_env_steps_done = checkpoint['num_env_steps_done']
-        self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
-        self.num_param_updates = checkpoint['num_policy_updates']
+        self.num_learning_steps_done = checkpoint['num_learning_steps_done']
+        self.num_param_updates = checkpoint['num_param_updates']
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
         self.best_perf = checkpoint['best_perf']
@@ -1062,7 +1062,7 @@ class GDQN(Sepa):
         trajectory = self.finish_episode()
         return trajectory
 
-    def evaluate(self, datasets=None):
+    def evaluate(self, datasets=None, ignore_eval_interval=False):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
@@ -1074,7 +1074,7 @@ class GDQN(Sepa):
         for dataset_name, dataset in datasets.items():
             if dataset_name == 'trainset25':
                 continue
-            if global_step % dataset['eval_interval'] == 0:
+            if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
                 self.init_figures(nrows=dataset['num_instances'],
                                   ncols=len(dataset['scip_seed']),
                                   col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
@@ -1116,18 +1116,18 @@ class GDQN(Sepa):
             # perform 1 optimization step
             self.optimize_model()
 
-            if self.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
-                self.update_target()
+            global_step = self.num_param_updates
+            if global_step > 0 and global_step % hparams.get('log_interval', 100) == 0:
+                self.log_stats()
 
-            if self.num_param_updates > 0:
-                global_step = self.num_param_updates
-                if global_step % hparams.get('log_interval', 100) == 0:
-                    self.log_stats()
+            if global_step > 0 and global_step % hparams.get('checkpoint_interval', 100) == 0:
+                self.save_checkpoint()
 
-                if global_step % hparams.get('checkpoint_interval', 100) == 0:
-                    self.save_checkpoint()
-
-                # evaluate periodically
-                self.evaluate()
+            # evaluate periodically
+            self.evaluate()
 
         return 0
+
+    def get_model(self):
+        """ useful for distributed actors """
+        return self.policy_net

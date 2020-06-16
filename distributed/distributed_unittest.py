@@ -1,6 +1,6 @@
-from distributed.worker import GDQNWorker
-from distributed.dqn_learner import GDQNLearner
-from distributed.per_server import PrioritizedReplayServer
+from distributed.cut_dqn_worker import CutDQNWorker
+from distributed.cut_dqn_learner import CutDQNLearner
+from distributed.replay_server import PrioritizedReplayServer
 import argparse
 import yaml
 import os
@@ -8,16 +8,19 @@ import os
 if __name__ == '__main__':
     """
     Tests the following functionality:
-    1. Worker -> PER packets:
-        a. store transitions in local buffer.
-        b. encode local buffer periodically and send to PER.
-        c. decode worker's packet and push transitions into the PER storage
-    2. PER <-> Learner packets:
-        a. encode transitions batch and send to Learner
-        b. decode PER->Learner packet and perform SGD
-        c. send back encoded new_priorities to PER, decode on PER side, and update priorities
-
-    Learner -> ParamServer -> Worker packets are not tested, since we didn't touch this type of packets.
+    1. Workers -> ReplayBuffer packets:
+        a. store transitions in local buffer on the worker side.
+        b. send replay data packet to repay server via zmq socket.
+        c. receive replay data on replay server socket, and push into memory. 
+    2. ReplayBuffer <-> Learner packets:
+        a. send batches to learner up to max_pending_requests. 
+        b. receive batch on learner side and push to queue.
+        c. pull beach from learner queue, perform SGD and push new priorities from queue.
+        d. pull new priorities from queue and send to replay server.
+        e. receive new priorities on replay server side and update.  
+    3. Learner ->  Workers packets
+        a. publish new params to workers. 
+        b. each worker receives new params and update policy.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='unittest_results',
@@ -45,9 +48,9 @@ if __name__ == '__main__':
         os.makedirs(args.logdir)
 
     # modify hparams to fit workers and learner
-    workers = [GDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(2)]
-    test_worker = GDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True, use_gpu=False)
-    learner = GDQNLearner(hparams=hparams, use_gpu=True, gpu_id=args.gpu_id)
+    workers = [CutDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(2)]
+    test_worker = CutDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True, use_gpu=False)
+    learner = CutDQNLearner(hparams=hparams, use_gpu=True, gpu_id=args.gpu_id)
     replay_server = PrioritizedReplayServer(config=hparams)
 
     for worker in workers:
@@ -59,71 +62,60 @@ if __name__ == '__main__':
 
     while True:
         # WORKER SIDE
+        # collect data and send to replay server, one packet per worker
         for worker in workers:
             local_buffer = worker.collect_data()
-
             # local_buffer is full enough. pack the local buffer and send packet
-            replay_data_packet = GDQNWorker.pack_replay_data(local_buffer)  # todo serialize
-            # the packet should be sent here and received on the listening socket.
+            replay_data_packet = worker.pack_replay_data(local_buffer)  # todo serialize
+            # send packet
+            worker.worker_2_replay_server_socket.send(replay_data_packet)
 
-            # PER SERVER SIDE
-            # a packet from worker should be received here.
-            # unpack replay data and push into PER
-            unpacked_buffer = replay_server.unpack_replay_data(replay_data_packet)
-            # push into memory
-            replay_server.add_data_list(unpacked_buffer)
 
-        # encode PER->Learner packet and send to Learner
-        if len(replay_server) >= replay_server.batch_size:
-            batch_packet = replay_server.get_batch_packet()
-            # batch_packet should be sent here and received on the Learner side
+        # REPLAY SERVER SIDE
+        # try receiving up to num_workers replay data packets,
+        # each received packets is unpacked and pushed into memory
+        replay_server.recv_replay_data()
+        # send batches to learner
+        replay_server.send_batches()
+        # wait for new priorities
+        # (in the real application - receive new replay data from workers in the meanwhile)
 
-            # LEARNER SIDE
-            # unpack batch_packet
-            batch_transitions, batch_weights, batch_idxes, batch_ids = learner.unpack_batch_packet(batch_packet)
-            # perform sgd step and return new priorities to replay server
-            batch_new_priorities = learner.sgd_step(transitions=batch_transitions, importance_sampling_correction_weights=batch_weights)
-            # send back to per the new priorities together with the corresponding idxes
-            new_priorities_packet = GDQNLearner.pack_priorities((batch_idxes, batch_new_priorities, batch_ids))
-            # priorities_packet should be sent here and received on the per side
+        # LEARNER SIDE
+        # in the real application, the learner receives batches and sends back new priorities in a separate thread,
+        # while pulling processing the batches in another asynchronous thread.
+        # here we alternate receiving a batch, processing and sending back priorities,
+        # until no more waiting batches exist.
+        while learner.recv_batch():
+            # receive batch from replay server and push into learner.replay_data_queue
+            # pull batch from queue, process and push new priorities to learner.new_priorities_queue
+            learner.process_batch()
+            # push new params to learner.new_params_queue periodically
+            learner.prepare_new_params_to_workers()
+            # send back the new priorities
+            learner.send_new_priorities()
+            # publish new params if any available in the new_params_queue
+            learner.publish_params()
 
-            # PER SERVER SIDE
-            idxes, new_priorities, data_ids = replay_server.unpack_priorities(new_priorities_packet)
-            # update priorities
-            replay_server.update_priorities(idxes, new_priorities, data_ids=data_ids)
+        # PER SERVER SIDE
+        # receive all the waiting new_priorities packets and update memory
+        replay_server.recv_new_priorities()
 
-        if learner.num_sgd_steps_done > 0 and learner.num_sgd_steps_done % hparams['param_update_interval'] == 0:
-            # LEARNER SIDE
-            # pack new params and broadcast to all workers
-            public_params_packet = learner.get_params_packet()
-            learner.num_param_updates += 1
-            # the new params should be broadcasted here to all workers.
+        # WORKER SIDE
+        # subscribe new_params from learner
+        for worker in workers:
+            if worker.recv_new_params():
+                worker.log_stats(global_step=worker.num_param_updates - 1)
 
-            # WORKER SIDE
-            for worker in workers:
-                worker.synchronize_params(public_params_packet)
-                worker.num_param_updates += 1
-            test_worker.synchronize_params(public_params_packet)
-            test_worker.num_param_updates += 1
-            received_new_params = True
-        else:
-            received_new_params = False
+        # TEST WORKER
+        # if new params have been published, evaluate the new policy
+        if test_worker.recv_new_params():
+            test_worker.evaluate(ignore_eval_interval=True)
+            test_worker.save_checkpoint()
 
-        # update learner target policy periodically
-        if learner.num_sgd_steps_done > 0 and learner.num_sgd_steps_done % hparams.get('target_update_interval', 1000) == 0:
-            learner.update_target()
-
-        global_step = learner.num_param_updates
-        if global_step > 0 and global_step % hparams.get('log_interval', 100) == 0:
-            learner.log_stats()
+        # todo - log stats in workers, learner and test_worker every params_update,
+        #        according to the num_param_updates sent with the params
 
         # TEST WORKER SIDE
-        if received_new_params:
-            test_worker.evaluate()
-            # frequently checkpoint all components
-            learner.save_checkpoint()
-            # todo replay_server.save_checkpoint()
-            test_worker.save_checkpoint()
-            for worker in workers:
-                worker.save_checkpoint()
+        # todo - checkpoint learner every time params are published.
+        # todo replay_server.save_checkpoint()
 

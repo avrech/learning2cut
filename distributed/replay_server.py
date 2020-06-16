@@ -1,4 +1,3 @@
-import ray
 import pyarrow as pa
 import zmq
 from utils.buffer import PrioritizedReplayBuffer
@@ -44,14 +43,19 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         unpacked_priorities = pa.deserialize(priorities_packet)
         return unpacked_priorities  # idxes, priorities, data_ids
 
-    def send_batch_recv_priorities(self):
-        # send batches to learner up to max_pending_requests
-        while self.pending_priority_requests_cnt < self.max_pending_requests:
-            batch_packet = self.get_batch_packet()
-            self.replay_server_2_learner_socket.send(batch_packet)
-            self.pending_priority_requests_cnt += 1
+    def send_batches(self):
+        # wait for receiving batch_size x 10 trainsitions from workers,
+        # because we don't want the learner to overfit at the beginning
+        if len(self.storage) > self.batch_size * 10:
+            # send batches to learner up to max_pending_requests (learner's queue capacity)
+            while self.pending_priority_requests_cnt < self.max_pending_requests:
+                batch_packet = self.get_batch_packet()
+                self.replay_server_2_learner_socket.send(batch_packet)
+                self.pending_priority_requests_cnt += 1
 
-        # receive and update priorities (non-blocking) until no more priorities received
+    def recv_new_priorities(self):
+        # receive all the waiting new_priorities packets (non-blocking)
+        # unpack, and update memory priorities
         while True:
             try:
                 new_priorities_packet = self.learner_2_replay_server_socket.recv(zmq.DONTWAIT)
@@ -68,7 +72,13 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
 
     def recv_replay_data(self):
         # receive replay data from all workers.
-        # try at most num_workers times, to balance between the number of workers and the network load.
+        # try at most num_workers times to avoid an infinite loop,
+        # which can happen in a case there are multiple workers,
+        # so that while the server finishes receiving the n'th packet
+        # new replay data packets arrive.
+        # todo - balance between the number of workers and the network load playing with worker's local buffer size
+        #  such that each worker sends larger packets in larger intervals,
+        #  and tune this interval to match the replay server cycle time
         for _ in range(self.config['num_workers']):
             try:
                 new_replay_data_packet = self.workers_2_replay_server_socket.recv(zmq.DONTWAIT)
@@ -83,5 +93,5 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
     def run(self):
         while True:
             self.recv_replay_data()
-            if len(self.storage) > self.batch_size * 10:  # x10 because we don't want to make the learner overfitting at the beginning
-                self.send_batch_recv_priorities()
+            self.send_batches()
+            self.recv_new_priorities()
