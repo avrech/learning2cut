@@ -1,6 +1,4 @@
 import random
-import torch
-from collections import deque
 import numpy as np
 from utils.segtree import MinSegmentTree, SegmentTree, SumSegmentTree
 from utils.data import Transition
@@ -83,7 +81,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self._it_min = MinSegmentTree(it_capacity)
         self._max_priority = 1.0
         self._next_unique_id = 0
-        self._data_unique_ids = np.zeros((self.capacity,))
+        self._data_unique_ids = -np.ones((self.capacity,))
 
         # unpack buffer configs
         # self.max_num_updates = self.cfg["max_num_updates"]
@@ -94,7 +92,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.priority_beta_start = config.get('priority_beta_start', 0.4)
         self.priority_beta_end = config.get('priority_beta_end', 1.0)
         self.priority_beta_decay = config.get('priority_beta_decay', 10000)
-        self.num_sgd_steps_done = 0
+        self.num_sgd_steps_done = 0  # saved and loaded from checkpoint
         # beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * \
         #        math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
 
@@ -167,7 +165,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
         assert beta > 0
         assert len(self.storage) >= batch_size
-        
+
         idxes = np.array(self._sample_proportional(batch_size))
 
         weights = []

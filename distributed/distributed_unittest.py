@@ -112,10 +112,5 @@ if __name__ == '__main__':
             test_worker.evaluate(ignore_eval_interval=True)
             test_worker.save_checkpoint()
 
-        # todo - log stats in workers, learner and test_worker every params_update,
-        #        according to the num_param_updates sent with the params
-
-        # TEST WORKER SIDE
-        # todo - checkpoint learner every time params are published.
-        # todo replay_server.save_checkpoint()
+        # todo - replay_server.save_checkpoint()
 

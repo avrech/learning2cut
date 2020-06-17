@@ -69,7 +69,7 @@ class CutDQNAgent(Sepa):
 
         # training stuff
         self.num_env_steps_done = 0
-        self.num_learning_steps_done = 0
+        self.num_sgd_steps_done = 0
         self.num_param_updates = 0
         self.i_episode = 0
         self.training = True
@@ -271,7 +271,7 @@ class CutDQNAgent(Sepa):
                importance sampling +
                when recovering from failures wait like in Ape-X paper appendix
         """
-        if len(self.memory) < self.batch_size:
+        if len(self.memory) < self.hparams.get('replay_buffer_minimum_size', self.batch_size*10):
             return
         if self.use_per:
             # todo sample with beta
@@ -285,7 +285,7 @@ class CutDQNAgent(Sepa):
             transitions = self.memory.sample(self.batch_size)
             self.sgd_step(transitions)
         self.num_param_updates += 1
-        if self.num_learning_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
+        if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
             self.update_target()
 
     def sgd_step(self, transitions, importance_sampling_correction_weights=None):
@@ -411,7 +411,7 @@ class CutDQNAgent(Sepa):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-        self.num_learning_steps_done += 1
+        self.num_sgd_steps_done += 1
         # todo - for distributed learning return losses to update priorities - double check
         if self.use_per:
             # for transition, compute the norm of its TD-error
@@ -804,7 +804,7 @@ class CutDQNAgent(Sepa):
             # log the average loss of the last training session
             print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
             self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
-            print(f'SGD Step: {self.num_learning_steps_done} | ', end='')
+            print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
 
 
         d = int(np.floor(cur_time_sec/(3600*24)))
@@ -907,7 +907,7 @@ class CutDQNAgent(Sepa):
             'target_net_state_dict': self.target_net.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'num_env_steps_done': self.num_env_steps_done,
-            'num_learning_steps_done': self.num_learning_steps_done,
+            'num_sgd_steps_done': self.num_sgd_steps_done,
             'num_param_updates': self.num_param_updates,
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
@@ -937,7 +937,7 @@ class CutDQNAgent(Sepa):
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.num_env_steps_done = checkpoint['num_env_steps_done']
-        self.num_learning_steps_done = checkpoint['num_learning_steps_done']
+        self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
         self.num_param_updates = checkpoint['num_param_updates']
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
@@ -1016,7 +1016,10 @@ class CutDQNAgent(Sepa):
         self.set_training_mode()
         if self.hparams.get('resume_training', False):
             self.load_checkpoint()
-
+            # initialize prioritized replay buffer internal counters, to continue beta from the point it was
+            if self.use_per:
+                self.memory.num_sgd_steps_done = self.num_sgd_steps_done
+                
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
         # create SCIP model for G
         hparams = self.hparams

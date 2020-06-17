@@ -90,7 +90,7 @@ class CutDQNLearner(CutDQNAgent):
         The test worker will synchronize to the learner state every params update, so it won't be
         affected from checkpointing separately.
         """
-        if self.num_learning_steps_done > 0 and self.num_learning_steps_done % self.param_sync_interval == 0:
+        if self.num_sgd_steps_done > 0 and self.num_sgd_steps_done % self.param_sync_interval == 0:
             self.num_param_updates += 1
 
             # prepare params_packet
@@ -178,7 +178,7 @@ class CutDQNLearner(CutDQNAgent):
             packet = (idxes, new_priorities, data_ids)
             self.new_priorities_queue.append(packet)  # thread safe append
             # todo verify
-            if self.num_learning_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
+            if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
                 self.update_target()
 
     def run_optimize_model(self):

@@ -1,6 +1,8 @@
 import pyarrow as pa
 import zmq
 from utils.buffer import PrioritizedReplayBuffer
+import torch
+import os
 
 
 class PrioritizedReplayServer(PrioritizedReplayBuffer):
@@ -9,6 +11,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.config = config
         self.pending_priority_requests_cnt = 0
         self.max_pending_requests = config.get('max_pending_requests', 10)
+        self.minimum_size = config.get('replay_buffer_minimum_size', 128*100)
 
         # initialize zmq sockets
         print("[ReplayServer]: initializing sockets..")
@@ -28,6 +31,25 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.workers_2_replay_server_socket = context.socket(zmq.PULL)
         self.workers_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
 
+        # failure tolerance
+        self.logdir = config.get('logdir', 'results')
+        self.checkpoint_filepath = os.path.join(self.logdir, 'replay_server_checkpoint.pt')
+        # checkpoint every time params are published (like the other components do)
+        self.checkpoint_interval = config.get("param_sync_interval", 50)
+
+    def save_checkpoint(self):
+        torch.save({
+            'num_sgd_steps_done': self.num_sgd_steps_done
+        }, self.checkpoint_filepath)
+
+    def load_checkpoint(self):
+        if not os.path.exists(self.checkpoint_filepath):
+            print('Checkpoint file does not exist! starting from scratch.')
+            return
+        checkpoint = torch.load(self.checkpoint_filepath)
+        self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
+        print('Loaded checkpoint from: ', self.checkpoint_filepath)
+
     def get_batch_packet(self):
         transitions, weights, idxes, data_ids = self.sample()
         # weights returned as torch.tensor by default.
@@ -44,9 +66,9 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         return unpacked_priorities  # idxes, priorities, data_ids
 
     def send_batches(self):
-        # wait for receiving batch_size x 10 trainsitions from workers,
-        # because we don't want the learner to overfit at the beginning
-        if len(self.storage) > self.batch_size * 10:
+        # wait for receiving minimum_size transitions from workers,
+        # to avoid the learner from overfitting
+        if len(self.storage) >= self.minimum_size:
             # send batches to learner up to max_pending_requests (learner's queue capacity)
             while self.pending_priority_requests_cnt < self.max_pending_requests:
                 batch_packet = self.get_batch_packet()
@@ -91,7 +113,12 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             self.add_data_list(new_replay_data_list)
 
     def run(self):
+        if self.config.get('resume_training', False):
+            self.load_checkpoint()
+
         while True:
             self.recv_replay_data()
             self.send_batches()
             self.recv_new_priorities()
+            if self.num_sgd_steps_done > 0 and self.num_sgd_steps_done % self.checkpoint_interval == 0:
+                self.save_checkpoint()
