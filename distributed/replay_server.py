@@ -3,6 +3,7 @@ import zmq
 from utils.buffer import PrioritizedReplayBuffer
 import torch
 import os
+from tqdm import tqdm
 
 
 class PrioritizedReplayServer(PrioritizedReplayBuffer):
@@ -12,9 +13,11 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.pending_priority_requests_cnt = 0
         self.max_pending_requests = config.get('max_pending_requests', 10)
         self.minimum_size = config.get('replay_buffer_minimum_size', 128*100)
-
+        self.pbar = tqdm(total=self.capacity, desc='[Replay Server] Filling memory')
+        self.filling = True
+        self.print_prefix = '[ReplayServer] '
         # initialize zmq sockets
-        print("[ReplayServer]: initializing sockets..")
+        print(self.print_prefix, "initializing sockets...")
         # for sending a batch to learner
         context = zmq.Context()
         self.replay_server_2_learner_port = config["replay_server_2_learner_port"]
@@ -44,11 +47,11 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
 
     def load_checkpoint(self):
         if not os.path.exists(self.checkpoint_filepath):
-            print('Checkpoint file does not exist! starting from scratch.')
+            print(self.print_prefix, 'Checkpoint file does not exist! starting from scratch.')
             return
         checkpoint = torch.load(self.checkpoint_filepath)
         self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
-        print('Loaded checkpoint from: ', self.checkpoint_filepath)
+        print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
 
     def get_batch_packet(self):
         transitions, weights, idxes, data_ids = self.sample()
@@ -110,6 +113,16 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             new_replay_data_list = self.unpack_replay_data(new_replay_data_packet)
             # for transition_and_priority_tuple in new_replay_data:
             #     self.add(transition_and_priority_tuple)
+            if self.filling:
+                if len(self.storage) + len(new_replay_data_list) < self.capacity:
+                    self.pbar.update(len(new_replay_data_list))
+                else:
+                    # now filled the capacity.
+                    # increment the progress bar by the amount left and close
+                    self.pbar.update(self.capacity - len(self.storage))
+                    self.pbar.close()
+                    self.filling = False
+
             self.add_data_list(new_replay_data_list)
 
     def run(self):

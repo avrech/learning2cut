@@ -490,6 +490,12 @@ class MccormickCycleSeparator(Sepa):
                 model.addVarToRow(cut, y[e], c)
 
         if cut.getNNonz() == 0:
+            # debug
+            if not model.isFeasNegative(cutrhs):
+                print(f'cutrhs: {cutrhs}')
+                print(f'x_coef: {x_coef}')
+                print(f'y_coef: {y_coef}')
+                print(violated_cycle)
             assert model.isFeasNegative(cutrhs)
             # print("Gomory cut is infeasible: 0 <= ", cutrhs)
             return {"result": SCIP_RESULT.CUTOFF}

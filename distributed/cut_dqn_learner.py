@@ -1,9 +1,8 @@
 # distributedRL base class for learner - implements the distributed part
 from agents.cut_dqn_agent import CutDQNAgent
+import ray
 import time
-from abc import ABC, abstractmethod
 from collections import deque
-import numpy as np
 import pyarrow as pa
 import torch
 import zmq
@@ -33,9 +32,9 @@ class CutDQNLearner(CutDQNAgent):
 
         # number of SGD steps between each workers update
         self.param_sync_interval = hparams.get("param_sync_interval", 50)
-
+        self.print_prefix = '[Learner ] '
         # initialize zmq sockets
-        print("[Learner]: initializing sockets..")
+        print(self.print_prefix, "initializing sockets..")
         # for receiving batch from replay server
         context = zmq.Context()
         self.replay_server_2_learner_port = hparams["replay_server_2_learner_port"]

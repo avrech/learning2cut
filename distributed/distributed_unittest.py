@@ -108,7 +108,7 @@ if __name__ == '__main__':
         # TEST WORKER
         # if new params have been published, evaluate the new policy
         if test_worker.recv_new_params():
-            test_worker.evaluate(ignore_eval_interval=True, print_prefix='[Tester]\t')
+            test_worker.evaluate(print_prefix='[Tester]\t')
             test_worker.save_checkpoint()
 
 

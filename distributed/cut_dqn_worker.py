@@ -32,10 +32,11 @@ class CutDQNWorker(CutDQNAgent):
         else:
             self.checkpoint_filepath = os.path.join(self.logdir, 'learner_checkpoint.pt')
 
+        self.print_prefix = f'[Worker {self.worker_id}] '
         # initialize zmq sockets
         # use socket.connect() instead of .bind() because workers are the least stable part in the system
         # (not supposed to but rather suspected to be)
-        print(f"[Worker {self.worker_id}]: initializing sockets..")
+        print(self.print_prefix, "initializing sockets..")
         # for receiving params from learner
         context = zmq.Context()
         self.params_pubsub_port = hparams["params_pubsub_port"]
@@ -110,10 +111,10 @@ class CutDQNWorker(CutDQNAgent):
         while True:
             if self.recv_new_params():
                 # todo consider not ignoring eval interval
-                self.evaluate(datasets, ignore_eval_interval=True, print_prefix='[Tester]\t')
+                self.evaluate(datasets, print_prefix='[Tester]\t')
                 self.save_checkpoint()
 
-    def collect_data(self, verbose=False):
+    def collect_data(self):
         # todo
         #  - replace by execute episode
         #  - or more generally dqn experiment loop.

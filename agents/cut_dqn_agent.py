@@ -114,6 +114,7 @@ class CutDQNAgent(Sepa):
         self.logdir = hparams.get('logdir', 'results')
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
+        self.print_prefix = ''
         # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
@@ -551,7 +552,7 @@ class CutDQNAgent(Sepa):
     # done
     def sepaexeclp(self):
         if self.hparams.get('debug', False):
-            print('dqn')
+            print(self.print_prefix, 'dqn')
 
         # assert proper behavior
         self.nseparounds += 1
@@ -735,7 +736,7 @@ class CutDQNAgent(Sepa):
         return trajectory
 
     # done
-    def log_stats(self, save_best=False, plot_figures=False, global_step=None, print_prefix=''):
+    def log_stats(self, save_best=False, plot_figures=False, global_step=None):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
@@ -759,7 +760,7 @@ class CutDQNAgent(Sepa):
         if global_step is None:
             global_step = self.num_param_updates
 
-        print(f'{print_prefix}Global step: {global_step} | {self.dataset_name}\t|', end='')
+        print(self.print_prefix, f'Global step: {global_step} | {self.dataset_name}\t|', end='')
         cur_time_sec = time() - self.start_time + self.walltime_offset
 
         if self.is_tester:
@@ -915,7 +916,7 @@ class CutDQNAgent(Sepa):
             'loss_moving_avg': self.loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
         if self.hparams.get('verbose', 1) > 1:
-            print('Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
+            print(self.print_prefix, 'Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
 
     # done
     def _save_if_best(self):
@@ -930,7 +931,7 @@ class CutDQNAgent(Sepa):
     # done
     def load_checkpoint(self):
         if not os.path.exists(self.checkpoint_filepath):
-            print('Checkpoint file does not exist! starting from scratch.')
+            print(self.print_prefix, 'Checkpoint file does not exist! starting from scratch.')
             return
         checkpoint = torch.load(self.checkpoint_filepath)
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
@@ -945,7 +946,7 @@ class CutDQNAgent(Sepa):
         self.loss_moving_avg = checkpoint['loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
-        print('Loaded checkpoint from: ', self.checkpoint_filepath)
+        print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
 
     def load_datasets(self):
         """ load train/valid/test sets """
@@ -1065,7 +1066,7 @@ class CutDQNAgent(Sepa):
         trajectory = self.finish_episode()
         return trajectory
 
-    def evaluate(self, datasets=None, ignore_eval_interval=False, print_prefix=''):
+    def evaluate(self, datasets=None, ignore_eval_interval=False):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
@@ -1088,7 +1089,7 @@ class CutDQNAgent(Sepa):
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
-                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True, print_prefix=print_prefix)
+                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
         self.set_training_mode()
 
     def train_single_thread(self):

@@ -6,12 +6,12 @@ from distributed.cut_dqn_learner import CutDQNLearner
 ray.init()
 
 
-@ray.remote
+@ray.remote(num_cpus=1, num_gpus=0)
 def run_learner_io(learner):
     learner.run_io.remote()
 
 
-@ray.remote
+@ray.remote(num_cpus=1, num_gpus=1)
 def run_learner_optimize_model(learner):
     learner.run_optimize_model.remote()
 
@@ -39,8 +39,7 @@ class ApeXDQN:
         # Spawn all components
         self.workers = [ray_worker.remote(n, hparams=self.cfg) for n in range(1, self.num_workers + 1)]
         self.test_worker = ray_worker.remote('Test', hparams=self.cfg, is_tester=True)
-        gpu_id = ray.get_gpu_ids()[0]  # set the visible gpu id for the specific learner instance
-        self.learner = ray_learner.remote(hparams=self.cfg, use_gpu=self.use_gpu, gpu_id=gpu_id)
+        self.learner = ray_learner.remote(hparams=self.cfg, use_gpu=self.use_gpu)
         self.replay_server = ray_replay_buffer.remote(config=self.cfg)
 
     def train(self):
@@ -49,7 +48,7 @@ class ApeXDQN:
         ready_ids, remaining_ids = ray.wait(
             [worker.run.remote() for worker in self.workers] +
             # run the learner io and optimize_model methods in two parallel sub-processes
-            [run_learner_io.remote(self.learner), run_learner_optimize_model.remote(self.learner)] +
+            [run_learner_optimize_model.remote(self.learner), run_learner_io.remote(self.learner)] +
             [self.replay_server.run.remote()] +
             [self.test_worker.test_run.remote()]
         )
