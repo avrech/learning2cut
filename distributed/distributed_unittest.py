@@ -48,7 +48,7 @@ if __name__ == '__main__':
         os.makedirs(args.logdir)
 
     # modify hparams to fit workers and learner
-    workers = [CutDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(2)]
+    workers = [CutDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(1, hparams['num_workers']+1)]
     test_worker = CutDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True, use_gpu=False)
     learner = CutDQNLearner(hparams=hparams, use_gpu=True, gpu_id=args.gpu_id)
     replay_server = PrioritizedReplayServer(config=hparams)
@@ -64,12 +64,9 @@ if __name__ == '__main__':
         # WORKER SIDE
         # collect data and send to replay server, one packet per worker
         for worker in workers:
-            local_buffer = worker.collect_data()
+            replay_data = worker.collect_data()
             # local_buffer is full enough. pack the local buffer and send packet
-            replay_data_packet = worker.pack_replay_data(local_buffer)  # todo serialize
-            # send packet
-            worker.worker_2_replay_server_socket.send(replay_data_packet)
-
+            worker.send_replay_data(replay_data)
 
         # REPLAY SERVER SIDE
         # try receiving up to num_workers replay data packets,
@@ -85,7 +82,7 @@ if __name__ == '__main__':
         # while pulling processing the batches in another asynchronous thread.
         # here we alternate receiving a batch, processing and sending back priorities,
         # until no more waiting batches exist.
-        while learner.recv_batch():
+        while learner.recv_batch(blocking=False):
             # receive batch from replay server and push into learner.replay_data_queue
             # pull batch from queue, process and push new priorities to learner.new_priorities_queue
             learner.optimize_model()
@@ -99,18 +96,19 @@ if __name__ == '__main__':
         # PER SERVER SIDE
         # receive all the waiting new_priorities packets and update memory
         replay_server.recv_new_priorities()
+        if replay_server.num_sgd_steps_done > 0 and replay_server.num_sgd_steps_done % replay_server.checkpoint_interval == 0:
+            replay_server.save_checkpoint()
 
         # WORKER SIDE
         # subscribe new_params from learner
         for worker in workers:
             if worker.recv_new_params():
-                worker.log_stats(global_step=worker.num_param_updates - 1)
+                worker.log_stats(global_step=worker.num_param_updates - 1, print_prefix=f'[Worker {worker.worker_id}]\t')
 
         # TEST WORKER
         # if new params have been published, evaluate the new policy
         if test_worker.recv_new_params():
-            test_worker.evaluate(ignore_eval_interval=True)
+            test_worker.evaluate(ignore_eval_interval=True, print_prefix='[Tester]\t')
             test_worker.save_checkpoint()
 
-        # todo - replay_server.save_checkpoint()
 

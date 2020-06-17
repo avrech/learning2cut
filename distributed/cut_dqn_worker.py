@@ -101,7 +101,7 @@ class CutDQNWorker(CutDQNAgent):
                 #        This is because the current stats are related to the previous policy.
                 #        In addition, maybe workers shouldn't log stats every update ?
                 # if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
-                self.log_stats(global_step=self.num_param_updates-1)
+                self.log_stats(global_step=self.num_param_updates-1, print_prefix=f'[Worker {self.worker_id}]\t')
 
     def test_run(self):
         # self.eps_greedy = 0
@@ -109,7 +109,8 @@ class CutDQNWorker(CutDQNAgent):
         datasets = self.load_datasets()
         while True:
             if self.recv_new_params():
-                self.evaluate(datasets, ignore_eval_interval=True)
+                # todo consider not ignoring eval interval
+                self.evaluate(datasets, ignore_eval_interval=True, print_prefix='[Tester]\t')
                 self.save_checkpoint()
 
     def collect_data(self, verbose=False):

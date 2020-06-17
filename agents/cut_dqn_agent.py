@@ -735,7 +735,7 @@ class CutDQNAgent(Sepa):
         return trajectory
 
     # done
-    def log_stats(self, save_best=False, plot_figures=False, global_step=None):
+    def log_stats(self, save_best=False, plot_figures=False, global_step=None, print_prefix=''):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
@@ -759,7 +759,7 @@ class CutDQNAgent(Sepa):
         if global_step is None:
             global_step = self.num_param_updates
 
-        print(f'Global step: {global_step} | {self.dataset_name}\t|', end='')
+        print(f'{print_prefix}Global step: {global_step} | {self.dataset_name}\t|', end='')
         cur_time_sec = time() - self.start_time + self.walltime_offset
 
         if self.is_tester:
@@ -1065,7 +1065,7 @@ class CutDQNAgent(Sepa):
         trajectory = self.finish_episode()
         return trajectory
 
-    def evaluate(self, datasets=None, ignore_eval_interval=False):
+    def evaluate(self, datasets=None, ignore_eval_interval=False, print_prefix=''):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
@@ -1088,7 +1088,7 @@ class CutDQNAgent(Sepa):
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
-                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
+                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True, print_prefix=print_prefix)
         self.set_training_mode()
 
     def train_single_thread(self):
