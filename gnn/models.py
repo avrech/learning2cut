@@ -5,7 +5,7 @@ from torch_geometric.nn.conv import MessagePassing, GCNConv, GATConv
 import torch.nn.functional as F
 from torch_sparse import spspmm
 from torch_geometric.nn import TopKPooling
-from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops
+from torch_geometric.utils import add_self_loops, sort_edge_index, remove_self_loops, add_remaining_self_loops
 from torch_geometric.utils.repeat import repeat
 from collections import OrderedDict, namedtuple
 
@@ -543,7 +543,165 @@ class TQnet(torch.nn.Module):
             return self.q(cut_decoding)
 
 
-# standard Q network
+# transformer Q network
+class TQnetV2(torch.nn.Module):
+    def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
+        super(TQnetV2, self).__init__()
+        self.hparams = hparams
+        cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
+        self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
+        ###########
+        # Encoder #
+        ###########
+        # stack lp conv layers todo consider skip connections
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
+                                                                emb_dim=hparams.get('emb_dim', 32),                   # default
+                                                                aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
+                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1) - 1)))
+                                        for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
+
+        # stack cut conv layers todo consider skip connections
+        self.cut_conv = {
+            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+                                                                  edge_attr_dim=1,
+                                                                  aggr=hparams.get('cut_conv_aggr', 'mean')))
+                                        for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
+            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+                                                                  edge_attr_dim=1,
+                                                                  edge_attr_emb=1,
+                                                                  heads=hparams.get('attention_heads', 4)))
+                                        for i in range(hparams.get('encoder_cut_conv_layers', 1))])),
+        }.get(hparams.get('cut_conv', 'CATConv'))
+
+        ###########
+        # Decoder #
+        ###########
+        self.decoder_conv = {
+            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+                                                                  edge_attr_dim=2,
+                                                                  aggr=hparams.get('cut_conv_aggr', 'mean')))
+                                        for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
+            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+                                                                  edge_attr_dim=2,
+                                                                  edge_attr_emb=4,
+                                                                  heads=hparams.get('attention_heads', 4)))
+                                        for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
+        }.get(hparams.get('cut_conv', 'CATConv'))
+        self.decoder_edge_attr_list = None
+        self.decoder_edge_index_list = None
+        self.decoder_context = None
+
+        ##########
+        # Q head #
+        ##########
+        self.q = Lin(hparams.get('emb_dim', 32), 2)  # Q-values for adding a cut or not
+
+    def forward(self,
+                x_c,
+                x_v,
+                x_a,
+                edge_index_c2v,
+                edge_index_a2v,
+                edge_attr_c2v,
+                edge_attr_a2v,
+                edge_index_a2a,
+                edge_attr_a2a,
+                edge_attr_dec=None,
+                edge_index_dec=None
+                ):
+        """
+        :return: torch.Tensor([x_a.shape[0], 2])
+        """
+        # encoding
+        # run lp conv and generate cut embedding
+        lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
+        x_a = self.lp_conv(lp_conv_inputs)
+        # run cut conv and generate cut encoding
+        cut_conv_inputs = x_a, edge_index_a2a, edge_attr_a2a
+        cut_encoding, _, _ = self.cut_conv(cut_conv_inputs)
+
+        # decoding - inference
+        if edge_attr_dec is None:
+            ncuts = cut_encoding.shape[0]
+
+            # Build the action iteratively by picking the argmax across all q_values
+            # of all cuts.
+            # The edge_index_dec at each iteration is the same as edge_index_a2a,
+            # and the edge_attr_dec is 1-dim vector indicating whether a cut has been already selected.
+            # The not(edge_attr_dec) will serve as mask for finding the next argmax
+            # At the end of each iteration, before updating edge_attr_dec with the newly selected cut,
+            # the edges pointing to the selected cut are stored in edge_index_list,
+            # together with the corresponding edge_attr_dec entries.
+            # Those will serve as transformer context to train the selected cut Q value.
+
+            # initialize the decoder with all cuts marked as (not selected)
+            edge_attr_dec = torch.zeros((edge_index_a2a.shape[0], 1), dtype=torch.float32).to(self.device)
+            # todo assert that edge_index_a2a contains all the self loops
+            edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec, fill_value=0)
+
+            self.decoder_edge_index_list = []
+            self.decoder_edge_attr_list = []
+
+            # create a tensor of all q values to return to user
+            q_vals = torch.empty(size=(ncuts, 2), dtype=torch.float32)
+
+            # run loop until all cuts are selected, or the first one is discarded
+            for _ in range(ncuts):
+                # decode
+                decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
+                cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+
+                # compute q values for all cuts
+                q = self.q(cut_decoding)
+
+                # find argmax [cut, selected] and max q_value
+                # mask already selected cuts, overriding their q_values by -inf
+                selected_cuts_mask = edge_attr_dec.bool()
+                q[selected_cuts_mask, :] = -float('Inf')
+                serial_index, max_q = q.argmax(), q.max(q)
+                cut_index = int(serial_index / 2)  # the serial index runs row by row, while each row contribute to serial indices: row_idx*2 and row_idx*2+1
+                selected = serial_index % 2  # the cut is selected if the its q[cut_index, 1] is the max. this index is serialized to odd number.
+
+                if selected:
+                    # append to the context list the edges pointing to the selected cut,
+                    # and their corresponding attr
+                    cut_incoming_edges_mask = edge_index_dec[1, :] == cut_index
+                    incoming_edges = edge_index_dec[:, cut_incoming_edges_mask]
+                    incoming_attr = edge_attr_dec[cut_incoming_edges_mask]
+                    self.decoder_edge_attr_list.append(incoming_attr.detach().cpu())
+                    self.decoder_edge_index_list.append(incoming_edges.detach().cpu())
+                    # update the decoder context for the next iteration
+                    edge_attr_dec[cut_index] = 1  # mark the current cut as selected
+                    # store the q values of the selected in cut in the output q_vals tensor
+                    q_vals[cut_index, :] = q[cut_index, :]
+                    # go to the next iteration to see if there are more useful cuts
+                else:
+                    # stop adding cuts
+                    # store the current context for the remaining cuts
+
+            # finally, stack the decoder edge_attr and edge_index tensors,
+            # and make a transformer context in order to generate later a Transition for training,
+            # allowing by that fast parallel backprop
+            edge_attr_dec = torch.cat(self.decoder_edge_attr_list, dim=0)
+            edge_index_dec = torch.cat(self.decoder_edge_index_list, dim=1)
+            self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
+            return q_vals
+
+        else:
+            # we are in training.
+            # produce all q values in parallel
+            decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
+            cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+            # take the decoder output only at the cut_index and estimate q values
+            return self.q(cut_decoding)
+
+
+# feed forward Q network - no recurrence
 class Qnet(torch.nn.Module):
     def __init__(self, hparams={}):
         super(Qnet, self).__init__()
