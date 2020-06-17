@@ -45,7 +45,7 @@ class CutDQNLearner(CutDQNAgent):
         context = zmq.Context()
         self.learner_2_replay_server_port = hparams["learner_2_replay_server_port"]
         self.learner_2_replay_server_socket = context.socket(zmq.PUSH)
-        self.learner_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
+        self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
         # for publishing new params to workers
         context = zmq.Context()
         self.params_pubsub_port = hparams["params_pubsub_port"]

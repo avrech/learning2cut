@@ -19,7 +19,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         context = zmq.Context()
         self.replay_server_2_learner_port = config["replay_server_2_learner_port"]
         self.replay_server_2_learner_socket = context.socket(zmq.PUSH)
-        self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
+        self.replay_server_2_learner_socket.connect(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
         # for receiving new priorities from learner
         context = zmq.Context()
         self.learner_2_replay_server_port = config["learner_2_replay_server_port"]

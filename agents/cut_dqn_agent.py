@@ -1019,7 +1019,7 @@ class CutDQNAgent(Sepa):
             # initialize prioritized replay buffer internal counters, to continue beta from the point it was
             if self.use_per:
                 self.memory.num_sgd_steps_done = self.num_sgd_steps_done
-                
+
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
         # create SCIP model for G
         hparams = self.hparams

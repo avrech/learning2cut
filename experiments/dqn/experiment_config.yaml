@@ -166,7 +166,7 @@ datasets:
 model: Apex-DQN
 learner_device: cuda
 worker_device: cpu
-num_workers:2
+num_workers: 2
 num_learners: 1
 #num_step: 3
 #batch_size: 512
@@ -196,3 +196,4 @@ params_pubsub_port: 5555
 replay_server_2_learner_port: 5556
 learner_2_replay_server_port: 5557
 workers_2_replay_server_port: 5558
+replay_buffer_minimum_size: 10000

@@ -45,11 +45,11 @@ class CutDQNWorker(CutDQNAgent):
         self.params_sub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
 
         # for sending replay data to buffer
-        # for receiving replay data from workers
-        context = zmq.Context()
-        self.workers_2_replay_server_port = hparams["workers_2_replay_server_port"]
-        self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
-        self.worker_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
+        if self.is_worker:
+            context = zmq.Context()
+            self.workers_2_replay_server_port = hparams["workers_2_replay_server_port"]
+            self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
+            self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
 
     def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with learner's policy_net params """

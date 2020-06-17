@@ -88,7 +88,7 @@ if __name__ == '__main__':
         while learner.recv_batch():
             # receive batch from replay server and push into learner.replay_data_queue
             # pull batch from queue, process and push new priorities to learner.new_priorities_queue
-            learner.process_batch()
+            learner.optimize_model()
             # push new params to learner.new_params_queue periodically
             learner.prepare_new_params_to_workers()
             # send back the new priorities
