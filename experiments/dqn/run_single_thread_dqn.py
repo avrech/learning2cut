@@ -22,9 +22,9 @@ if __name__ == '__main__':
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
     parser.add_argument('--gpu-id', type=int, default=None,
-                        help='gpu id to use if available')
+                        help='gpu id to use')
     parser.add_argument('--use-gpu', type=int, default=None,
-                        help='gpu id to use if available')
+                        help='use gpu if available')
 
     args = parser.parse_args()
     if args.mixed_debug:
@@ -47,5 +47,5 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    dqn_standalone = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
-    dqn_standalone.train_single_thread()
+    dqn_single_thread = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
+    dqn_single_thread.train()

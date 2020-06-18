@@ -127,7 +127,8 @@ def get_transition(scip_state,
                    action=None,
                    transformer_decoder_context=None,
                    reward=None,
-                   scip_next_state=None):
+                   scip_next_state=None,
+                   tqnet_version='v2'):
     """
     Creates a torch_geometric.data.Data object from SCIP state
     produced by scip.Model.getState(state_format='tensor')
@@ -180,8 +181,14 @@ def get_transition(scip_state,
     if transformer_decoder_context is not None:
         edge_index_dec, edge_attr_dec = transformer_decoder_context
     else:
+        # create dummy edge_index_dec and edge_attr_dec, only for batching correctly
         edge_index_dec = torch.tensor([[0], [0]], dtype=torch.long)  # self loop
-        edge_attr_dec = torch.zeros(size=(1, 2), dtype=torch.float32)  # null attributes
+        if tqnet_version == 'v1':
+            edge_attr_dec = torch.zeros(size=(1, 2), dtype=torch.float32)
+        elif tqnet_version == 'v2':
+            edge_attr_dec = torch.zeros(size=(1, 1), dtype=torch.float32)
+        else:
+            raise ValueError
 
     if action is not None:
         a = torch.from_numpy(action).long()

@@ -1092,7 +1092,7 @@ class CutDQNAgent(Sepa):
                 self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
         self.set_training_mode()
 
-    def train_single_thread(self):
+    def train(self):
         datasets = self.load_datasets()
         trainset = self.trainset
         graph_indices = self.graph_indices
