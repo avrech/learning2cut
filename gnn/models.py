@@ -416,7 +416,7 @@ class TQnet(torch.nn.Module):
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         self.version = hparams.get('tqnet_version', 'v2')
         assert self.version in ['v1', 'v2']
-        
+
         ###########
         # Encoder #
         ###########
@@ -499,7 +499,7 @@ class TQnet(torch.nn.Module):
                 q_vals = self.inference_v1(cut_encoding)
                 return q_vals
             elif self.version == 'v2':
-                q_vals = self.inference_v2(cut_encoding)
+                q_vals = self.inference_v2(cut_encoding, edge_index_a2a)
                 return q_vals
             else:
                 raise ValueError
@@ -576,7 +576,7 @@ class TQnet(torch.nn.Module):
         # Those will serve as transformer context to train the selected cut Q value.
 
         # initialize the decoder with all cuts marked as (not selected)
-        edge_attr_dec = torch.zeros((edge_index_a2a.shape[0], 1), dtype=torch.float32).to(self.device)
+        edge_attr_dec = torch.zeros((edge_index_a2a.shape[1], 1), dtype=torch.float32).to(self.device)
         # todo assert that edge_index_a2a contains all the self loops
         edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec,
                                                                  fill_value=0)
