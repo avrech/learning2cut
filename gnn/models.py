@@ -447,14 +447,15 @@ class TQnet(torch.nn.Module):
         ###########
         # Decoder #
         ###########
+        decoder_edge_attr_dim = 2 if self.version == 'v1' else 1
         self.decoder_conv = {
             'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
-                                                                  edge_attr_dim=2,
+                                                                  edge_attr_dim=decoder_edge_attr_dim,
                                                                   aggr=hparams.get('cut_conv_aggr', 'mean')))
                                         for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
             'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
                                                                   out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
-                                                                  edge_attr_dim=2,
+                                                                  edge_attr_dim=decoder_edge_attr_dim,
                                                                   edge_attr_emb=4,
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
@@ -601,7 +602,7 @@ class TQnet(torch.nn.Module):
             # find argmax [cut_index, selected] and max q_value
             serial_index, max_q = q.argmax(), q.max(q)
             # translate the serial index to [row, col] (or in other words [cut_index, selected])
-            cut_index = torch.floor(serial_index / 2).long()
+            cut_index = torch.floor(serial_index.float() / 2).long()
             # a cut is selected if the maximal value is q[cut_index, 1]
             selected = serial_index % 2
 
@@ -617,7 +618,7 @@ class TQnet(torch.nn.Module):
                 # update the decoder context for the next iteration
                 # a. update the cut outgoing edges attribute to "selected"
                 cut_outgoing_edges_mask = edge_index_dec[0, :] == cut_index
-                edge_attr_dec[cut_outgoing_edges_mask] = selected
+                edge_attr_dec[cut_outgoing_edges_mask] = selected.float()
                 # b. store the q values of the selected cut in the output q_vals
                 q_vals[cut_index, :] = q[cut_index, :]
                 # c. update the selected_cuts_mask
