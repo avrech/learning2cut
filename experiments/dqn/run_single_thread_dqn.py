@@ -23,7 +23,7 @@ if __name__ == '__main__':
                         help='set for mixed python/c debugging')
     parser.add_argument('--gpu-id', type=int, default=None,
                         help='gpu id to use')
-    parser.add_argument('--use-gpu', type=int, default=None,
+    parser.add_argument('--use-gpu', action='store_true',
                         help='use gpu if available')
 
     args = parser.parse_args()

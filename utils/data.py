@@ -203,7 +203,7 @@ def get_transition(scip_state,
         # don't care
         r = torch.zeros(size=(x_a.shape[0], ), dtype=torch.float32)
 
-    # proceses the next state:
+    # process the next state:
     if scip_next_state is not None:
         # non terminal state
         ns_x_c = torch.from_numpy(scip_next_state['C'])

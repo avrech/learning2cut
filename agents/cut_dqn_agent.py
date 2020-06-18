@@ -56,6 +56,7 @@ class CutDQNAgent(Sepa):
         self.target_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
+        self.tqnet_version = hparams.get('tqnet_version', 'v2')
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
         # value aggregation method for the target Q values
         if hparams.get('value_aggr', 'mean') == 'max':
@@ -156,7 +157,7 @@ class CutDQNAgent(Sepa):
     # done
     def _select_action(self, scip_state):
         # transform scip_state into GNN data type
-        batch = Batch().from_data_list([get_transition(scip_state)],
+        batch = Batch().from_data_list([get_transition(scip_state, tqnet_version=self.tqnet_version)],
                                        follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
         if self.training:
@@ -195,31 +196,37 @@ class CutDQNAgent(Sepa):
                 # randomize action
                 random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
                 if self.use_transformer:
+                    # todo - randomize according to v1 and v2
                     # we create random decoder context to store for backprop.
-                    # we randomize inference order for building the context,
-                    # since it is exactly what the decoder does.
-                    decoder_edge_attr_list = []
-                    decoder_edge_index_list = []
-                    ncuts = random_action.shape[0]
-                    inference_order = torch.randperm(ncuts)
-                    edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
-                                                torch.empty((1, ncuts), dtype=torch.long)], dim=0)
-                    edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
-                    # iterate over all cuts in the random order, and set each one a context
-                    for cut_index in inference_order:
-                        # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
-                        edge_index_dec[1, :] = cut_index
-                        # store the context (edge_index_dec and edge_attr_dec) of the current iteration
-                        decoder_edge_attr_list.append(edge_attr_dec.clone())
-                        decoder_edge_index_list.append(edge_index_dec.clone())
-                        # assign the random action of cut_index to the context of the next round
-                        edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
-                        edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
+                    # we randomize inference order for building the context;
+                    # in 'v1' it is anyway what the decoder does.
+                    # in 'v2' we randomize the order among the selected cuts only.
+                    if self.tqnet_version == 'v1':
+                        decoder_edge_attr_list = []
+                        decoder_edge_index_list = []
+                        ncuts = random_action.shape[0]
+                        inference_order = torch.randperm(ncuts)
+                        edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                                    torch.empty((1, ncuts), dtype=torch.long)], dim=0)
+                        edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
+                        # iterate over all cuts in the random order, and set each one a context
+                        for cut_index in inference_order:
+                            # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+                            edge_index_dec[1, :] = cut_index
+                            # store the context (edge_index_dec and edge_attr_dec) of the current iteration
+                            decoder_edge_attr_list.append(edge_attr_dec.clone())
+                            decoder_edge_index_list.append(edge_index_dec.clone())
+                            # assign the random action of cut_index to the context of the next round
+                            edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
+                            edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
 
-                    # finally, stack the decoder edge_attr and edge_index tensors, and make a transformer context
-                    random_edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
-                    random_edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
-                    random_action_decoder_context = TransformerDecoderContext(random_edge_index_dec, random_edge_attr_dec)
+                        # finally, stack the decoder edge_attr and edge_index tensors, and make a transformer context
+                        random_edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+                        random_edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
+                        random_action_decoder_context = TransformerDecoderContext(random_edge_index_dec, random_edge_attr_dec)
+                    elif self.tqnet_version == 'v2':
+                        raise NotImplementedError
+                        # todo - complete
                 else:
                     random_edge_attr_dec = None
                     random_edge_index_dec = None
@@ -332,7 +339,12 @@ class CutDQNAgent(Sepa):
             # thus, the edge_attr_dec is zeros, to indicate that each
             # cut is processed conditioning on "no-cut-selected"
             ns_edge_index_dec = batch.ns_edge_index_a2a
-            ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
+            if self.tqnet_version == 'v1':
+                ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
+            elif self.tqnet_version == 'v2':
+                ns_edge_attr_dec = torch.zeros(size=(ns_edge_index_dec.shape[1], 1) , dtype=torch.float32)
+            else:
+                raise ValueError
         else:
             ns_edge_index_dec = None
             ns_edge_attr_dec = None
@@ -677,7 +689,8 @@ class CutDQNAgent(Sepa):
                                             action=action['selected'],
                                             transformer_decoder_context=transformer_decoder_context,
                                             reward=reward,
-                                            scip_next_state=next_state)
+                                            scip_next_state=next_state,
+                                            tqnet_version=self.tqnet_version)
 
                 if self.use_per:
                     # todo - compute initial priority for PER based on the policy q_values.

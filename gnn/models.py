@@ -576,11 +576,10 @@ class TQnet(torch.nn.Module):
         # Those will serve as transformer context to train the selected cut Q value.
 
         # initialize the decoder with all cuts marked as (not selected)
-        edge_attr_dec = torch.zeros((edge_index_a2a.shape[1], 1), dtype=torch.float32).to(self.device)
+        edge_attr_dec = torch.zeros((edge_index_a2a.shape[1], ), dtype=torch.float32).to(self.device)
         # todo assert that edge_index_a2a contains all the self loops
-        edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec,
-                                                                 fill_value=0)
-
+        edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec, fill_value=0)
+        edge_attr_dec.unsqueeze_(dim=1)
         self.decoder_edge_index_list = []
         self.decoder_edge_attr_list = []
 
