@@ -123,7 +123,7 @@ class CutDQNWorker(CutDQNAgent):
         trainset = self.datasets['trainset25']
         while len(local_buffer) < self.hparams.get('local_buffer_size'):
             # sample graph randomly
-            graph_idx = self.graph_indices[self.i_episode + 1 % len(self.graph_indices)]
+            graph_idx = self.graph_indices[(self.i_episode + 1) % len(self.graph_indices)]
             G, baseline = trainset['instances'][graph_idx]
 
             # execute episodes, collect experience and append to local_buffer
