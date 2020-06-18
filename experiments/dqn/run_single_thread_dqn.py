@@ -47,5 +47,5 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    dqn_standalone = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
-    dqn_standalone.train_single_thread()
+    dqn_single_thread = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
+    dqn_single_thread.train()
