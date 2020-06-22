@@ -1,6 +1,5 @@
 # distributedRL base class for learner - implements the distributed part
 from agents.cut_dqn_agent import CutDQNAgent
-import ray
 import time
 from collections import deque
 import pyarrow as pa
@@ -38,7 +37,7 @@ class CutDQNLearner(CutDQNAgent):
         self.replay_data_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_priorities_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_params_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
-        # todo - inherited and recovered in GDQN
+        # todo - inherited and recovered in CutDQNAgent
         #  self.num_param_updates = 0
 
         # number of SGD steps between each workers update
