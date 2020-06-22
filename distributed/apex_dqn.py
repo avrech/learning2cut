@@ -1,19 +1,8 @@
 import ray
 from distributed.replay_server import PrioritizedReplayServer
 from distributed.cut_dqn_worker import CutDQNWorker
-from distributed.cut_dqn_learner import CutDQNLearner
+from distributed.cut_dqn_learner import CutDQNLearner, RayLearner
 import time
-ray.init()
-
-
-@ray.remote(num_cpus=1, num_gpus=0)
-def run_learner_io(learner):
-    learner.run_io.remote()
-
-
-@ray.remote(num_cpus=1, num_gpus=1)
-def run_learner_optimize_model(learner):
-    learner.run_optimize_model.remote()
 
 
 class ApeXDQN:
@@ -33,13 +22,15 @@ class ApeXDQN:
     def spawn(self):
         # wrap all actor classes with ray.remote to make them running remotely
         ray_worker = ray.remote(CutDQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
+        # ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
         ray_replay_buffer = ray.remote(PrioritizedReplayServer)
 
         # Spawn all components
         self.workers = [ray_worker.remote(n, hparams=self.cfg) for n in range(1, self.num_workers + 1)]
         self.test_worker = ray_worker.remote('Test', hparams=self.cfg, is_tester=True)
-        self.learner = ray_learner.remote(hparams=self.cfg, use_gpu=self.use_gpu)
+        # instantiate learner and run its io method in a background process
+        # self.learner = ray_learner.remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
+        self.learner = RayLearner.remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
         self.replay_server = ray_replay_buffer.remote(config=self.cfg)
 
     def train(self):
@@ -47,8 +38,7 @@ class ApeXDQN:
 
         ready_ids, remaining_ids = ray.wait(
             [worker.run.remote() for worker in self.workers] +
-            # run the learner io and optimize_model methods in two parallel sub-processes
-            [run_learner_optimize_model.remote(self.learner), run_learner_io.remote(self.learner)] +
+            [self.learner.run_optimize_model.remote()] +
             [self.replay_server.run.remote()] +
             [self.test_worker.test_run.remote()]
         )

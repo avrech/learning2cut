@@ -9,10 +9,21 @@ import zmq
 from utils.data import Transition
 import os
 from torch.utils.tensorboard import SummaryWriter
+import threading
 
 
 class CutDQNLearner(CutDQNAgent):
-    def __init__(self, hparams, use_gpu=True, gpu_id=None, **kwargs):
+    """
+    This actor executes in parallel two tasks:
+        a. receive batch, send priorities and publish params.
+        b. optimize model.
+    According to
+    https://stackoverflow.com/questions/54937456/how-to-make-an-actor-do-two-things-simultaneously
+    Ray's Actor.remote() cannot execute to tasks in parallel. We adopted the suggested solution in the
+    link above, and run the IO in a background process on Actor instantiation.
+    The main Actor's thread will optimize the model using the GPU.
+    """
+    def __init__(self, hparams, use_gpu=True, gpu_id=None, run_io=False, **kwargs):
         super(CutDQNLearner, self).__init__(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id, **kwargs)
         # set GDQN instance role
         self.is_learner = True
@@ -50,6 +61,10 @@ class CutDQNLearner(CutDQNAgent):
         self.params_pubsub_port = hparams["params_pubsub_port"]
         self.params_pub_socket = context.socket(zmq.PUB)
         self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+
+        if run_io:
+            self.background_io = threading.Thread(target=self.run_io, args=())
+            self.background_io.start()
 
     @staticmethod
     def params_to_numpy(model: torch.nn.Module):
@@ -159,7 +174,7 @@ class CutDQNLearner(CutDQNAgent):
         asynchronously receive data and return new priorities to replay server,
         and publish new params to workers
         """
-        time.sleep(1)
+        time.sleep(2)
         while True:
             self.recv_batch(blocking=False)
             self.send_new_priorities()
@@ -188,7 +203,13 @@ class CutDQNLearner(CutDQNAgent):
         push new priorities to queue
         and periodically push updated params to param_queue
         """
-        time.sleep(3)
+        time.sleep(1)
         while True:
             self.optimize_model()
             self.prepare_new_params_to_workers()
+
+
+@ray.remote(num_gpus=1, num_cpus=2)
+class RayLearner(CutDQNLearner):
+    def __init__(self, hparams, use_gpu=True, gpu_id=None, run_io=False):
+        super().__init__(hparams, use_gpu=use_gpu, gpu_id=gpu_id, run_io=run_io)

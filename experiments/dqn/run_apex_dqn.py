@@ -2,6 +2,7 @@ from distributed.apex_dqn import ApeXDQN
 import argparse
 import yaml
 import os
+import ray
 
 
 if __name__ == '__main__':
@@ -33,6 +34,7 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
+    ray.init()
     apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
     apex.spawn()
     apex.train()
