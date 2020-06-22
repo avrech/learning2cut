@@ -199,34 +199,42 @@ class CutDQNAgent(Sepa):
                     # todo - randomize according to v1 and v2
                     # we create random decoder context to store for backprop.
                     # we randomize inference order for building the context;
-                    # in 'v1' it is anyway what the decoder does.
-                    # in 'v2' we randomize the order among the selected cuts only.
+                    # in 'v2' we process the selected cuts a first (in random order)
+                    # and then the remaining discarded cuts.
+                    # in addition, the edge_attr_dec in 'v2' are only the "selected" feature
+                    ncuts = random_action.shape[0]
                     if self.tqnet_version == 'v1':
-                        decoder_edge_attr_list = []
-                        decoder_edge_index_list = []
-                        ncuts = random_action.shape[0]
                         inference_order = torch.randperm(ncuts)
-                        edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
-                                                    torch.empty((1, ncuts), dtype=torch.long)], dim=0)
-                        edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
-                        # iterate over all cuts in the random order, and set each one a context
-                        for cut_index in inference_order:
-                            # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
-                            edge_index_dec[1, :] = cut_index
-                            # store the context (edge_index_dec and edge_attr_dec) of the current iteration
-                            decoder_edge_attr_list.append(edge_attr_dec.clone())
-                            decoder_edge_index_list.append(edge_index_dec.clone())
-                            # assign the random action of cut_index to the context of the next round
-                            edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
-                            edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
-
-                        # finally, stack the decoder edge_attr and edge_index tensors, and make a transformer context
-                        random_edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
-                        random_edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
-                        random_action_decoder_context = TransformerDecoderContext(random_edge_index_dec, random_edge_attr_dec)
                     elif self.tqnet_version == 'v2':
-                        raise NotImplementedError
-                        # todo - complete
+                        selected_idxes = random_action.nonzero()
+                        inference_order = torch.cat([selected_idxes[torch.randperm(len(selected_idxes))],
+                                                     random_action.logical_not().nonzero()])
+
+                    decoder_edge_attr_list = []
+                    decoder_edge_index_list = []
+                    edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                                torch.empty((1, ncuts), dtype=torch.long)], dim=0)
+                    edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
+                    # iterate over all cuts, and assign a context to each one
+                    for cut_index in inference_order:
+                        # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+                        edge_index_dec[1, :] = cut_index
+                        # store the context (edge_index_dec and edge_attr_dec) of the current iteration
+                        decoder_edge_attr_list.append(edge_attr_dec.clone())
+                        decoder_edge_index_list.append(edge_index_dec.clone())
+                        # assign the random action of cut_index to the context of the next round
+                        edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
+                        edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
+
+                    # finally, stack the decoder edge_attr and edge_index tensors, and make a transformer context
+                    random_edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+                    if self.tqnet_version == 'v2':
+                        # take only the "selected" attribute
+                        random_edge_attr_dec = random_edge_attr_dec[:, 1].unsqueeze(dim=1)
+
+                    random_edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
+                    random_action_decoder_context = TransformerDecoderContext(random_edge_index_dec, random_edge_attr_dec)
+
                 else:
                     random_edge_attr_dec = None
                     random_edge_index_dec = None
