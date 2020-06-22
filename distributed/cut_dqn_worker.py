@@ -120,7 +120,7 @@ class CutDQNWorker(CutDQNAgent):
         #  - or more generally dqn experiment loop.
         """Fill local buffer until some stopping criterion is satisfied"""
         local_buffer = []
-        trainset = self.datasets['trainset25']
+        trainset = self.trainset
         while len(local_buffer) < self.hparams.get('local_buffer_size'):
             # sample graph randomly
             graph_idx = self.graph_indices[(self.i_episode + 1) % len(self.graph_indices)]

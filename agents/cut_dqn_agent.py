@@ -970,11 +970,21 @@ class CutDQNAgent(Sepa):
         print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
 
     def load_datasets(self):
-        """ load train/valid/test sets """
+        """
+        Load train/valid/test sets
+        todo - overfit: load only test100[0] as trainset and validset
+        """
         hparams = self.hparams
 
         # datasets and baselines
         datasets = deepcopy(hparams['datasets'])
+
+        # todo - in overfitting sanity check consider only the hard valid set
+        if self.hparams.get('overfit', False):
+            for dataset_name in hparams['datasets'].keys():
+                if dataset_name != 'validset100':
+                    datasets.pop(dataset_name)
+
         for dataset_name, dataset in datasets.items():
             datasets[dataset_name]['datadir'] = os.path.join(hparams['datadir'], dataset_name,
                                                        "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(
@@ -984,6 +994,10 @@ class CutDQNAgent(Sepa):
             # read all graphs with their baselines from disk
             dataset['instances'] = []
             for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'Loading {dataset_name}'):
+                # todo - overfitting sanity check consider only graph_0_0.pkl
+                if self.hparams.get('overfit', False) and filename != 'graph_0_0.pkl':
+                    continue
+
                 with open(os.path.join(datasets[dataset_name]['datadir'], filename), 'rb') as f:
                     G, baseline = pickle.load(f)
                     if baseline['is_optimal']:
@@ -1024,7 +1038,14 @@ class CutDQNAgent(Sepa):
             dataset['stats']['gap_auc_std'] = gap_auc_std
 
         self.datasets = datasets
-        self.trainset = self.datasets['trainset25']
+        # todo - overfitting sanity check -
+        #  change 'testset100' to 'validset100' to enable logging stats collected only for validation sets.
+        #  set trainset and validset100
+        #  remove all the other datasets from database
+        if self.hparams.get('overfit', False):
+            self.trainset = self.datasets['validset100']
+        else:
+            self.trainset = self.datasets['trainset25']
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 
