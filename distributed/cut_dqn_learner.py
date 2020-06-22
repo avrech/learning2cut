@@ -208,8 +208,3 @@ class CutDQNLearner(CutDQNAgent):
             self.optimize_model()
             self.prepare_new_params_to_workers()
 
-
-@ray.remote(num_gpus=1, num_cpus=2)
-class RayLearner(CutDQNLearner):
-    def __init__(self, hparams, use_gpu=True, gpu_id=None, run_io=False):
-        super().__init__(hparams, use_gpu=use_gpu, gpu_id=gpu_id, run_io=run_io)
