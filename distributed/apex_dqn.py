@@ -2,7 +2,7 @@ import ray
 from distributed.replay_server import PrioritizedReplayServer
 from distributed.cut_dqn_worker import CutDQNWorker
 from distributed.cut_dqn_learner import CutDQNLearner
-
+import time
 ray.init()
 
 
@@ -52,4 +52,5 @@ class ApeXDQN:
             [self.replay_server.run.remote()] +
             [self.test_worker.test_run.remote()]
         )
+        time.sleep(self.cfg.get('time_limit', 3600*24))
         print('finished')
