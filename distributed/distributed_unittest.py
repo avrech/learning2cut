@@ -103,12 +103,12 @@ if __name__ == '__main__':
         # subscribe new_params from learner
         for worker in workers:
             if worker.recv_new_params():
-                worker.log_stats(global_step=worker.num_param_updates - 1, print_prefix=f'[Worker {worker.worker_id}]\t')
+                worker.log_stats(global_step=worker.num_param_updates - 1)
 
         # TEST WORKER
         # if new params have been published, evaluate the new policy
         if test_worker.recv_new_params():
-            test_worker.evaluate(print_prefix='[Tester]\t')
+            test_worker.evaluate()
             test_worker.save_checkpoint()
 
 
