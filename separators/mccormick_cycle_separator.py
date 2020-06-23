@@ -106,8 +106,6 @@ class MccormickCycleSeparator(Sepa):
             self.debug_invalid_cut_stats = {}
             self.debug_cutoff_stats = {}
             self.cutoff_occured = False
-            self.tight_cuts = []
-
 
     def sepaexeclp(self):
         if self.hparams.get('debug', False):
