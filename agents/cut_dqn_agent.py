@@ -449,6 +449,7 @@ class CutDQNAgent(Sepa):
         else:
             return None
 
+    # done
     def update_target(self):
         # Update the target network, copying all weights and biases in DQN
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -581,9 +582,51 @@ class CutDQNAgent(Sepa):
             # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
 
         if self.model.getNLPIterations() < self.lp_iterations_limit:
+            # todo - sanity check: for each available cut add an identical cut with different scale, and a weaker cut
+            if self.hparams.get('sanity_check', False):
+                self.add_identical_and_weaker_cuts()
             self._do_dqn_step()
         # return {"result": SCIP_RESULT.DIDNOTRUN}
         return {"result": SCIP_RESULT.DIDNOTFIND}
+
+    def add_identical_and_weaker_cuts(self):
+        """
+        For each cut in the separation storage
+        add:
+            - identical cut with only different scale
+            - weaker cut with rhs shifted right such that the weaker cut is still efficacious.
+        """
+        cur_state, available_cuts = self.model.getState(state_format='dict', get_available_cuts=True)
+        nvars = self.model.getNVars()
+        ncuts = available_cuts['ncuts']
+        cuts_nnz_vals = cur_state['cut_nzrcoef']['vals']
+        cuts_nnz_rowidxs = cur_state['cut_nzrcoef']['rowidxs']
+        cuts_nnz_colidxs = cur_state['cut_nzrcoef']['colidxs']
+        lhss = cur_state['cut']['lhss']
+        rhss = cur_state['cut']['rhss']
+
+        cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)),
+                                           shape=[ncuts, nvars]).toarray()
+        cur_solution = self.model.getBestSol()
+        # todo - verify that cuts_matrix cols are corresponding to sol_vector entries
+        sol_vector = [self.model.getSolVal(cur_solution, x_i) for x_i in self.x.values()]
+        sol_vector += [self.model.getSolVal(cur_solution, y_ij) for y_ij in self.y.values()]
+        sol_vector = np.array(sol_vector)
+
+        for row, rhs, lhs in zip(cuts_matrix, rhss, lhss):
+            raise NotImplementedError
+
+
+        # rhs slack of all cuts added at the previous round (including the discarded cuts)
+        # generally, LP rows look like
+        # lhs <= coef @ vars + cst <= rhs
+        # here, self.prev_action['rhss'] = rhs - cst,
+        # so cst is already subtracted.
+        # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
+        # with only constant factor between them
+        cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
+        rhs_slack = available_cuts['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
+        normalized_slack = rhs_slack / cuts_norm
 
     # done
     def _update_episode_stats(self, current_round_ncuts):
@@ -837,6 +880,7 @@ class CutDQNAgent(Sepa):
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
 
+    # done
     def init_figures(self, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
         for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
             fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True)
@@ -848,6 +892,7 @@ class CutDQNAgent(Sepa):
         self.figures['col_labels'] = col_labels
         self.figures['row_labels'] = row_labels
 
+    # done
     def add_episode_subplot(self, row, col):
         """
         plot the last episode curves to subplot in position (row, col)
@@ -893,6 +938,7 @@ class CutDQNAgent(Sepa):
         # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
         # self.figures['Gap_vs_LP_Iterations'].append(fig)
 
+    # done
     def decorate_figures(self, legend=True, col_labels=True, row_labels=True):
         """ save figures to png file """
         # decorate (title, labels etc.)
@@ -913,6 +959,7 @@ class CutDQNAgent(Sepa):
                 ax = self.figures[figname]['axes'][-1, 0]
                 ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), fancybox=True, shadow=True, ncol=1, borderaxespad=0.)
 
+    # done
     def save_figures(self, filename_prefix=None):
         for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
             # save png
@@ -969,6 +1016,7 @@ class CutDQNAgent(Sepa):
         self.target_net.to(self.device)
         print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
 
+    # done
     def load_datasets(self):
         """
         Load train/valid/test sets
@@ -1051,6 +1099,7 @@ class CutDQNAgent(Sepa):
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 
+    # done
     def initialize_training(self):
         # fix random seed for all experiment
         if self.hparams.get('seed', None) is not None:
@@ -1065,6 +1114,7 @@ class CutDQNAgent(Sepa):
             if self.use_per:
                 self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
+    # done
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
         # create SCIP model for G
         hparams = self.hparams
@@ -1110,6 +1160,7 @@ class CutDQNAgent(Sepa):
         trajectory = self.finish_episode()
         return trajectory
 
+    # done
     def evaluate(self, datasets=None, ignore_eval_interval=False):
         if datasets is None:
             datasets = self.datasets
@@ -1136,6 +1187,7 @@ class CutDQNAgent(Sepa):
                 self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
         self.set_training_mode()
 
+    # done
     def train(self):
         datasets = self.load_datasets()
         trainset = self.trainset
@@ -1176,6 +1228,7 @@ class CutDQNAgent(Sepa):
 
         return 0
 
+    # done
     def get_model(self):
         """ useful for distributed actors """
         return self.policy_net

@@ -9,13 +9,13 @@
 # - num_policy_updates equals to the number of workers' policy updates, which happen every param_update_interval
 # - the hard datasets can be evaluated on the tester in the same frequency as the easy datasets.
 # DQN ALGORITHM HPARAMS
-batch_size: 128
+batch_size: 256
 lr: 0.001
 weight_decay: 0.0001
 nstep_learning: 8 # 1, 8
 target_update_interval: 1000  # num sgd steps between target_net's parameters update
 value_aggr: mean
-credit_assignment: False  # False, True
+credit_assignment: True  # False, True
 gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
@@ -26,7 +26,7 @@ empty_action_penalty: 0
 
 # DQN ARCHITECTURE HPARAMS
 dqn_arch: TQNet     # options: TQNet , QNet
-tqnet_version: v1   # options: v1, v2
+tqnet_version: v2   # options: v1, v2
 emb_dim: 128
 cut_conv: CutConv   # options: CutConv, CATConv
 encoder_cut_conv_layers: 1
