@@ -114,7 +114,7 @@ class CutDQNLearner(CutDQNAgent):
 
             # log stats here - to be synchronized with the workers and tester logs.
             # todo - if self.num_param_updates > 0 and self.num_param_updates % self.hparams.get('log_interval', 100) == 0:
-            self.log_stats(print_prefix='[Learner]\t')
+            self.log_stats()
             self.save_checkpoint()
 
     @staticmethod
