@@ -348,9 +348,9 @@ class CutDQNAgent(Sepa):
             # cut is processed conditioning on "no-cut-selected"
             ns_edge_index_dec = batch.ns_edge_index_a2a
             if self.tqnet_version == 'v1':
-                ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t()
+                ns_edge_attr_dec = torch.zeros_like(ns_edge_index_dec, dtype=torch.float32).t().to(self.device)
             elif self.tqnet_version == 'v2':
-                ns_edge_attr_dec = torch.zeros(size=(ns_edge_index_dec.shape[1], 1) , dtype=torch.float32)
+                ns_edge_attr_dec = torch.zeros(size=(ns_edge_index_dec.shape[1], 1), dtype=torch.float32).to(self.device)
             else:
                 raise ValueError
         else:
