@@ -1043,7 +1043,9 @@ class CutDQNAgent(Sepa):
         #  set trainset and validset100
         #  remove all the other datasets from database
         if self.hparams.get('overfit', False):
-            self.trainset = self.datasets['validset100']
+            self.trainset = deepcopy(self.datasets['validset100'])
+            self.trainset['dataset_name'] = 'trainset_overfit'
+            self.trainset['instances'][0][1].pop('rootonly_stats')
         else:
             self.trainset = self.datasets['trainset25']
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
