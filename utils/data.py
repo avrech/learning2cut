@@ -164,12 +164,11 @@ def get_transition(scip_state,
     edge_attr_a2v = torch.from_numpy(cuts_nzrcoef).unsqueeze(dim=1)
 
     # build the clique graph of the candidate cuts:
-    edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality))
-    # add self loops with corresponding edge_attr_a2a=0 since it is orthogonality
-    # in case there is only one cut, edge_index_a2a and edge_attr_a2a are empty,
-    # and then we need to create them by hand
     if x_a.shape[0] > 1:
-        edge_index_a2a, edge_attr_a2a = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_a2a, fill_value=0)
+        # we add 1 to cuts_orthogonality to ensure that all edges are created
+        # including the self edges
+        edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality + 1))
+        edge_attr_a2a -= 1  # subtract 1 to set back the correct orthogonality values
         edge_attr_a2a.unsqueeze_(dim=1)
     elif x_a.shape[0] == 1:
         edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # single self loop
@@ -225,13 +224,11 @@ def get_transition(scip_state,
         ns_edge_attr_a2v = torch.from_numpy(ns_cuts_nzrcoef).unsqueeze(dim=1)
 
         # build the clique graph of the candidate cuts:
-        ns_edge_index_a2a, ns_edge_attr_a2a = dense_to_sparse(torch.from_numpy(ns_cuts_orthogonality))
-        # add self loops with corresponding ns_edge_attr_a2a=0 since it is orthogonality
-        # in case there is only one cut, ns_edge_index_a2a and ns_edge_attr_a2a are empty,
-        # and then we need to create them by hand
         if ns_x_a.shape[0] > 1:
-            ns_edge_index_a2a, ns_edge_attr_a2a = add_remaining_self_loops(ns_edge_index_a2a, edge_weight=ns_edge_attr_a2a,
-                                                                     fill_value=0)
+            ns_edge_index_a2a, ns_edge_attr_a2a = dense_to_sparse(torch.from_numpy(ns_cuts_orthogonality + 1))
+            ns_edge_attr_a2a -= 1
+            # ns_edge_index_a2a, ns_edge_attr_a2a = add_remaining_self_loops(ns_edge_index_a2a, edge_weight=ns_edge_attr_a2a,
+            #                                                          fill_value=0)
             ns_edge_attr_a2a.unsqueeze_(dim=1)
         elif ns_x_a.shape[0] == 1:
             ns_edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # single self loop

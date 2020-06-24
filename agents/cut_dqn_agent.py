@@ -116,7 +116,6 @@ class CutDQNAgent(Sepa):
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         self.print_prefix = ''
-        # todo compute fscore of p = nactive/napplied and q = nactive / (napplied + nstillviolated)
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
@@ -125,11 +124,17 @@ class CutDQNAgent(Sepa):
         self.loss_moving_avg = 0
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
-        # initialize (set seed and load checkpoint
+
+        # debug
+        self.sanity_check_stats = {'n_duplicated_cuts': [],
+                                   'n_weak_cuts': [],
+                                   'n_original_cuts': []}
+
+        # initialize (set seed and load checkpoint)
         self.initialize_training()
 
     # done
-    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset', scip_seed=None):
+    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None):
         self.G = G
         self.x = x
         self.y = y
@@ -472,7 +477,7 @@ class CutDQNAgent(Sepa):
         see all the available cuts.
         """
         # get the current state, a dictionary of available cuts (keyed by their names,
-        # and query the statistics related to the previous action (cut activity)
+        # and query statistics related to the previous action (cut activeness etc.)
         cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True, query=self.prev_action)
 
         # validate the solver behavior
@@ -572,6 +577,7 @@ class CutDQNAgent(Sepa):
 
     # done
     def sepaexeclp(self):
+        result = {"result": SCIP_RESULT.DIDNOTFIND}
         if self.hparams.get('debug', False):
             print(self.print_prefix, 'dqn')
 
@@ -582,51 +588,115 @@ class CutDQNAgent(Sepa):
             # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
 
         if self.model.getNLPIterations() < self.lp_iterations_limit:
-            # todo - sanity check: for each available cut add an identical cut with different scale, and a weaker cut
-            if self.hparams.get('sanity_check', False):
-                self.add_identical_and_weaker_cuts()
-            self._do_dqn_step()
-        # return {"result": SCIP_RESULT.DIDNOTRUN}
-        return {"result": SCIP_RESULT.DIDNOTFIND}
+            # sanity check: for each cut in the separation storage
+            # add an identical cut with different scale, and a weak cut with right shifted rhs
+            if self.hparams.get('sanity_check', False) and self.is_tester:
+                result = self.add_identical_and_weak_cuts()
 
-    def add_identical_and_weaker_cuts(self):
+            self._do_dqn_step()
+
+            # sanity check: for each cut in the separation storage
+            # check if its weak version was applied
+            # and if both the original and the identical versions were applied.
+            if self.hparams.get('sanity_check', False) and self.is_tester:
+                self.track_identical_and_weak_cuts()
+
+        # todo - what retcode should be returned here? SEPARATED/DIDNOTFIND ?
+        return result
+
+    def add_identical_and_weak_cuts(self):
         """
         For each cut in the separation storage
         add:
             - identical cut with only different scale
-            - weaker cut with rhs shifted right such that the weaker cut is still efficacious.
+            - weak cut with rhs shifted right such that the weak cut is still efficacious.
+        This function is written to maximize clarity, and not necessarily efficiency.
         """
-        cur_state, available_cuts = self.model.getState(state_format='dict', get_available_cuts=True)
-        nvars = self.model.getNVars()
-        ncuts = available_cuts['ncuts']
-        cuts_nnz_vals = cur_state['cut_nzrcoef']['vals']
-        cuts_nnz_rowidxs = cur_state['cut_nzrcoef']['rowidxs']
-        cuts_nnz_colidxs = cur_state['cut_nzrcoef']['colidxs']
-        lhss = cur_state['cut']['lhss']
-        rhss = cur_state['cut']['rhss']
+        result = {'result': SCIP_RESULT.DIDNOTFIND}
+        model = self.model
+        cuts = self.model.getCuts()
+        n_original_cuts = len(cuts)
+        cut_names = set()
+        for cut in cuts:
+            cut_name = cut.name
+            cut_names.add(cut_name)
+            cut_rhs = cut.getRhs()
+            cut_lhs = cut.getLhs()
+            cut_cst = cut.getConstant()
+            assert cut_cst == 0
+            cut_cols = cut.getCols()
+            cut_coef = cut.getVals()
+            cut_vars = [col.getVar() for col in cut_cols]
 
-        cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)),
-                                           shape=[ncuts, nvars]).toarray()
-        cur_solution = self.model.getBestSol()
-        # todo - verify that cuts_matrix cols are corresponding to sol_vector entries
-        sol_vector = [self.model.getSolVal(cur_solution, x_i) for x_i in self.x.values()]
-        sol_vector += [self.model.getSolVal(cur_solution, y_ij) for y_ij in self.y.values()]
-        sol_vector = np.array(sol_vector)
+            # add an identical cut by multiplying the original cut by a constant
+            scaling_factor = np.random.randint(low=2, high=5)
+            identical_cut = self.model.createEmptyRowSepa(self,
+                                                          cut_name + 'iden',
+                                                          rhs=cut_rhs * scaling_factor,
+                                                          lhs=cut_lhs * scaling_factor,
+                                                          local=cut.isLocal(),
+                                                          removable=cut.isRemovable())
+            model.cacheRowExtensions(identical_cut)
+            for v, c in zip(cut_vars, cut_coef):
+                model.addVarToRow(identical_cut, v, c * scaling_factor)
+            # flush all changes before adding the cut
+            model.flushRowExtensions(identical_cut)
+            infeasible = model.addCut(identical_cut)
+            assert not infeasible
+            model.releaseRow(identical_cut)
 
-        for row, rhs, lhs in zip(cuts_matrix, rhss, lhss):
-            raise NotImplementedError
+            # add a weak cut by shifting right the rhs such that the cut is still efficacious
+            cut_activity = model.getRowLPActivity(cut)
+            # the activity of a violated cut should be higher than the rhs.
+            # we generate a weak cut by shifting the rhs to random value sampled uniformly
+            # from (cut_activity, cut_rhs)
+            weak_rhs = 0
+            while weak_rhs >= cut_activity or weak_rhs <= cut_rhs:
+                weak_rhs = np.random.uniform(low=cut_rhs, high=cut_activity)
+            assert weak_rhs < cut_activity and weak_rhs > cut_rhs, f'weak_rhs: {weak_rhs}, cut_activity: {cut_activity}, cut_rhs: {cut_rhs}'
+            weak_cut = self.model.createEmptyRowSepa(self,
+                                                     cut_name + 'weak',
+                                                     rhs=weak_rhs,
+                                                     lhs=cut_lhs,
+                                                     local=cut.isLocal(),
+                                                     removable=cut.isRemovable())
+            model.cacheRowExtensions(weak_cut)
+            for v, c in zip(cut_vars, cut_coef):
+                model.addVarToRow(weak_cut, v, c)
+            # flush all changes before adding the cut
+            model.flushRowExtensions(weak_cut)
+            infeasible = model.addCut(weak_cut)
+            assert not infeasible
+            result = {'result': SCIP_RESULT.SEPARATED}
+            model.releaseRow(weak_cut)
 
+        self.sanity_check_stats['cur_cut_names'] = cut_names
+        self.sanity_check_stats['cur_n_original_cuts'] = n_original_cuts
+        return result
 
-        # rhs slack of all cuts added at the previous round (including the discarded cuts)
-        # generally, LP rows look like
-        # lhs <= coef @ vars + cst <= rhs
-        # here, self.prev_action['rhss'] = rhs - cst,
-        # so cst is already subtracted.
-        # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
-        # with only constant factor between them
-        cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
-        rhs_slack = available_cuts['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
-        normalized_slack = rhs_slack / cuts_norm
+    def track_identical_and_weak_cuts(self):
+        cur_n_original_cuts = self.sanity_check_stats['cur_n_original_cuts']
+        if cur_n_original_cuts == 0:
+            return
+
+        cut_names = [bytes(name).decode('utf-8') for name in list(self.prev_action.keys())[:cur_n_original_cuts*3]]
+        cur_n_duplicated_cuts = 0
+        cur_n_weak_cuts = 0
+        added_cuts = set()
+
+        for cut_name, selected in zip(cut_names, self.prev_action['selected']):
+            if selected:
+                if cut_name[-4:] == 'weak':
+                    cur_n_weak_cuts += 1
+                    continue
+                basename = cut_name[:-4] if cut_name[-4:] == 'iden' else cut_name
+                if basename in added_cuts:
+                    cur_n_duplicated_cuts += 1
+                else:
+                    added_cuts.add(basename)
+        self.sanity_check_stats['n_duplicated_cuts'].append(cur_n_duplicated_cuts)
+        self.sanity_check_stats['n_weak_cuts'].append(cur_n_weak_cuts)
+        self.sanity_check_stats['n_original_cuts'].append(cur_n_original_cuts)
 
     # done
     def _update_episode_stats(self, current_round_ncuts):
@@ -832,7 +902,6 @@ class CutDQNAgent(Sepa):
                 self.decorate_figures()
 
             if save_best:
-                # self._save_if_best()
                 perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])  # todo bug with (-) ?
                 if perf > self.best_perf[self.dataset_name]:
                     self.best_perf[self.dataset_name] = perf
@@ -854,6 +923,24 @@ class CutDQNAgent(Sepa):
                     self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
                     self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                     self.test_stats_buffer[k] = []
+
+            # sanity check
+            if self.hparams.get('sanity_check', False):
+                n_original_cuts = np.array(self.sanity_check_stats['n_original_cuts'])
+                n_duplicated_cuts = np.array(self.sanity_check_stats['n_duplicated_cuts'])
+                n_weak_cuts = np.array(self.sanity_check_stats['n_weak_cuts'])
+                sanity_check_stats = {'dup_frac': n_duplicated_cuts / n_original_cuts,
+                                      'weak_frac': n_weak_cuts / n_original_cuts}
+                for k, vals in sanity_check_stats.items():
+                    avg = np.mean(vals)
+                    std = np.std(vals)
+                    print('{}: {:.4f} | '.format(k, avg), end='')
+                    self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
+                    self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step,
+                                           walltime=cur_time_sec)
+                self.sanity_check_stats['n_original_cuts'] = []
+                self.sanity_check_stats['n_duplicated_cuts'] = []
+                self.sanity_check_stats['n_weak_cuts'] = []
 
         if self.is_worker:
             # plot normalized dualbound and gap auc
@@ -1027,10 +1114,11 @@ class CutDQNAgent(Sepa):
         # datasets and baselines
         datasets = deepcopy(hparams['datasets'])
 
-        # todo - in overfitting sanity check consider only the hard valid set
-        if self.hparams.get('overfit', False):
+        # todo - in overfitting sanity check consider only the first instance of the overfitted dataset
+        overfit_dataset_name = self.hparams.get('overfit', False)
+        if overfit_dataset_name in datasets.keys():
             for dataset_name in hparams['datasets'].keys():
-                if dataset_name != 'validset100':
+                if dataset_name != overfit_dataset_name:
                     datasets.pop(dataset_name)
 
         for dataset_name, dataset in datasets.items():
@@ -1043,7 +1131,7 @@ class CutDQNAgent(Sepa):
             dataset['instances'] = []
             for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'Loading {dataset_name}'):
                 # todo - overfitting sanity check consider only graph_0_0.pkl
-                if self.hparams.get('overfit', False) and filename != 'graph_0_0.pkl':
+                if overfit_dataset_name and filename != 'graph_0_0.pkl':
                     continue
 
                 with open(os.path.join(datasets[dataset_name]['datadir'], filename), 'rb') as f:
@@ -1056,7 +1144,7 @@ class CutDQNAgent(Sepa):
 
         # for the validation and test datasets compute some metrics:
         for dataset_name, dataset in datasets.items():
-            if dataset_name == 'trainset25':
+            if dataset_name[:8] == 'trainset':
                 continue
             db_auc_list = []
             gap_auc_list = []
@@ -1090,8 +1178,8 @@ class CutDQNAgent(Sepa):
         #  change 'testset100' to 'validset100' to enable logging stats collected only for validation sets.
         #  set trainset and validset100
         #  remove all the other datasets from database
-        if self.hparams.get('overfit', False):
-            self.trainset = deepcopy(self.datasets['validset100'])
+        if overfit_dataset_name:
+            self.trainset = deepcopy(self.datasets[overfit_dataset_name])
             self.trainset['dataset_name'] = 'trainset_overfit'
             self.trainset['instances'][0][1].pop('rootonly_stats')
         else:
@@ -1171,7 +1259,7 @@ class CutDQNAgent(Sepa):
         global_step = self.num_param_updates
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
-            if dataset_name == 'trainset25':
+            if dataset_name[:8] == 'trainset':
                 continue
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
                 self.init_figures(nrows=dataset['num_instances'],
@@ -1200,8 +1288,8 @@ class CutDQNAgent(Sepa):
             graph_idx = graph_indices[i_episode % len(graph_indices)]
             G, baseline = trainset['instances'][graph_idx]
             if hparams.get('debug', False):
-                filename = os.listdir(datasets['trainset25']['datadir'])[graph_idx]
-                filename = os.path.join(datasets['trainset25']['datadir'], filename)
+                filename = os.listdir(trainset['datadir'])[graph_idx]
+                filename = os.path.join(trainset['datadir'], filename)
                 print(f'instance no. {graph_idx}, filename: {filename}')
 
             # execute episode and collect experience
