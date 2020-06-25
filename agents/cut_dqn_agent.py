@@ -105,6 +105,7 @@ class CutDQNAgent(Sepa):
         self.nseparounds = 0
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
         self.lp_iterations_limit = -1
+        self.terminal_state = None
 
         # logging
         self.is_tester = True  # todo set in distributed setting
@@ -158,6 +159,7 @@ class CutDQNAgent(Sepa):
         self.nseparounds = 0
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
+        self.terminal_state = None
 
     # done
     def _select_action(self, scip_state):
@@ -489,11 +491,7 @@ class CutDQNAgent(Sepa):
         # finish with the previos step:
         self._update_episode_stats(current_round_ncuts=available_cuts['ncuts'])
 
-        # if the are no avialable cuts, the solution is probably feasible,
-        # and anyway, the episode is ended since we don't have anything to do.
-        # so in this case we should just jump out,
-        # without storing the current state-action pair,
-        # since the terminal state is not important.
+        # if there are available cuts, select action and continue to the next state
         if available_cuts['ncuts'] > 0:
 
             # select an action, and get the decoder context for a case we use transformer and q_values for PER
@@ -523,16 +521,43 @@ class CutDQNAgent(Sepa):
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
+        # if the are no available cuts we terminate the episode.
+        # the stats of the last action were already collected.
+        # todo set self.terminal_state and continue from here
+        # without storing the current state-action pair,
+        # since the terminal state is not important.
+
     # done
     def finish_episode(self):
         """
-        Compute rewards, push transitions into memory
-        and log stats
+        Compute rewards, push transitions into memory and log stats
+        INFO:
+        SCIP can terminate an episode (due to, say, node_limit or lp_iterations_limit)
+        after executing the LP without calling DQN.
+        In this case we need to compute by hand the tightness of the last action taken,
+        because the solver allows to access the information only in SCIP_STAGE.SOLVING
+        We distinguish between 4 types of terminal states:
+        OPTIMAL:
+            Gap == 0. If the LP_ITERATIONS_LIMIT was reached, we interpolate the final db/gap at the limit.
+            Otherwise, the final statistics are taken as is.
+            In this case the agent is rewarded also for all SCIP's side effects (e.g. heuristics)
+            which potentially helped in solving the instance.
+        LP_ITERATIONS_LIMIT_REACHED:
+            Gap >= 0. This state refers to the case in which the last action was not empty.
+            We snapshot the current db/gap and interpolate the final db/gap at the limit.
+        NO_CUTS:
+            Gap > 0, ncuts == 0.
+            We save the current db/gap as the final values,
+            and do not consider any more db improvements (e.g. by heuristics)
+        EMPTY_ACTION:
+            Gap > 0, ncuts > 0, nselected == 0.
+            The treatment is the same as NO_CUTS.
+
+        In practice, this function is called after SCIP.optimize() terminates.
+        self.terminal_state is set to None at the beginning, and once one of the 4 cases above is detected,
+        self.terminal_state is set to the appropriate value.
+
         """
-        # SCIP can terminate an episode (due to, say, node_limit or lp_iterations_limit)
-        # after executing the LP without calling DQN.
-        # In this case we need to compute by hand the tightness of the last action taken,
-        # because the solver allowes to access the information only in SCIP_STAGE.SOLVING
         if self.cut_generator is not None:
             assert self.nseparounds == self.cut_generator.nseparounds
 
