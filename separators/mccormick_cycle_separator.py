@@ -232,19 +232,14 @@ class MccormickCycleSeparator(Sepa):
         cut_found = False
         for cycle in violated_cycles:
             if self.ncuts_at_cur_node < max_cycles:
-                result = self.add_cut(cycle)
+                result, cut_added = self.add_cut(cycle)
                 if result['result'] == SCIP_RESULT.CUTOFF:
                     print('CUTOFF')
                     return result
-                elif result == 'invalid':
-                    print('skipped invalid inequality')
-                    continue
-                elif result == 'duplicated':
-                    continue
-
-                self.ncuts += 1
-                self.ncuts_at_cur_node += 1
-                cut_found = True
+                elif cut_added:
+                    self.ncuts += 1
+                    self.ncuts_at_cur_node += 1
+                    cut_found = True
 
         if cut_found:
             self._sepa_cnt += 1
@@ -355,16 +350,20 @@ class MccormickCycleSeparator(Sepa):
                 # self.model.constructLP()
                 # todo - check if separation storage flush is needed
                 # add cycle to the separation storage
-                self.add_cut(cycle, probing=True)
-                self.model.applyCutsProbing()
-                self.ncuts_probing += 1
-                # solve the LP
-                lperror, _ = self.model.solveProbingLP()
-                if not lperror:
-                    dualbound = -self.model.getLPObjVal()  # for some reason it returns as negative.
-                    new_dualbound.append(dualbound)
+                _, cut_added = self.add_cut(cycle, probing=True)
+                if cut_added:
+                    self.model.applyCutsProbing()
+                    self.ncuts_probing += 1
+                    # solve the LP
+                    lperror, _ = self.model.solveProbingLP()
+                    if not lperror:
+                        dualbound = -self.model.getLPObjVal()  # for some reason it returns as negative.
+                        new_dualbound.append(dualbound)
+                    else:
+                        print('LPERROR OCCURED IN STRONG_CUTTING')
+                        new_dualbound.append(1000000)
                 else:
-                    print('LPERROR OCCURED IN STRONG_CUTTING')
+                    print('CUT SKIPPED IN STRONG CUTTING')
                     new_dualbound.append(1000000)
                 self.model.endProbing()
             # calculate how many cuts applied in probing to subtract from stats
@@ -379,13 +378,14 @@ class MccormickCycleSeparator(Sepa):
             return np.array(violated_cycles)[strongest[:num_cycles_to_add]]
 
     def add_cut(self, violated_cycle, probing=False):
-        result = SCIP_RESULT.DIDNOTRUN
+        scip_result = SCIP_RESULT.DIDNOTRUN
+        cut_added = False
         model = self.model
 
         if not model.isLPSolBasic():
-            return {"result": result}
+            return {"result": scip_result}, cut_added
 
-        result = SCIP_RESULT.DIDNOTFIND
+        scip_result = SCIP_RESULT.DIDNOTFIND
         # add cut
         #TODO: here it might make sense just to have a function `addCut` just like `addCons`. Or maybe better `createCut`
         # so that then one can ask stuff about it, like its efficacy, etc. This function would receive all coefficients
@@ -413,13 +413,20 @@ class MccormickCycleSeparator(Sepa):
             x_coef[j] -= 1
             y_coef[e] += 2
 
-        # check if inequality is valid with respect to the optimal solution found
-
         cutrhs = len(F) - 1
         cutlhs = -len(C_minus_F)
+
+        # filter "empty" cycles: 0 <= 0
+        all_zeros = all(np.array(list(x_coef.values()) + list(y_coef.values())) == 0)
+        if all_zeros:
+            assert cutlhs <= 0 <= cutrhs
+            # skip this cut
+            return scip_result, cut_added
+
         # debug
-        if self.debug_cutoff and not self.is_valid_inequality(x_coef, y_coef, cutrhs):
-            return 'invalid'
+        # check if inequality is valid with respect to the optimal solution found
+        if self.debug_cutoff:
+            assert self.is_valid_inequality(x_coef, y_coef, cutrhs)
 
         # filter duplicated cuts
         # after coefficient aggregation, to different cycles can collapse into the same inequality.
@@ -431,7 +438,7 @@ class MccormickCycleSeparator(Sepa):
         cut_id = (tuple(x_items), tuple(y_items), cutrhs, cutlhs)
         if cut_id in self.added_cuts:
             # skip this cycle
-            return 'duplicated'
+            return scip_result, cut_added
 
         # else - add to the added_cuts set, and add the cut to scip separation storage
         self.added_cuts.add(cut_id)
@@ -451,6 +458,9 @@ class MccormickCycleSeparator(Sepa):
             if c != 0:
                 model.addVarToRow(cut, y[e], c)
 
+        # todo: model.isFeasNegative(0) returns False, why?
+        #       a cycle 0 <= 0 is valid, but here it fails.
+        #       we filter such cases beforehand.
         if cut.getNNonz() == 0:
             # debug
             if not model.isFeasNegative(cutrhs):
@@ -460,7 +470,7 @@ class MccormickCycleSeparator(Sepa):
                 print(violated_cycle)
             assert model.isFeasNegative(cutrhs)
             # print("Gomory cut is infeasible: 0 <= ", cutrhs)
-            return {"result": SCIP_RESULT.CUTOFF}
+            return {"result": SCIP_RESULT.CUTOFF}, cut_added
 
         # Only take efficacious cuts, except for cuts with one non-zero coefficient (= bound changes)
         # the latter cuts will be handeled internally in sepastore.
@@ -471,11 +481,12 @@ class MccormickCycleSeparator(Sepa):
             infeasible = model.addCut(cut, forcecut=self.forcecut)
 
             if infeasible:
-                result = SCIP_RESULT.CUTOFF
+                scip_result = SCIP_RESULT.CUTOFF
             else:
-                result = SCIP_RESULT.SEPARATED
+                scip_result = SCIP_RESULT.SEPARATED
         model.releaseRow(cut)
-        return {"result": result}
+        cut_added = True
+        return {"result": scip_result}, cut_added
 
     def is_valid_inequality(self, x_coef, y_coef, cutrhs):
         """
