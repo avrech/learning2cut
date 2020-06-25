@@ -127,6 +127,8 @@ class MccormickCycleSeparator(Sepa):
         lp_iterations_limit = self.hparams.get('lp_iterations_limit', -1)
         if lp_iterations_limit > 0 and self.model.getNLPIterations() >= lp_iterations_limit:
             # terminate
+            if self.hparams.get('verbose', 0) == 2:
+                print('mccormick_cycle_separator: LP_ITERATIONS_LIMIT reached. terminating!')
             self.finish_experiment()
             return {"result": SCIP_RESULT.DIDNOTRUN}
 

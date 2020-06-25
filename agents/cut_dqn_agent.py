@@ -511,6 +511,8 @@ class CutDQNAgent(Sepa):
                 # TODO we need somehow to tell scip to stop cutting, without breaking the system. 
                 # flush the separation storage
                 self.model.clearCuts()
+                if self.hparams.get('verbose', 0) == 2:
+                    print(self.print_prefix + 'discarded all cuts')
 
             # SCIP will execute the action,
             # and return here in the next LP round -
@@ -601,7 +603,12 @@ class CutDQNAgent(Sepa):
             if self.hparams.get('sanity_check', False) and self.is_tester:
                 self.track_identical_and_weak_cuts()
 
-        # todo - what retcode should be returned here? SEPARATED/DIDNOTFIND ?
+        else:
+            result = {"result": SCIP_RESULT.DIDNOTRUN}
+            if self.hparams.get('verbose', 0) == 2:
+                print(self.print_prefix + 'LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
+
+        # todo - what retcode should be returned here? SEPARATED/DIDNOTFIND/DIDNOTRUN ?
         return result
 
     def add_identical_and_weak_cuts(self):
@@ -970,7 +977,7 @@ class CutDQNAgent(Sepa):
     # done
     def init_figures(self, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
         for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
-            fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True)
+            fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
             fig.set_size_inches(w=8, h=10)
             fig.set_tight_layout(True)
             self.figures[figname] = {'fig': fig, 'axes': axes}
@@ -1269,6 +1276,10 @@ class CutDQNAgent(Sepa):
                                               range(dataset['num_instances'])])
                 for inst_idx, (G, baseline) in enumerate(dataset['instances']):
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
+                        if self.hparams.get('verbose', 0) == 2:
+                            print('##################################################################################')
+                            print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
+                            print('##################################################################################')
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)

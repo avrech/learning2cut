@@ -38,11 +38,11 @@ cut_conv_aggr: mean
 
 # GENERAL
 seed: 259385
-hide_scip_output: True
+hide_scip_output: False
 num_episodes: 2000000
 log_interval: 20
 checkpoint_interval: 20
-verbose: 1
+verbose: 2
 
 # DEBUG FLAGS
 debug: False
