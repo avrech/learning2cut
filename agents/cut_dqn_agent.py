@@ -101,11 +101,12 @@ class CutDQNAgent(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
+        self.finished_episode_stats = False
         self.cut_generator = None
         self.nseparounds = 0
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
         self.lp_iterations_limit = -1
-        self.terminal_state = None
+        self.terminal_state = False
 
         # logging
         self.is_tester = True  # todo set in distributed setting
@@ -155,11 +156,155 @@ class CutDQNAgent(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
+        self.finished_episode_stats = False
         self.cut_generator = cut_generator
         self.nseparounds = 0
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
-        self.terminal_state = None
+        self.terminal_state = False
+
+    # done
+    def sepaexeclp(self):
+        if self.hparams.get('debug', False):
+            print(self.print_prefix, 'dqn')
+
+        # assert proper behavior
+        self.nseparounds += 1
+        if self.cut_generator is not None:
+            assert self.nseparounds == self.cut_generator.nseparounds
+            # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
+
+        # sanity check only:
+        # for each cut in the separation storage add an identical cut with only a different scale,
+        # and a weak cut with right shifted rhs
+        if self.hparams.get('sanity_check', False) and self.is_tester:
+            self.add_identical_and_weak_cuts()
+
+        # finish with the previous step:
+        self._update_episode_stats()
+
+        # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
+        # we dont want to run any further dqn steps, and therefore we return immediately.
+        if self.terminal_state:
+            # discard potentially added cuts and return
+            self.model.clearCuts()
+            result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+        elif self.model.getNLPIterations() < self.lp_iterations_limit:
+
+            result = self._do_dqn_step()
+
+            # sanity check: for each cut in the separation storage
+            # check if its weak version was applied
+            # and if both the original and the identical versions were applied.
+            if self.hparams.get('sanity_check', False) and self.is_tester:
+                self.track_identical_and_weak_cuts()
+
+        else:
+            # stop optimization (implicitly), and don't add any more cuts
+            if self.hparams.get('verbose', 0) == 2:
+                print(self.print_prefix + 'LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
+            self.terminal_state = 'LP_ITERATIONS_LIMIT_REACHED'
+            # finish collecting episode stats
+            self.finished_episode_stats = True
+            # clear cuts and terminate
+            self.model.clearCuts()
+            result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+        # todo - what retcode should be returned here?
+        #  currently: if selected cuts              -> SEPARATED
+        #                discarded all or no cuts   -> DIDNOTFIND
+        #                otherwise                  -> DIDNOTRUN
+        return result
+
+    # done
+    def _do_dqn_step(self):
+        """
+        Here is the episode inner loop of DQN.
+        This DQN implemention is most vanilla one,
+        in which we sequentially
+        1. get state
+        2. select action
+        3. get the next state and reward (in the next LP round, after the LP solver solved for our cuts)
+        4. store transition in memory
+        5. optimize the policy on the replay memory
+        When the instance is solved, the episode ends, and we start solving another instance,
+        continuing with the latest policy parameters.
+        This DQN agent should only be included as a separator in the next instance SCIP model.
+        The priority of calling the DQN separator should be the lowest, so it will be able to
+        see all the available cuts.
+        """
+        # get the current state, a dictionary of available cuts (keyed by their names,
+        # and query statistics related to the previous action (cut activeness etc.)
+        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True,
+                                                        query=self.prev_action)
+
+        # validate the solver behavior
+        if self.prev_action is not None:
+            # assert that all the selected cuts were actually applied
+            # otherwise, there is either a bug or a cut safety/feasibility issue.
+            assert (self.prev_action['selected'] == self.prev_action['applied']).all()
+
+        # if there are available cuts, select action and continue to the next state
+        if available_cuts['ncuts'] > 0:
+
+            # select an action, and get the decoder context for a case we use transformer and q_values for PER
+            action, q_values, decoder_context = self._select_action(cur_state)
+            available_cuts['selected'] = action
+
+            # apply the action
+            if any(action):
+                # force SCIP to take the selected cuts and discard the others
+                self.model.forceCuts(action)
+                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+                # in order to prevent it from adding more or less cuts
+                self.model.setIntParam('separating/maxcuts', int(sum(action)))
+                self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+                # continue to the next state
+                result = {"result": SCIP_RESULT.SEPARATED}
+
+            else:
+                # todo - This action leads to the terminal state.
+                #        SCIP may apply now heuristics which will further improve the dualbound/gap.
+                #        However, those improvements are not related to the currently taken action.
+                #        So we snapshot here the dualbound and gap and other related stats,
+                #        and set the terminal_state flag accordingly.
+                # force SCIP to "discard" all the available cuts by flushing the separation storage
+                self.model.clearCuts()
+                if self.hparams.get('verbose', 0) == 2:
+                    print(self.print_prefix + 'discarded all cuts')
+                self.terminal_state = 'EMPTY_ACTION'
+                self.prev_action = available_cuts
+                self._update_episode_stats()
+                self.finished_episode_stats = True
+                result = {"result": SCIP_RESULT.DIDNOTFIND}
+
+            # SCIP will execute the action,
+            # and return here in the next LP round -
+            # unless the instance is solved and the episode is done.
+            # store the current state and action for
+            # computing later the n-step rewards and the (s,a,r',s') transitions
+            self.state_action_qvalues_context_list.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
+            self.prev_action = available_cuts
+            self.prev_state = cur_state
+
+        # If there are no available cuts we terminate the episode.
+        # The stats of the previous action are already collected,
+        # so we can finish collecting stats.
+        # We don't store the current state-action pair,
+        # since the terminal state is not important.
+        # The final gap in this state can be either zero (OPTIMAL) or strictly positive.
+        # However, model.getGap() can potentially return gap > 0, as SCIP stats will be updated only afterward.
+        # So we temporarily set terminal_state to True (general description)
+        # and we will accurately characterize it after the optimization terminates.
+        elif available_cuts['ncuts'] == 0:
+            # todo: check if we ever get here, and verify behavior
+            self.prev_action = None
+            self.terminal_state = True
+            self.finished_episode_stats = True
+            result = {"result": SCIP_RESULT.DIDNOTFIND}
+
+        return result
 
     # done
     def _select_action(self, scip_state):
@@ -284,6 +429,236 @@ class CutDQNAgent(Sepa):
                 # return None, None for q_values and decoder context,
                 # since they are used only while generating experience
                 return greedy_action, None, None
+
+    # done
+    def finish_episode(self):
+        """
+        Compute rewards, push transitions into memory and log stats
+        INFO:
+        SCIP can terminate an episode (due to, say, node_limit or lp_iterations_limit)
+        after executing the LP without calling DQN.
+        In this case we need to compute by hand the tightness of the last action taken,
+        because the solver allows to access the information only in SCIP_STAGE.SOLVING
+        We distinguish between 4 types of terminal states:
+        OPTIMAL:
+            Gap == 0. If the LP_ITERATIONS_LIMIT was reached, we interpolate the final db/gap at the limit.
+            Otherwise, the final statistics are taken as is.
+            In this case the agent is rewarded also for all SCIP's side effects (e.g. heuristics)
+            which potentially helped in solving the instance.
+        LP_ITERATIONS_LIMIT_REACHED:
+            Gap >= 0. This state refers to the case in which the last action was not empty.
+            We snapshot the current db/gap and interpolate the final db/gap at the limit.
+        DIDNOTFIND:
+            Gap > 0, ncuts == 0.
+            We save the current db/gap as the final values,
+            and do not consider any more db improvements (e.g. by heuristics)
+        EMPTY_ACTION:
+            Gap > 0, ncuts > 0, nselected == 0.
+            The treatment is the same as DIDNOTFIND.
+
+        In practice, this function is called after SCIP.optimize() terminates.
+        self.terminal_state is set to None at the beginning, and once one of the 4 cases above is detected,
+        self.terminal_state is set to the appropriate value.
+
+        """
+        if self.cut_generator is not None:
+            assert self.nseparounds == self.cut_generator.nseparounds
+
+        # classify the terminal state
+        if self.terminal_state == 'EMPTY_ACTION':
+            # all the available cuts were discarded.
+            # the dualbound / gap might have been changed due to heuristics etc.
+            # however, this improvement is not related to the empty action.
+            # we extend the dualbound curve with constant and the LP iterations to the LP_ITERATIONS_LIMIT.
+            # the discarded cuts slack is not relevant anyway, since we penalize this action with constant.
+            # we set it to zero.
+            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
+            self.prev_action['applied'] = np.zeros_like(self.prev_action['selected'], dtype=np.bool)
+
+        elif self.terminal_state == 'LP_ITERATIONS_LIMIT_REACHED':
+            pass
+        elif self.terminal_state and self.model.getGap() == 0:
+            self.terminal_state = 'OPTIMAL'
+        elif self.terminal_state and self.model.getGap() > 0:
+            self.terminal_state = 'DIDNOTFIND'
+
+        assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'DIDNOTFIND', 'EMPTY_ACTION']
+
+        # in a case SCIP terminated without calling the agent,
+        # we need to complete some feedback manually.
+        # (it can happen only in terminal_state = OPTIMAL/LP_ITERATIONS_LIMIT_REACHED).
+        # we need to evaluate the normalized slack of the applied cuts,
+        # and to update the episode stats with the latest SCIP stats.
+        if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None:
+            assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED']
+            nvars = self.model.getNVars()
+            ncuts = self.prev_action['ncuts']
+            cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
+            cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
+            cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
+            cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)), shape=[ncuts, nvars]).toarray()
+            final_solution = self.model.getBestSol()
+            sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
+            sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
+            sol_vector = np.array(sol_vector)
+            # rhs slack of all cuts added at the previous round (including the discarded cuts)
+            # generally, LP rows look like
+            # lhs <= coef @ vars + cst <= rhs
+            # here, self.prev_action['rhss'] = rhs - cst,
+            # so cst is already subtracted.
+            # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
+            # with only constant factor between them
+            cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
+            rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
+            normalized_slack = rhs_slack / cuts_norm
+            # assign tightness penalty only to the selected cuts.
+            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
+            self.prev_action['normalized_slack'][self.prev_action['selected']] = normalized_slack[self.prev_action['selected']]
+            # assume that all the selected actions were actually applied,
+            # although we cannot verify it
+            self.prev_action['applied'] = self.prev_action['selected']
+
+            # update the rest of statistics needed to compute rewards
+            self._update_episode_stats()
+
+        # compute rewards and other stats for the whole episode,
+        # and if in training session, push transitions into memory
+        trajectory = self._compute_rewards_and_stats()
+        # increase the number of episodes done
+        if self.training:
+            self.i_episode += 1
+
+        return trajectory
+
+    # done
+    def _compute_rewards_and_stats(self):
+        """
+        Compute action-wise reward and store (s,a,r,s') transitions in memory
+        By the way, compute so metrics for plotting, e.g.
+        1. dualbound auc,
+        2. gap auc,
+        3. nactive/napplied,
+        4. napplied/navailable
+        """
+        lp_iterations_limit = self.lp_iterations_limit
+        gap = self.episode_stats['gap']
+        dualbound = self.episode_stats['dualbound']
+        lp_iterations = self.episode_stats['lp_iterations']
+
+        # compute the area under the curve:
+        dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
+        gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
+        if self.dqn_objective == 'db_auc':
+            objective_area = dualbound_area
+        elif self.dqn_objective == 'gap_auc':
+            objective_area = gap_area
+        else:
+            raise NotImplementedError
+
+        trajectory = []
+        if self.training:
+            # compute n-step returns for each state-action pair (s_t, a_t)
+            # and store a transition (s_t, a_t, r_t, s_{t+n}
+            n_transitions = len(self.state_action_qvalues_context_list)
+            n_steps = self.nstep_learning
+            gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
+            indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
+            # in case of n_steps > 1, pad objective_area with zeros only for avoiding overflow
+            max_index = np.max(indices)
+            if max_index >= len(objective_area):
+                objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
+            # take sliding windows of width n_step from objective_area
+            n_step_rewards = objective_area[indices]
+            # compute returns
+            # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
+            R = n_step_rewards @ gammas
+            # assign rewards and store transitions (s,a,r,s')
+            for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
+                # get the next n-step state and q values. if the episode already terminated,
+                # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
+                next_state, _, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
+
+                # credit assignment:
+                # R is a joint reward for all cuts applied at each step.
+                # now, assign to each cut its reward according to its slack
+                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
+                # so we punish inactive cuts by decreasing their reward to
+                # R * (1 - slack)
+                # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
+                normalized_slack = action['normalized_slack']
+                if self.hparams.get('credit_assignment', True):
+                    credit = 1 - normalized_slack
+                    reward = joint_reward * credit
+                else:
+                    reward = joint_reward * np.ones_like(normalized_slack)
+
+                # penalize "empty" action
+                is_empty_action = np.logical_not(action['selected']).all()
+                if self.empty_action_penalty is not None and is_empty_action:
+                    reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
+
+                transition = get_transition(scip_state=state,
+                                            action=action['selected'],
+                                            transformer_decoder_context=transformer_decoder_context,
+                                            reward=reward,
+                                            scip_next_state=next_state,
+                                            tqnet_version=self.tqnet_version)
+
+                if self.use_per:
+                    # todo - compute initial priority for PER based on the policy q_values.
+                    #        compute the TD error for each action in the current state as we do in sgd_step,
+                    #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
+                    selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
+                    q_values = q_values.gather(1, selected_action)
+                    # todo verify behavior with terminal state
+                    if next_q_values is None:
+                        # next state is terminal, and its q_values are 0 by convention
+                        target_q_values = torch.from_numpy(reward)
+                    else:
+                        max_next_q_values = next_q_values.max(1)[0]
+                        if self.hparams.get('value_aggr', 'mean') == 'max':
+                            max_next_q_values_aggr = max_next_q_values.max()
+                        if self.hparams.get('value_aggr', 'mean') == 'mean':
+                            max_next_q_values_aggr = max_next_q_values.mean()
+                        max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
+                        target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
+                    td_error = torch.abs(q_values - target_q_values)
+                    td_error = torch.clamp(td_error, min=1e-8)
+                    # todo - support pq norm
+                    initial_priority = torch.norm(td_error).item()  # default L2 norm
+                    # todo - support PER, local buffer and remote PER
+                    trajectory.append((transition, initial_priority))
+                    # self.memory.add((transition, initial_priority))
+                else:
+                    trajectory.append(transition)
+                    # self.memory.add(transition)
+
+        # compute some stats and store in buffer
+        active_applied_ratio = []
+        applied_available_ratio = []
+        for _, action, _, _ in self.state_action_qvalues_context_list:
+            normalized_slack = action['normalized_slack']
+            # because of numerical errors, we consider as zero |value| < 1e-6
+            approximately_zero = np.abs(normalized_slack) < 1e-6
+            normalized_slack[approximately_zero] = 0
+
+            applied = action['applied']
+            is_active = normalized_slack[applied] == 0
+            active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
+            applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
+        # store episode results in tmp_stats_buffer
+        db_auc = sum(dualbound_area)
+        gap_auc = sum(gap_area)
+        self.tmp_stats_buffer['db_auc'].append(db_auc)
+        self.tmp_stats_buffer['gap_auc'].append(gap_auc)
+        self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
+        self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
+        if self.baseline.get('rootonly_stats', None) is not None:
+            # this is evaluation round.
+            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
+            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+
+        return trajectory
 
     # done
     def optimize_model(self):
@@ -461,181 +836,6 @@ class CutDQNAgent(Sepa):
         # Update the target network, copying all weights and biases in DQN
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
-    # done
-    def _do_dqn_step(self):
-        """
-        Here is the episode inner loop of DQN.
-        This DQN implemention is most vanilla one,
-        in which we sequentially
-        1. get state
-        2. select action
-        3. get the next state and reward (in the next LP round, after the LP solver solved for our cuts)
-        4. store transition in memory
-        5. optimize the policy on the replay memory
-        When the instance is solved, the episode ends, and we start solving another instance,
-        continuing with the latest policy parameters.
-        This DQN agent should only be included as a separator in the next instance SCIP model.
-        The priority of calling the DQN separator should be the lowest, so it will be able to
-        see all the available cuts.
-        """
-        # get the current state, a dictionary of available cuts (keyed by their names,
-        # and query statistics related to the previous action (cut activeness etc.)
-        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True, query=self.prev_action)
-
-        # validate the solver behavior
-        if self.prev_action is not None:
-            # assert that all the selected cuts were actually applied
-            # otherwise, there is either a bug or a cut safety/feasibility issue.
-            assert (self.prev_action['selected'] == self.prev_action['applied']).all()
-
-        # finish with the previos step:
-        self._update_episode_stats(current_round_ncuts=available_cuts['ncuts'])
-
-        # if there are available cuts, select action and continue to the next state
-        if available_cuts['ncuts'] > 0:
-
-            # select an action, and get the decoder context for a case we use transformer and q_values for PER
-            action, q_values, decoder_context = self._select_action(cur_state)
-            available_cuts['selected'] = action
-            # force SCIP to take the selected cuts and discard the others
-            if sum(action) > 0:
-                # need to do it only if there are selected actions
-                self.model.forceCuts(action)
-                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
-                # in order to prevent it from adding more or less cuts
-                self.model.setIntParam('separating/maxcuts', int(sum(action)))
-                self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
-            else:
-                # TODO we need somehow to tell scip to stop cutting, without breaking the system. 
-                # flush the separation storage
-                self.model.clearCuts()
-                if self.hparams.get('verbose', 0) == 2:
-                    print(self.print_prefix + 'discarded all cuts')
-
-            # SCIP will execute the action,
-            # and return here in the next LP round -
-            # unless the instance is solved and the episode is done.
-            # store the current state and action for
-            # computing later the n-step rewards and the (s,a,r',s') transitions
-            self.state_action_qvalues_context_list.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
-            self.prev_action = available_cuts
-            self.prev_state = cur_state
-
-        # if the are no available cuts we terminate the episode.
-        # the stats of the last action were already collected.
-        # todo set self.terminal_state and continue from here
-        # without storing the current state-action pair,
-        # since the terminal state is not important.
-
-    # done
-    def finish_episode(self):
-        """
-        Compute rewards, push transitions into memory and log stats
-        INFO:
-        SCIP can terminate an episode (due to, say, node_limit or lp_iterations_limit)
-        after executing the LP without calling DQN.
-        In this case we need to compute by hand the tightness of the last action taken,
-        because the solver allows to access the information only in SCIP_STAGE.SOLVING
-        We distinguish between 4 types of terminal states:
-        OPTIMAL:
-            Gap == 0. If the LP_ITERATIONS_LIMIT was reached, we interpolate the final db/gap at the limit.
-            Otherwise, the final statistics are taken as is.
-            In this case the agent is rewarded also for all SCIP's side effects (e.g. heuristics)
-            which potentially helped in solving the instance.
-        LP_ITERATIONS_LIMIT_REACHED:
-            Gap >= 0. This state refers to the case in which the last action was not empty.
-            We snapshot the current db/gap and interpolate the final db/gap at the limit.
-        NO_CUTS:
-            Gap > 0, ncuts == 0.
-            We save the current db/gap as the final values,
-            and do not consider any more db improvements (e.g. by heuristics)
-        EMPTY_ACTION:
-            Gap > 0, ncuts > 0, nselected == 0.
-            The treatment is the same as NO_CUTS.
-
-        In practice, this function is called after SCIP.optimize() terminates.
-        self.terminal_state is set to None at the beginning, and once one of the 4 cases above is detected,
-        self.terminal_state is set to the appropriate value.
-
-        """
-        if self.cut_generator is not None:
-            assert self.nseparounds == self.cut_generator.nseparounds
-
-        if self.prev_action.get('normalized_slack', None) is None:
-            nvars = self.model.getNVars()
-            ncuts = self.prev_action['ncuts']
-            cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
-            cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
-            cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
-            cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)), shape=[ncuts, nvars]).toarray()
-            final_solution = self.model.getBestSol()
-            sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
-            sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
-            sol_vector = np.array(sol_vector)
-            # rhs slack of all cuts added at the previous round (including the discarded cuts)
-            # generally, LP rows look like
-            # lhs <= coef @ vars + cst <= rhs
-            # here, self.prev_action['rhss'] = rhs - cst,
-            # so cst is already subtracted.
-            # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
-            # with only constant factor between them
-            cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
-            rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
-            normalized_slack = rhs_slack / cuts_norm
-            # assign tightness penalty only to the selected cuts.
-            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
-            self.prev_action['normalized_slack'][self.prev_action['selected']] = normalized_slack[self.prev_action['selected']]
-            # assume that all the selected actions were actually applied,
-            # although we cannot verify it
-            self.prev_action['applied'] = self.prev_action['selected']
-
-            # update the rest of statistics needed to compute rewards
-            self._update_episode_stats(current_round_ncuts=ncuts)
-
-
-        # compute rewards and other stats for the whole episode,
-        # and if in training session, push transitions into memory
-        trajectory = self._compute_rewards_and_stats()
-        # increase the number of episodes done
-        if self.training:
-            self.i_episode += 1
-
-        return trajectory
-
-    # done
-    def sepaexeclp(self):
-        result = {"result": SCIP_RESULT.DIDNOTFIND}
-        if self.hparams.get('debug', False):
-            print(self.print_prefix, 'dqn')
-
-        # assert proper behavior
-        self.nseparounds += 1
-        if self.cut_generator is not None:
-            assert self.nseparounds == self.cut_generator.nseparounds
-            # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
-
-        if self.model.getNLPIterations() < self.lp_iterations_limit:
-            # sanity check: for each cut in the separation storage
-            # add an identical cut with different scale, and a weak cut with right shifted rhs
-            if self.hparams.get('sanity_check', False) and self.is_tester:
-                result = self.add_identical_and_weak_cuts()
-
-            self._do_dqn_step()
-
-            # sanity check: for each cut in the separation storage
-            # check if its weak version was applied
-            # and if both the original and the identical versions were applied.
-            if self.hparams.get('sanity_check', False) and self.is_tester:
-                self.track_identical_and_weak_cuts()
-
-        else:
-            result = {"result": SCIP_RESULT.DIDNOTRUN}
-            if self.hparams.get('verbose', 0) == 2:
-                print(self.print_prefix + 'LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
-
-        # todo - what retcode should be returned here? SEPARATED/DIDNOTFIND/DIDNOTRUN ?
-        return result
-
     def add_identical_and_weak_cuts(self):
         """
         For each cut in the separation storage
@@ -644,7 +844,6 @@ class CutDQNAgent(Sepa):
             - weak cut with rhs shifted right such that the weak cut is still efficacious.
         This function is written to maximize clarity, and not necessarily efficiency.
         """
-        result = {'result': SCIP_RESULT.DIDNOTFIND}
         model = self.model
         cuts = self.model.getCuts()
         n_original_cuts = len(cuts)
@@ -699,12 +898,10 @@ class CutDQNAgent(Sepa):
             model.flushRowExtensions(weak_cut)
             infeasible = model.addCut(weak_cut)
             assert not infeasible
-            result = {'result': SCIP_RESULT.SEPARATED}
             model.releaseRow(weak_cut)
 
         self.sanity_check_stats['cur_cut_names'] = cut_names
         self.sanity_check_stats['cur_n_original_cuts'] = n_original_cuts
-        return result
 
     def track_identical_and_weak_cuts(self):
         cur_n_original_cuts = self.sanity_check_stats['cur_n_original_cuts']
@@ -731,19 +928,29 @@ class CutDQNAgent(Sepa):
         self.sanity_check_stats['n_original_cuts'].append(cur_n_original_cuts)
 
     # done
-    def _update_episode_stats(self, current_round_ncuts):
-        # collect statistics related to the action taken at the previous round
-        # since getNCuts takes into account the cuts added by the cut generator before
+    def _update_episode_stats(self):
+        if self.finished_episode_stats or self.prev_action is None:
+            return
+        # collect statistics related to the action taken at the previous round.
+        # since model.getNCuts takes into account the cuts added by other separators before
         # calling the cut selection agent, we need to subtract the current round ncuts from
         # this value
-        self.episode_stats['ncuts'].append(self.model.getNCuts() - current_round_ncuts)
+        self.episode_stats['ncuts'].append(self.prev_action['ncuts'])
         self.episode_stats['ncuts_applied'].append(self.model.getNCutsApplied())
         self.episode_stats['solving_time'].append(self.model.getSolvingTime())
         self.episode_stats['processed_nodes'].append(self.model.getNNodes())
-        self.episode_stats['gap'].append(self.model.getGap())
-        self.episode_stats['lp_rounds'].append(self.model.getNLPs())
-        self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
-        self.episode_stats['dualbound'].append(self.model.getDualbound())
+        if self.terminal_state and self.terminal_state == 'EMPTY_ACTION':
+            # extend the gap and dualbound with constant,
+            # and append the LP_ITERATIONS_LIMIT to the lp_iterations.
+            self.episode_stats['gap'].append(self.episode_stats['gap'][-1])
+            self.episode_stats['lp_iterations'].append(self.lp_iterations_limit)  # todo assert lp_iterations_limit > 0?
+            self.episode_stats['dualbound'].append(self.episode_stats['dualbound'][-1])
+            self.episode_stats['lp_rounds'].append(self.model.getNLPs()+1)  # todo - check if needed to add 1 when EMPTY_ACTION
+        else:
+            self.episode_stats['gap'].append(self.model.getGap())
+            self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
+            self.episode_stats['dualbound'].append(self.model.getDualbound())
+            self.episode_stats['lp_rounds'].append(self.model.getNLPs())
 
         # enforce the lp_iterations_limit
         lp_iterations_limit = self.lp_iterations_limit
@@ -761,6 +968,8 @@ class CutDQNAgent(Sepa):
             # finally truncate the lp_iterations to the limit
             self.episode_stats['lp_iterations'][-1] = lp_iterations_limit
 
+
+
     # done
     def set_eval_mode(self):
         self.training = False
@@ -770,136 +979,6 @@ class CutDQNAgent(Sepa):
     def set_training_mode(self):
         self.training = True
         self.policy_net.train()
-
-    # done
-    def _compute_rewards_and_stats(self):
-        """
-        Compute action-wise reward and store (s,a,r,s') transitions in memory
-        By the way, compute so metrics for plotting, e.g.
-        1. dualbound auc,
-        2. gap auc,
-        3. nactive/napplied,
-        4. napplied/navailable
-        """
-        lp_iterations_limit = self.lp_iterations_limit
-        gap = self.episode_stats['gap']
-        dualbound = self.episode_stats['dualbound']
-        lp_iterations = self.episode_stats['lp_iterations']
-
-        # compute the area under the curve:
-        dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
-        gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
-        if self.dqn_objective == 'db_auc':
-            objective_area = dualbound_area
-        elif self.dqn_objective == 'gap_auc':
-            objective_area = gap_area
-        else:
-            raise NotImplementedError
-
-        trajectory = []
-        if self.training:
-            # compute n-step returns for each state-action pair (s_t, a_t)
-            # and store a transition (s_t, a_t, r_t, s_{t+n}
-            n_transitions = len(self.state_action_qvalues_context_list)
-            n_steps = self.nstep_learning
-            gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
-            indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
-            # in case of n_steps > 1, pad objective_area with zeros only for avoiding overflow
-            max_index = np.max(indices)
-            if max_index >= len(objective_area):
-                objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
-            # take sliding windows of width n_step from objective_area
-            n_step_rewards = objective_area[indices]
-            # compute returns
-            # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
-            R = n_step_rewards @ gammas
-            # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
-                # get the next n-step state and q values. if the episode already terminated,
-                # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
-                next_state, _, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
-
-                # credit assignment:
-                # R is a joint reward for all cuts applied at each step.
-                # now, assign to each cut its reward according to its slack
-                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
-                # so we punish inactive cuts by decreasing their reward to
-                # R * (1 - slack)
-                # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
-                normalized_slack = action['normalized_slack']
-                if self.hparams.get('credit_assignment', True):
-                    credit = 1 - normalized_slack
-                    reward = joint_reward * credit
-                else:
-                    reward = joint_reward * np.ones_like(normalized_slack)
-
-                # penalize "empty" action
-                is_empty_action = np.logical_not(action['selected']).all()
-                if self.empty_action_penalty is not None and is_empty_action:
-                    reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
-
-                transition = get_transition(scip_state=state,
-                                            action=action['selected'],
-                                            transformer_decoder_context=transformer_decoder_context,
-                                            reward=reward,
-                                            scip_next_state=next_state,
-                                            tqnet_version=self.tqnet_version)
-
-                if self.use_per:
-                    # todo - compute initial priority for PER based on the policy q_values.
-                    #        compute the TD error for each action in the current state as we do in sgd_step,
-                    #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
-                    selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
-                    q_values = q_values.gather(1, selected_action)
-                    # todo verify behavior with terminal state
-                    if next_q_values is None:
-                        # next state is terminal, and its q_values are 0 by convention
-                        target_q_values = torch.from_numpy(reward)
-                    else:
-                        max_next_q_values = next_q_values.max(1)[0]
-                        if self.hparams.get('value_aggr', 'mean') == 'max':
-                            max_next_q_values_aggr = max_next_q_values.max()
-                        if self.hparams.get('value_aggr', 'mean') == 'mean':
-                            max_next_q_values_aggr = max_next_q_values.mean()
-                        max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
-                        target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
-                    td_error = torch.abs(q_values - target_q_values)
-                    td_error = torch.clamp(td_error, min=1e-8)
-                    # todo - support pq norm
-                    initial_priority = torch.norm(td_error).item()  # default L2 norm
-                    # todo - support PER, local buffer and remote PER
-                    trajectory.append((transition, initial_priority))
-                    # self.memory.add((transition, initial_priority))
-                else:
-                    trajectory.append(transition)
-                    # self.memory.add(transition)
-
-        # compute some stats and store in buffer
-        active_applied_ratio = []
-        applied_available_ratio = []
-        for _, action, _, _ in self.state_action_qvalues_context_list:
-            normalized_slack = action['normalized_slack']
-            # because of numerical errors, we consider as zero |value| < 1e-6
-            approximately_zero = np.abs(normalized_slack) < 1e-6
-            normalized_slack[approximately_zero] = 0
-
-            applied = action['applied']
-            is_active = normalized_slack[applied] == 0
-            active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
-            applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
-        # store episode results in tmp_stats_buffer
-        db_auc = sum(dualbound_area)
-        gap_auc = sum(gap_area)
-        self.tmp_stats_buffer['db_auc'].append(db_auc)
-        self.tmp_stats_buffer['gap_auc'].append(gap_auc)
-        self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
-        self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
-        if self.baseline.get('rootonly_stats', None) is not None:
-            # this is evaluation round.
-            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
-            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
-
-        return trajectory
 
     # done
     def log_stats(self, save_best=False, plot_figures=False, global_step=None):
