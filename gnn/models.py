@@ -416,6 +416,9 @@ class TQnet(torch.nn.Module):
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         self.version = hparams.get('tqnet_version', 'v2')
         assert self.version in ['v1', 'v2']
+        self.select_at_least_one_cut = hparams.get('select_at_least_one_cut', True)
+        # select_at_least_one_cut is implemented only for 'v1' right now
+        assert not (self.select_at_least_one_cut and self.version == 'v1')
 
         ###########
         # Encoder #
@@ -599,6 +602,12 @@ class TQnet(torch.nn.Module):
 
             # mask already selected cuts, overriding their q_values by -inf
             q[selected_cuts_mask, :] = -float('Inf')
+
+            # force selecting at least one cut
+            # by setting the "discard" q_values of all cuts to -Inf at the first iteration only
+            if self.select_at_least_one_cut and not selected_cuts_mask.any():
+                q[:, 0] = -float('Inf')
+
             # find argmax [cut_index, selected] and max q_value
             serial_index, max_q = q.argmax(), q.max(q)
             # translate the serial index to [row, col] (or in other words [cut_index, selected])
@@ -639,6 +648,9 @@ class TQnet(torch.nn.Module):
                     self.decoder_edge_index_list.append(incoming_edges.detach().cpu())
                 # store the last q values of the remaining cuts in the output q_vals
                 q_vals[remaining_cuts_mask, :] = q[remaining_cuts_mask, :]
+
+        if self.select_at_least_one_cut and ncuts > 0:
+            assert selected_cuts_mask.any()
 
         # finally, stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer

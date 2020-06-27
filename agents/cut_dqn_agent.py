@@ -67,6 +67,7 @@ class CutDQNAgent(Sepa):
         self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
         self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
         self.empty_action_penalty = self.hparams.get('empty_action_penalty', 0)
+        self.select_at_least_one_cut = self.hparams.get('select_at_least_one_cut', True)
 
         # training stuff
         self.num_env_steps_done = 0
@@ -347,6 +348,10 @@ class CutDQNAgent(Sepa):
             else:
                 # randomize action
                 random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
+                if self.select_at_least_one_cut and random_action.sum() == 0:
+                    # select a cut arbitrarily
+                    random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = 1
+
                 if self.use_transformer:
                     # todo - randomize according to v1 and v2
                     # we create random decoder context to store for backprop.
