@@ -47,7 +47,8 @@ verbose: 1
 # DEBUG FLAGS
 debug: False
 debug_cuda: False
-overfit: False
+overfit: validset50
+sanity_check: True
 
 # SCIP STUFF
 reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP

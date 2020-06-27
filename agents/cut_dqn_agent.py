@@ -968,8 +968,6 @@ class CutDQNAgent(Sepa):
             # finally truncate the lp_iterations to the limit
             self.episode_stats['lp_iterations'][-1] = lp_iterations_limit
 
-
-
     # done
     def set_eval_mode(self):
         self.training = False
