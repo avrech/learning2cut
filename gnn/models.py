@@ -606,10 +606,13 @@ class TQnet(torch.nn.Module):
             # force selecting at least one cut
             # by setting the "discard" q_values of all cuts to -Inf at the first iteration only
             if self.select_at_least_one_cut and not selected_cuts_mask.any():
-                q[:, 0] = -float('Inf')
+                masked_q = q.clone()
+                masked_q[:, 0] = -float('Inf')
+                serial_index = masked_q.argmax()
+            else:
+                # find argmax [cut_index, selected] and max q_value
+                serial_index = q.argmax()
 
-            # find argmax [cut_index, selected] and max q_value
-            serial_index, max_q = q.argmax(), q.max(q)
             # translate the serial index to [row, col] (or in other words [cut_index, selected])
             cut_index = torch.floor(serial_index.float() / 2).long()
             # a cut is selected if the maximal value is q[cut_index, 1]
@@ -638,16 +641,19 @@ class TQnet(torch.nn.Module):
                 # store the current context for the remaining cuts
                 remaining_cuts_mask = selected_cuts_mask.logical_not()
                 remaining_cuts_idxs = remaining_cuts_mask.nonzero()
+                edge_attr_dec = edge_attr_dec.detach().cpu()
+                edge_index_dec = edge_index_dec.detach().cpu()
                 for cut_index in remaining_cuts_idxs:
                     # append to the context list the edges pointing to the cut_index,
                     # and their corresponding attr
                     cut_incoming_edges_mask = edge_index_dec[1, :] == cut_index
                     incoming_edges = edge_index_dec[:, cut_incoming_edges_mask]
                     incoming_attr = edge_attr_dec[cut_incoming_edges_mask]
-                    self.decoder_edge_attr_list.append(incoming_attr.detach().cpu())
-                    self.decoder_edge_index_list.append(incoming_edges.detach().cpu())
+                    self.decoder_edge_attr_list.append(incoming_attr)
+                    self.decoder_edge_index_list.append(incoming_edges)
                 # store the last q values of the remaining cuts in the output q_vals
-                q_vals[remaining_cuts_mask, :] = q[remaining_cuts_mask, :]
+                q_vals[remaining_cuts_mask, :] = q.detach().cpu()[remaining_cuts_mask, :]
+                break
 
         if self.select_at_least_one_cut and ncuts > 0:
             assert selected_cuts_mask.any()
