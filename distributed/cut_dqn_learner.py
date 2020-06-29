@@ -193,6 +193,7 @@ class CutDQNLearner(CutDQNAgent):
         """
         # wait until there is any batch ready for processing, and count the idle time
         idle_time_start = time.time()
+        idle_time_end = time.time()
         while not self.replay_data_queue:
             idle_time_end = time.time()
         self.idle_time_sec = idle_time_end - idle_time_start
