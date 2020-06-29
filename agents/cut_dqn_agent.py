@@ -999,7 +999,7 @@ class CutDQNAgent(Sepa):
         self.policy_net.train()
 
     # done
-    def log_stats(self, save_best=False, plot_figures=False, global_step=None):
+    def log_stats(self, save_best=False, plot_figures=False, global_step=None, info={}):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
@@ -1087,7 +1087,11 @@ class CutDQNAgent(Sepa):
             self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
             print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
 
+        # print the additional info
+        for k, v in info.items():
+            print(k + ': ' + v + ' | ', end='')
 
+        # print times
         d = int(np.floor(cur_time_sec/(3600*24)))
         h = int(np.floor(cur_time_sec/3600) - 24*d)
         m = int(np.floor(cur_time_sec/60) - 60*(24*d + h))

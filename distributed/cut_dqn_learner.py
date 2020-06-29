@@ -29,6 +29,9 @@ class CutDQNLearner(CutDQNAgent):
         self.is_worker = False
         self.is_tester = False
 
+        # idle time monitor
+        self.idle_time_sec = 0
+
         # todo set learner specific logdir
         learner_logdir = os.path.join(self.logdir, 'tensorboard', 'learner')
         self.writer = SummaryWriter(log_dir=learner_logdir)
@@ -114,7 +117,9 @@ class CutDQNLearner(CutDQNAgent):
 
             # log stats here - to be synchronized with the workers and tester logs.
             # todo - if self.num_param_updates > 0 and self.num_param_updates % self.hparams.get('log_interval', 100) == 0:
-            self.log_stats()
+            cur_time_sec = time() - self.start_time + self.walltime_offset
+            info = {'Idle time': '{:.2f}%'.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec))}
+            self.log_stats(info=info)
             self.save_checkpoint()
 
     @staticmethod
@@ -186,14 +191,20 @@ class CutDQNLearner(CutDQNAgent):
         we pop one batch from replay_data_queue, process and push new priorities to new_priorities_queue.
         Sending those priorities, and updating the workers will be done asynchronously in a separate thread.
         """
-        if len(self.replay_data_queue) > 0:
-            transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
-            new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights)
-            packet = (idxes, new_priorities, data_ids)
-            self.new_priorities_queue.append(packet)  # thread safe append
-            # todo verify
-            if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
-                self.update_target()
+        # wait until there is any batch ready for processing, and count the idle time
+        idle_time_start = time.time()
+        while not self.replay_data_queue:
+            idle_time_end = time.time()
+        self.idle_time_sec = idle_time_end - idle_time_start
+
+        # pop one batch and perform one SGD step
+        transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
+        new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights)
+        packet = (idxes, new_priorities, data_ids)
+        self.new_priorities_queue.append(packet)  # thread safe append
+        # todo verify
+        if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
+            self.update_target()
 
     def run_optimize_model(self):
         """
