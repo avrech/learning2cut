@@ -337,7 +337,13 @@ class CutDQNAgent(Sepa):
                         edge_index_a2a=batch.edge_index_a2a,
                         edge_attr_a2a=batch.edge_attr_a2a,
                     )
-                    greedy_action = q_values.max(1)[1].detach().cpu().numpy().astype(np.bool)
+                    if self.use_transformer and self.tqnet_version == 'v2':
+                        # the action is not necessarily q_values.argmax(1).
+                        # take the action built internally in the transformer.
+                        greedy_action = self.policy_net.decoder_greedy_action.numpy()
+                    else:
+                        greedy_action = q_values.max(1)[1].detach().cpu().numpy().astype(np.bool)
+
                     if self.use_transformer:
                         # return also the decoder context to store for backprop
                         greedy_action_decoder_context = self.policy_net.decoder_context
@@ -430,7 +436,13 @@ class CutDQNAgent(Sepa):
                     edge_index_a2a=batch.edge_index_a2a,
                     edge_attr_a2a=batch.edge_attr_a2a
                 )
-                greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
+                # todo enforce select_at_least_one_cut.
+                #  in tqnet v2 it is enforced internally, so that the decoder_greedy_action is valid.
+                if self.use_transformer and self.tqnet_version == 'v2':
+                    greedy_action = self.policy_net.decoder_greedy_action.numpy()
+                else:
+                    greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
+                assert not self.select_at_least_one_cut or any(greedy_action)
                 # return None, None for q_values and decoder context,
                 # since they are used only while generating experience
                 return greedy_action, None, None
@@ -488,7 +500,7 @@ class CutDQNAgent(Sepa):
             self.terminal_state = 'DIDNOTFIND'
 
         assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'DIDNOTFIND', 'EMPTY_ACTION']
-
+        assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
         # in a case SCIP terminated without calling the agent,
         # we need to complete some feedback manually.
         # (it can happen only in terminal_state = OPTIMAL/LP_ITERATIONS_LIMIT_REACHED).
@@ -551,6 +563,10 @@ class CutDQNAgent(Sepa):
         lp_iterations = self.episode_stats['lp_iterations']
 
         # compute the area under the curve:
+        if len(dualbound) <= 2:
+            print(self.episode_stats)
+            print(self.state_action_qvalues_context_list)
+
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
         gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
         if self.dqn_objective == 'db_auc':
@@ -620,7 +636,7 @@ class CutDQNAgent(Sepa):
                         # next state is terminal, and its q_values are 0 by convention
                         target_q_values = torch.from_numpy(reward)
                     else:
-                        max_next_q_values = next_q_values.max(1)[0]
+                        max_next_q_values = next_q_values.max(1)[0]  # todo - verify there is no -Inf or nan here
                         if self.hparams.get('value_aggr', 'mean') == 'max':
                             max_next_q_values_aggr = max_next_q_values.max()
                         if self.hparams.get('value_aggr', 'mean') == 'mean':
@@ -785,9 +801,9 @@ class CutDQNAgent(Sepa):
         # aggregate the action-wise values using mean or max,
         # and generate for each graph in the batch a single value
         max_target_next_q_values_aggr = self.aggr_func(max_target_next_q_values,   # source vector
-                                           batch.ns_x_a_batch,              # target index of each element in source
-                                           dim=0,                           # scattering dimension
-                                           dim_size=self.batch_size)   # output tensor size in dim after scattering
+                                                       batch.ns_x_a_batch,         # target index of each element in source
+                                                       dim=0,                      # scattering dimension
+                                                       dim_size=self.batch_size)   # output tensor size in dim after scattering
 
         # override with zeros the values of terminal states which are zero by convention
         max_target_next_q_values_aggr[batch.ns_terminal] = 0
@@ -934,28 +950,27 @@ class CutDQNAgent(Sepa):
 
     # done
     def _update_episode_stats(self):
+        """ Collect statistics related to the action taken at the previous round.
+        This function is assumed to be called in the consequent separation round
+        after the action was taken.
+        A corner case is when choosing "EMPTY_ACTION" (shouldn't happen if we force selecting at least one cut)
+        then the function is called immediately, and we need to add 1 to the number of lp_rounds.
+        """
         if self.finished_episode_stats or self.prev_action is None:
             return
-        # collect statistics related to the action taken at the previous round.
-        # since model.getNCuts takes into account the cuts added by other separators before
-        # calling the cut selection agent, we need to subtract the current round ncuts from
-        # this value
         self.episode_stats['ncuts'].append(self.prev_action['ncuts'])
         self.episode_stats['ncuts_applied'].append(self.model.getNCutsApplied())
         self.episode_stats['solving_time'].append(self.model.getSolvingTime())
         self.episode_stats['processed_nodes'].append(self.model.getNNodes())
+        self.episode_stats['gap'].append(self.model.getGap())
+        self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
+        self.episode_stats['dualbound'].append(self.model.getDualbound())
+
         if self.terminal_state and self.terminal_state == 'EMPTY_ACTION':
-            # extend the gap and dualbound with constant,
-            # and append the LP_ITERATIONS_LIMIT to the lp_iterations.
-            self.episode_stats['gap'].append(self.episode_stats['gap'][-1])
-            self.episode_stats['lp_iterations'].append(self.lp_iterations_limit)  # todo assert lp_iterations_limit > 0?
-            self.episode_stats['dualbound'].append(self.episode_stats['dualbound'][-1])
             self.episode_stats['lp_rounds'].append(self.model.getNLPs()+1)  # todo - check if needed to add 1 when EMPTY_ACTION
         else:
-            self.episode_stats['gap'].append(self.model.getGap())
-            self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
-            self.episode_stats['dualbound'].append(self.model.getDualbound())
             self.episode_stats['lp_rounds'].append(self.model.getNLPs())
+
 
         # enforce the lp_iterations_limit
         lp_iterations_limit = self.lp_iterations_limit
@@ -1202,7 +1217,7 @@ class CutDQNAgent(Sepa):
         if not os.path.exists(self.checkpoint_filepath):
             print(self.print_prefix, 'Checkpoint file does not exist! starting from scratch.')
             return
-        checkpoint = torch.load(self.checkpoint_filepath)
+        checkpoint = torch.load(self.checkpoint_filepath, map_location=self.device)
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

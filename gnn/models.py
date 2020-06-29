@@ -418,7 +418,7 @@ class TQnet(torch.nn.Module):
         assert self.version in ['v1', 'v2']
         self.select_at_least_one_cut = hparams.get('select_at_least_one_cut', True)
         # select_at_least_one_cut is implemented only for 'v1' right now
-        assert not (self.select_at_least_one_cut and self.version == 'v1')
+        assert not (self.select_at_least_one_cut and self.version == 'v1'), 'select_at_least_one_cut is not implemented yet for v1'
 
         ###########
         # Encoder #
@@ -466,6 +466,7 @@ class TQnet(torch.nn.Module):
         self.decoder_edge_attr_list = None
         self.decoder_edge_index_list = None
         self.decoder_context = None
+        self.decoder_greedy_action = None
 
         ##########
         # Q head #
@@ -657,6 +658,10 @@ class TQnet(torch.nn.Module):
 
         if self.select_at_least_one_cut and ncuts > 0:
             assert selected_cuts_mask.any()
+
+        # store the greedy action built on the fly to return to user,
+        # since the q_values.argmax(1) is not necessarily equal to selected_cuts_mask
+        self.decoder_greedy_action = selected_cuts_mask
 
         # finally, stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer

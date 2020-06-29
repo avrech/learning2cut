@@ -33,6 +33,8 @@ if __name__ == '__main__':
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
+    parser.add_argument('--use-gpu', action='store_true',
+                        help='use gpu for learner if available')
     parser.add_argument('--gpu-id', type=int, default=None,
                         help='gpu id to use if available')
 
@@ -50,7 +52,7 @@ if __name__ == '__main__':
     # modify hparams to fit workers and learner
     workers = [CutDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(1, hparams['num_workers']+1)]
     test_worker = CutDQNWorker(worker_id='Tester', hparams=hparams, is_tester=True, use_gpu=False)
-    learner = CutDQNLearner(hparams=hparams, use_gpu=True, gpu_id=args.gpu_id)
+    learner = CutDQNLearner(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
     replay_server = PrioritizedReplayServer(config=hparams)
 
     for worker in workers:
