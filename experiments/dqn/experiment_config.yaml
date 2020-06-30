@@ -48,7 +48,7 @@ verbose: 1
 # DEBUG FLAGS
 debug: False
 debug_cuda: False
-overfit: validset50
+overfit: validset25
 sanity_check: True
 
 # SCIP STUFF

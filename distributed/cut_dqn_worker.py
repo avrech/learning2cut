@@ -61,7 +61,7 @@ class CutDQNWorker(CutDQNAgent):
             param.data.copy_(new_param)
         # synchronize the global step counter self.num_param_updates with the value arrived from learner.
         # this makes self.log_stats() robust to Worker failures, missed packets and in resumed training.
-        assert self.num_param_updates < params_id, "global step counter is not consistent between learner and worker"
+        assert self.num_param_updates < params_id, f"global step counter is not consistent between learner and worker: TestWorker.num_param_updates={self.num_param_updates}, ParamsID={params_id}"
         self.num_param_updates = params_id
         # test should evaluate model here and then log stats.
         # workers should log stats before synchronizing, to plot the statistics collected by the previous policy,

@@ -4,6 +4,8 @@ import yaml
 import os
 import ray
 import cProfile
+import pstats
+import io
 
 
 if __name__ == '__main__':
@@ -25,6 +27,8 @@ if __name__ == '__main__':
                         help='use gpu for learner')
     parser.add_argument('--profile', action='store_true',
                         help='run with cProfile')
+    parser.add_argument('--time-limit', type=float, default=3600*24,
+                        help='global time limit in seconds')
 
     args = parser.parse_args()
     with open(args.configfile) as f:
@@ -44,6 +48,18 @@ if __name__ == '__main__':
         apex.train()
 
     if args.profile:
-        cProfile.run('main()')
+        # profile main() and print stats to readable file
+        pr = cProfile.Profile()
+        pr.enable()
+
+        main()
+
+        pr.disable()
+        s = io.StringIO()
+        ps = pstats.Stats(pr, stream=s).sort_stats('tottime')
+        ps.print_stats()
+        with open(os.path.join(args.logdir, 'profile_pstats.txt'), 'w+') as f:
+            f.write(s.getvalue())
+        print('Saved pstats to ', os.path.join(args.logdir, 'profile_pstats.txt'))
     else:
         main()
