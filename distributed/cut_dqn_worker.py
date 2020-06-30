@@ -59,8 +59,9 @@ class CutDQNWorker(CutDQNAgent):
         for param, new_param in zip(model.parameters(), new_params):
             new_param = torch.FloatTensor(new_param).to(self.device)
             param.data.copy_(new_param)
-        # synchronize the global step counter GDQN.num_param_updates with the value arrived from learner.
-        # this makes GDQN.log_stats() robust to Worker failures, and useful in recovering and resume training.
+        # synchronize the global step counter self.num_param_updates with the value arrived from learner.
+        # this makes self.log_stats() robust to Worker failures, missed packets and in resumed training.
+        assert self.num_param_updates < params_id, "global step counter is not consistent between learner and worker"
         self.num_param_updates = params_id
         # test should evaluate model here and then log stats.
         # workers should log stats before synchronizing, to plot the statistics collected by the previous policy,
@@ -70,21 +71,22 @@ class CutDQNWorker(CutDQNAgent):
         replay_data_packet = self.pack_replay_data(replay_data)
         self.worker_2_replay_server_socket.send(replay_data_packet)
 
-    def recv_new_params(self):
+    def recv_new_params(self, blocking=False):
         """
-        receive the latest published params.
-        In a case several param packets are waiting,
-        receive all of them and take the latest one.
+        Receive the recently published params.
+        The PUB/SUB protocol says that the packet received is the last one sent by the publisher.
+        So, in order to track the correct global step, a
         """
-        received = False
-        while True:
+        if blocking:
+            new_params_packet = self.params_sub_socket.recv()
+            received = True
+        else:
             try:
-                # if there is a waiting packet
                 new_params_packet = self.params_sub_socket.recv(zmq.DONTWAIT)
                 received = True
             except zmq.Again:
                 # no packets are waiting
-                break  # and go to synchronize
+                received = False
 
         if received:
             self.synchronize_params(new_params_packet)
@@ -109,10 +111,11 @@ class CutDQNWorker(CutDQNAgent):
         self.initialize_training()
         datasets = self.load_datasets()
         while True:
-            if self.recv_new_params():
-                # todo consider not ignoring eval interval
-                self.evaluate(datasets)
-                self.save_checkpoint()
+            received = self.recv_new_params(blocking=True)
+            assert received
+            # todo consider not ignoring eval interval
+            self.evaluate(datasets, ignore_eval_interval=True)
+            self.save_checkpoint()
 
     def collect_data(self):
         # todo
