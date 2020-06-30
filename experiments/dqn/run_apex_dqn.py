@@ -3,6 +3,7 @@ import argparse
 import yaml
 import os
 import ray
+import cProfile
 
 
 if __name__ == '__main__':
@@ -22,6 +23,8 @@ if __name__ == '__main__':
                         help='gpu id to use if available')
     parser.add_argument('--use-gpu', action='store_true',
                         help='use gpu for learner')
+    parser.add_argument('--profile', action='store_true',
+                        help='run with cProfile')
 
     args = parser.parse_args()
     with open(args.configfile) as f:
@@ -34,7 +37,13 @@ if __name__ == '__main__':
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
 
-    ray.init(ignore_reinit_error=True)
-    apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
-    apex.spawn()
-    apex.train()
+    def main():
+        ray.init(ignore_reinit_error=True)
+        apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
+        apex.spawn()
+        apex.train()
+
+    if args.profile:
+        cProfile.run('main()')
+    else:
+        main()

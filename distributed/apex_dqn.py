@@ -21,20 +21,9 @@ class ApeXDQN:
 
     def spawn(self):
         # wrap all actor classes with ray.remote to make them running remotely
-        ray_worker = ray.remote(
-            max_restarts=self.cfg.get('ray_actor_max_restarts', 10),
-            max_task_retries=self.cfg.get('ray_actor_max_task_retries', 10)
-        )(CutDQNWorker)
-        ray_learner = ray.remote(
-            max_restarts=self.cfg.get('ray_actor_max_restarts', 10),
-            max_task_retries=self.cfg.get('ray_actor_max_task_retries', 10),
-            num_gpus=int(self.use_gpu),
-            num_cpus=2
-        )(CutDQNLearner)
-        ray_replay_buffer = ray.remote(
-            max_restarts=self.cfg.get('ray_actor_max_restarts', 10),
-            max_task_retries=self.cfg.get('ray_actor_max_task_retries', 10)
-        )(PrioritizedReplayServer)
+        ray_worker = ray.remote(CutDQNWorker)
+        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
+        ray_replay_buffer = ray.remote(PrioritizedReplayServer)
 
         # Spawn all components
         self.workers = [ray_worker.remote(n, hparams=self.cfg) for n in range(1, self.num_workers + 1)]
