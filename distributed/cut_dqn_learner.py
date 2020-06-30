@@ -117,7 +117,7 @@ class CutDQNLearner(CutDQNAgent):
 
             # log stats here - to be synchronized with the workers and tester logs.
             # todo - if self.num_param_updates > 0 and self.num_param_updates % self.hparams.get('log_interval', 100) == 0:
-            cur_time_sec = time() - self.start_time + self.walltime_offset
+            cur_time_sec = time.time() - self.start_time + self.walltime_offset
             info = {'Idle time': '{:.2f}%'.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec))}
             self.log_stats(info=info)
             self.save_checkpoint()
