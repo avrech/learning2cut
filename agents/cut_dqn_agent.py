@@ -1313,7 +1313,7 @@ class CutDQNAgent(Sepa):
         #  remove all the other datasets from database
         if overfit_dataset_name:
             self.trainset = deepcopy(self.datasets[overfit_dataset_name])
-            self.trainset['dataset_name'] = 'trainset_overfit'
+            self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
             self.trainset['instances'][0][1].pop('rootonly_stats')
         else:
             self.trainset = self.datasets['trainset25']
@@ -1392,7 +1392,7 @@ class CutDQNAgent(Sepa):
         global_step = self.num_param_updates
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
-            if dataset_name[:8] == 'trainset':
+            if 'trainset' in dataset_name:
                 continue
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
                 self.init_figures(nrows=dataset['num_instances'],
@@ -1409,7 +1409,7 @@ class CutDQNAgent(Sepa):
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
-                self.log_stats(save_best=(dataset_name[:8] == 'validset'), plot_figures=True)
+                self.log_stats(save_best=('validset' in dataset_name), plot_figures=True)
         self.set_training_mode()
 
     # done

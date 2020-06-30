@@ -32,9 +32,10 @@ class CutDQNLearner(CutDQNAgent):
         # idle time monitor
         self.idle_time_sec = 0
 
-        # todo set learner specific logdir
+        # set learner specific logdir
         learner_logdir = os.path.join(self.logdir, 'tensorboard', 'learner')
         self.writer = SummaryWriter(log_dir=learner_logdir)
+        # set checkpoint file path for learner and workers
         self.checkpoint_filepath = os.path.join(self.logdir, 'learner_checkpoint.pt')
 
         self.replay_data_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
@@ -162,6 +163,7 @@ class CutDQNLearner(CutDQNAgent):
             self.learner_2_replay_server_socket.send(new_priors_packet)
 
     def run(self):
+        self.initialize_training()
         time.sleep(3)
         while True:
             self.recv_batch()  # todo run in background
