@@ -21,9 +21,20 @@ class ApeXDQN:
 
     def spawn(self):
         # wrap all actor classes with ray.remote to make them running remotely
-        ray_worker = ray.remote(CutDQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
-        ray_replay_buffer = ray.remote(PrioritizedReplayServer)
+        ray_worker = ray.remote(
+            max_restarts=self.cfg.get('ray_actor_max_restarts', 10),
+            max_task_retries=self.cfg.get('ray_actor_max_task_retries', 10)
+        )(CutDQNWorker)
+        ray_learner = ray.remote(
+            max_restarts=self.cfg.get('ray_actor_max_restarts', 10),
+            max_task_retries=self.cfg.get('ray_actor_max_task_retries', 10),
+            num_gpus=int(self.use_gpu),
+            num_cpus=2
+        )(CutDQNLearner)
+        ray_replay_buffer = ray.remote(
+            max_restarts=self.cfg.get('ray_actor_max_restarts', 10),
+            max_task_retries=self.cfg.get('ray_actor_max_task_retries', 10)
+        )(PrioritizedReplayServer)
 
         # Spawn all components
         self.workers = [ray_worker.remote(n, hparams=self.cfg) for n in range(1, self.num_workers + 1)]
@@ -41,5 +52,7 @@ class ApeXDQN:
             [self.replay_server.run.remote()] +
             [self.test_worker.test_run.remote()]
         )
-        time.sleep(self.cfg.get('time_limit', 3600*24))  # todo - find a better way to block the main program here
+        # todo - find a good way to block the main program here, so ray will continue tracking all actors, restart etc.
+        # time.sleep(self.cfg.get('time_limit', 3600*24))
+        ray.get(ready_ids, timeout=self.cfg.get('time_limit', 3600*24))
         print('finished')
