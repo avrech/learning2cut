@@ -92,7 +92,9 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             if message == "restart":
                 # learner has been restarted.
                 # reset the pending_priority_requests_cnt to avoid deadlocks
+                print(self.print_prefix, 'received "restart" message from learner. resetting pending requests counter...')
                 self.pending_priority_requests_cnt = 0
+
             else:
                 # this is a new_priorities packet
                 idxes, new_priorities, batch_ids = message
