@@ -93,6 +93,13 @@ class CutDQNWorker(CutDQNAgent):
         return received
 
     def run(self):
+        """ uniform remote run wrapper for tester and worker actors """
+        if self.is_tester:
+            self.run_test()
+        else:
+            self.run_work()
+
+    def run_work(self):
         self.initialize_training()
         self.load_datasets()
         while True:
@@ -106,7 +113,7 @@ class CutDQNWorker(CutDQNAgent):
                 # if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
                 self.log_stats(global_step=self.num_param_updates-1)
 
-    def test_run(self):
+    def run_test(self):
         # self.eps_greedy = 0
         self.initialize_training()
         datasets = self.load_datasets()

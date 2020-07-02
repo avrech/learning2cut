@@ -3,20 +3,26 @@ from distributed.replay_server import PrioritizedReplayServer
 from distributed.cut_dqn_worker import CutDQNWorker
 from distributed.cut_dqn_learner import CutDQNLearner
 
+ray.init(ignore_reinit_error=True, address='auto')
+
 
 class ApeXDQN:
     def __init__(self, cfg, use_gpu=True):
         self.cfg = cfg
         self.num_workers = self.cfg["num_workers"]
-        self.num_learners = self.cfg["num_learners"]
         self.use_gpu = use_gpu
 
         # actors
-        self.workers = None
-        self.test_worker = None
-        self.learner = None
-        self.replay_server = None
-        self.all_actors = None
+        # self.workers = None
+        # self.tester = None
+        # self.learner = None
+        # self.replay_server = None
+
+        # container of all ray actors
+        self.actors = {f'worker_{n}': None for n in range(1, self.num_workers + 1)}
+        self.actors['tester'] = None
+        self.actors['learner'] = None
+        self.actors['replay_server'] = None
 
     def spawn(self):
         """
@@ -32,25 +38,74 @@ class ApeXDQN:
         # wrap base classes with ray.remote to make them remote "Actor"s
         ray_worker = ray.remote(CutDQNWorker)
         ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
-        ray_replay_buffer = ray.remote(PrioritizedReplayServer)
+        ray_replay_server = ray.remote(PrioritizedReplayServer)
 
         # spawn all components as detached processes
         # todo - verify actor.options(name='...').remote(...) if options works and if it is possible update code.
-        self.workers = [ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg) for n in range(1, self.num_workers + 1)]
-        self.test_worker = ray_worker.options(name='tester').remote('Test', hparams=self.cfg, is_tester=True)
+        for n in range(1, self.num_workers + 1):
+            self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}', detached=True).remote(n, hparams=self.cfg)
+        self.actors['tester'] = ray_worker.options(name='tester', detached=True).remote('Test', hparams=self.cfg, is_tester=True)
         # instantiate learner and run its io process in a background thread
-        self.learner = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
-        self.replay_server = ray_replay_buffer.options(name=f'replay_server').remote(config=self.cfg)
+        self.actors['learner'] = ray_learner.options(name='learner', detached=True).remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
+        self.actors['replay_server'] = ray_replay_server.options(name='replay_server', detached=True).remote(config=self.cfg)
 
     def train(self):
         print("Running main training loop...")
-
-        ready_ids, remaining_ids = ray.wait(
-            [worker.run.remote() for worker in self.workers] +
-            [self.learner.run_optimize_model.remote()] +
-            [self.replay_server.run.remote()] +
-            [self.test_worker.test_run.remote()]
-        )
+        ready_ids, remaining_ids = ray.wait([actor.run.remote() for actor in self.actors.values()])
+        # ready_ids, remaining_ids = ray.wait(
+        #     [worker.run.remote() for worker in self.workers] +
+        #     [self.learner.run.remote()] +
+        #     [self.replay_server.run.remote()] +
+        #     [self.tester.run.remote()]
+        # )
         # todo - find a good way to block the main program here, so ray will continue tracking all actors, restart etc.
-        ray.get(ready_ids, timeout=self.cfg.get('time_limit', 3600*24))
+        ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
         print('finished')
+
+    def restart(self, actors=[], force_restart=False):
+        """ Re-launch learner as detached actor """
+        # todo - look for running learner, kill, instantiate a new one (with potentially updated code), and restart.
+        actors = list(self.actors.keys()) if len(actors) == 0 else actors
+        # get running actors if any.
+        running_actors = {}
+        for actor_name in actors:
+            try:
+                actor = ray.get_actor(actor_name)
+                running_actors[actor_name] = actor
+            except ValueError as e:
+                # if actor_name doesn't exist, ray will raise a ValueError exception saying this
+                print(e)
+                running_actors[actor_name] = None
+
+        ray_worker = ray.remote(CutDQNWorker)
+        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
+        ray_replay_server = ray.remote(PrioritizedReplayServer)
+
+        # restart all actors
+        for actor_name in actors:
+            running_actor = running_actors[actor_name]
+            if running_actor is not None:
+                if force_restart:
+                    print(f'killing {actor_name}...')
+                    ray.kill(running_actor)
+                else:
+                    print(f'request ignored, {actor_name} is already running.'
+                          f'use --force-restart to kill the existing {actor_name} and restart a new one.')
+                    continue
+
+            print(f'restarting {actor_name}...')
+            if actor_name == 'learner':
+                learner = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
+                learner.run.remote()
+            elif actor_name == 'tester':
+                tester = ray_worker.options(name='tester').remote('Test', hparams=self.cfg, is_tester=True)
+                tester.run.remote()
+            elif actor_name == 'replay_server':
+                replay_server = ray_replay_server.options(name='replay_server').remote(config=self.cfg)
+                replay_server.run.remote()
+            else:
+                prefix, worker_id = actor_name.split('_')
+                worker_id = int(worker_id)
+                assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
+                worker = ray_worker.options(name=actor_name).remote(worker_id, hparams=self.cfg)
+                worker.run.remote()

@@ -63,10 +63,11 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         batch_packet = pa.serialize(batch).to_buffer()
         return batch_packet
 
+    # todo - this is essentially the same like unpcak_replay_data. unify those two to one general unpack()
     @staticmethod
     def unpack_priorities(priorities_packet):
         unpacked_priorities = pa.deserialize(priorities_packet)
-        return unpacked_priorities  # idxes, priorities, data_ids
+        return unpacked_priorities
 
     def send_batches(self):
         # wait for receiving minimum_size transitions from workers,
@@ -83,12 +84,20 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         # unpack, and update memory priorities
         while True:
             try:
-                new_priorities_packet = self.learner_2_replay_server_socket.recv(zmq.DONTWAIT)
+                new_packet = self.learner_2_replay_server_socket.recv(zmq.DONTWAIT)
             except zmq.Again:
-                break  # no priority packets received. break and return.
-            idxes, new_priorities, batch_ids = self.unpack_priorities(new_priorities_packet)
-            self.update_priorities(idxes, new_priorities, batch_ids)
-            self.pending_priority_requests_cnt -= 1  # decrease pending requests counter
+                break  # no packet received. break and return.
+            # unpack the received packet, and classify it
+            message = self.unpack_priorities(new_packet)
+            if message == "restart":
+                # learner has been restarted.
+                # reset the pending_priority_requests_cnt to avoid deadlocks
+                self.pending_priority_requests_cnt = 0
+            else:
+                # this is a new_priorities packet
+                idxes, new_priorities, batch_ids = message
+                self.update_priorities(idxes, new_priorities, batch_ids)
+                self.pending_priority_requests_cnt -= 1  # decrease pending requests counter
 
     @staticmethod
     def unpack_replay_data(replay_data_packet):

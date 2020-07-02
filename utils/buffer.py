@@ -95,6 +95,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.num_sgd_steps_done = 0  # saved and loaded from checkpoint
         # beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * \
         #        math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
+        self.print_prefix = '[ReplayBuffer] '
 
     def add(self, data: tuple([Transition, float])):
         """
@@ -204,9 +205,18 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         assert len(idxes) == len(data_ids)
         # assert all(time_stamps <= self._time_stamp)
         assert all(priorities > 0)
-        assert all(0 <= idxes) and all(idxes < len(self.storage))
+        # todo - this might cause undesired crash when the replay server is restarted.
+        #  a probable failing case is where old waiting packets are now received, while their idxes refer to the
+        #  old replay server storage. So we only need to check idxes for overflow,
+        #  and the validity of the data itself will be done by comparing the received data_id to the existing one.
+        # assert all(0 <= idxes) and all(idxes < len(self.storage))
 
         for idx, priority, data_id in zip(idxes, priorities, data_ids):
+            # filter invalid packets
+            if not 0 <= idx <= len(self.storage):
+                print(self.print_prefix, 'received invalid index')
+                # todo - possibly the whole packet is corrupted/outdated, should we stop here to save time?
+                continue
             if data_id != self._data_unique_ids[idx]:
                 # data_id will be equal to self._data_unique_ids[idx] for newly added data,
                 # and for returned priorities whose corresponding stored data hasn't been overridden between

@@ -46,7 +46,7 @@ class CutDQNLearner(CutDQNAgent):
 
         # number of SGD steps between each workers update
         self.param_sync_interval = hparams.get("param_sync_interval", 50)
-        self.print_prefix = '[Learner ] '
+        self.print_prefix = '[Learner] '
         # initialize zmq sockets
         print(self.print_prefix, "initializing sockets..")
         # for receiving batch from replay server
@@ -79,6 +79,7 @@ class CutDQNLearner(CutDQNAgent):
             params.append(param.cpu().numpy())
         return params
 
+    # todo - this method is unused. remove it
     def get_params_packet(self, packet_id):
         """
         pack the learner params together with unique packet_id,
@@ -151,35 +152,36 @@ class CutDQNLearner(CutDQNAgent):
             self.replay_data_queue.append(batch)
         return received
 
-    @staticmethod
-    def pack_priorities(priorities_message):
-        priorities_packet = pa.serialize(priorities_message).to_buffer()
-        return priorities_packet
-
     def send_new_priorities(self):
         if len(self.new_priorities_queue) > 0:
             new_priorities = self.new_priorities_queue.popleft()
-            new_priors_packet = self.pack_priorities(new_priorities)
-            self.learner_2_replay_server_socket.send(new_priors_packet)
+            new_priorities_packet = pa.serialize(new_priorities).to_buffer()
+            self.learner_2_replay_server_socket.send(new_priorities_packet)
 
-    def run(self):
-        self.initialize_training()
-        time.sleep(3)
-        while True:
-            self.recv_batch()  # todo run in background
-            replay_data = self.replay_data_queue.pop()
-            new_priorities = self.learning_step(replay_data)
-            self.new_priorities_queue.append(new_priorities)
-            self.send_new_priorities()
-
-            self.prepare_new_params_to_workers()
-            self.publish_params()
+    # old version
+    # def run(self):
+    #     self.initialize_training()
+    #     time.sleep(3)
+    #     while True:
+    #         self.recv_batch()  # todo run in background
+    #         replay_data = self.replay_data_queue.pop()
+    #         new_priorities = self.learning_step(replay_data)
+    #         self.new_priorities_queue.append(new_priorities)
+    #         self.send_new_priorities()
+    #
+    #         self.prepare_new_params_to_workers()
+    #         self.publish_params()
 
     def run_io(self):
         """
         asynchronously receive data and return new priorities to replay server,
         and publish new params to workers
         """
+        print(self.print_prefix + 'started io process in background...')
+        print(self.print_prefix + 'sending "restart" message to replay_server...')
+        restart_message = pa.serialize("restart").to_buffer()
+        self.learner_2_replay_server_socket.send(restart_message)
+
         time.sleep(2)
         while True:
             self.recv_batch(blocking=False)
@@ -209,13 +211,14 @@ class CutDQNLearner(CutDQNAgent):
         if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
             self.update_target()
 
-    def run_optimize_model(self):
+    def run(self):
         """
         asynchronously
         pop batch from replay_data_queue,
         push new priorities to queue
         and periodically push updated params to param_queue
         """
+        print(self.print_prefix + 'started main optimization loop')
         time.sleep(1)
         while True:
             self.optimize_model()
