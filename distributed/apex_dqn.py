@@ -88,7 +88,7 @@ class ApeXDQN:
                     print(f'killing {actor_name}...')
                     ray.kill(running_actor)
                 else:
-                    print(f'request ignored, {actor_name} is already running.'
+                    print(f'request ignored, {actor_name} is already running. '
                           f'use --force-restart to kill the existing {actor_name} and restart a new one.')
                     continue
 
@@ -115,7 +115,7 @@ class ApeXDQN:
             actor = ray.get_actor(actor_name)
             # if actor exists, kill it
             print(f'killing the existing {actor_name}...')
-            ray.kill(actor_name)
+            ray.kill(actor)
 
         except ValueError as e:
             # if actor_name doesn't exist, ray will raise a ValueError exception saying this
