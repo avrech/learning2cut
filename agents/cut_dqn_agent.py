@@ -776,7 +776,7 @@ class CutDQNAgent(Sepa):
             edge_attr_dec=ns_edge_attr_dec
         )
 
-        # compute the target using either DQN target or DDQN target
+        # compute DQN / DDQN target
         if self.hparams.get('update_rule', 'DQN') == 'DQN':
             # y = r + gamma max_a' target_net(s', a')
             max_target_next_q_values = target_next_q_values.max(1)[0].detach()
@@ -1457,3 +1457,83 @@ class CutDQNAgent(Sepa):
     def get_model(self):
         """ useful for distributed actors """
         return self.policy_net
+
+    def _imitate_scip_cut_selection(self):
+        """
+        This method uses for imitating SCIP cut selection.
+        It is identical to _do_dqn_step, except that it does not apply the agent action.
+        Instead it only predicts and action, and tracks SCIP's original algorithm.
+        The agent reports its accuracy and f1score.
+        """
+        # get the current state, a dictionary of available cuts (keyed by their names,
+        # and query statistics related to the previous action (cut activeness etc.)
+        # in imitation learning - here we get the reference for imitating.
+        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True,
+                                                        query=self.prev_action)
+
+        # # todo - in imitation this is not relevant
+        # if self.prev_action is not None:
+        #     # assert that all the selected cuts were actually applied
+        #     # otherwise, there is either a bug or a cut safety/feasibility issue.
+        #     assert (self.prev_action['selected'] == self.prev_action['applied']).all()
+
+        # if there are available cuts, predict selected cuts
+        if available_cuts['ncuts'] > 0:
+
+            # select an action, and get the decoder context for a case we use transformer and q_values for PER
+            action, q_values, decoder_context = self._select_action(cur_state)
+            available_cuts['selected'] = action
+
+            # todo - in imitation this is not relevant
+            # # apply the action
+            # if any(action):
+            #     # force SCIP to take the selected cuts and discard the others
+            #     self.model.forceCuts(action)
+            #     # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+            #     # in order to prevent it from adding more or less cuts
+            #     self.model.setIntParam('separating/maxcuts', int(sum(action)))
+            #     self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+            #     # continue to the next state
+            #     result = {"result": SCIP_RESULT.SEPARATED}
+            #
+            # else:
+            #     # todo - This action leads to the terminal state.
+            #     #        SCIP may apply now heuristics which will further improve the dualbound/gap.
+            #     #        However, those improvements are not related to the currently taken action.
+            #     #        So we snapshot here the dualbound and gap and other related stats,
+            #     #        and set the terminal_state flag accordingly.
+            #     # force SCIP to "discard" all the available cuts by flushing the separation storage
+            #     self.model.clearCuts()
+            #     if self.hparams.get('verbose', 0) == 2:
+            #         print(self.print_prefix + 'discarded all cuts')
+            #     self.terminal_state = 'EMPTY_ACTION'
+            #     self.prev_action = available_cuts
+            #     self._update_episode_stats()
+            #     self.finished_episode_stats = True
+            #     result = {"result": SCIP_RESULT.DIDNOTFIND}
+
+            # SCIP will execute the action,
+            # and return here in the next LP round -
+            # unless the instance is solved and the episode is done.
+            # store the current state and action for
+            # computing later the n-step rewards and the (s,a,r',s') transitions
+            self.state_action_qvalues_context_list.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
+            self.prev_action = available_cuts
+            self.prev_state = cur_state
+
+        # If there are no available cuts we terminate the episode.
+        # The stats of the previous action are already collected,
+        # so we can finish collecting stats.
+        # We don't store the current state-action pair,
+        # since the terminal state is not important.
+        # The final gap in this state can be either zero (OPTIMAL) or strictly positive.
+        # However, model.getGap() can potentially return gap > 0, as SCIP stats will be updated only afterward.
+        # So we temporarily set terminal_state to True (general description)
+        # and we will accurately characterize it after the optimization terminates.
+        elif available_cuts['ncuts'] == 0:
+            # todo: check if we ever get here, and verify behavior
+            self.prev_action = None
+            self.terminal_state = True
+            self.finished_episode_stats = True
+        result = {"result": SCIP_RESULT.DIDNOTFIND}
+        return result
