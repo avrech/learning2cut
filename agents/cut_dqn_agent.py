@@ -312,6 +312,8 @@ class CutDQNAgent(Sepa):
 
     # done
     def _select_action(self, scip_state):
+        # todo - what should be the return types? action only, or maybe also q values and decoder context?
+        #  for simple tracking return all types, for compatibility with non-transformer models return only action.
         # transform scip_state into GNN data type
         batch = Batch().from_data_list([get_transition(scip_state, tqnet_version=self.tqnet_version)],
                                        follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
@@ -341,18 +343,20 @@ class CutDQNAgent(Sepa):
                         edge_attr_a2a=batch.edge_attr_a2a,
                     )
                     if self.use_transformer and self.tqnet_version == 'v2':
-                        # the action is not necessarily q_values.argmax(1).
-                        # take the action built internally in the transformer.
+                        # the action is not necessarily q_values.argmax(dim=1).
+                        # take the action built internally in the transformer, and the corresponding q_values
+                        greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action).detach().cpu()  # todo - verification return the relevant q values only
                         greedy_action = self.policy_net.decoder_greedy_action.numpy()
                     else:
-                        greedy_action = q_values.max(1)[1].detach().cpu().numpy().astype(np.bool)
-
+                        greedy_q_values, greedy_action = q_values.max(1)  # todo - verification
+                        greedy_action = greedy_action.detach().cpu().numpy().astype(np.bool)
+                        greedy_q_values = greedy_q_values.detach().cpu()
                     if self.use_transformer:
                         # return also the decoder context to store for backprop
                         greedy_action_decoder_context = self.policy_net.decoder_context
                     else:
                         greedy_action_decoder_context = None
-                    return greedy_action, q_values.detach().cpu(), greedy_action_decoder_context
+                    return greedy_action, greedy_q_values, greedy_action_decoder_context
 
             else:
                 # randomize action
@@ -423,8 +427,9 @@ class CutDQNAgent(Sepa):
                     edge_index_dec=random_edge_index_dec.to(self.device),
                     edge_attr_dec=random_edge_attr_dec.to(self.device)
                 ).detach().cpu()
+                random_q_values = q_values.gather(1, random_action)  # todo - verification. take the relevant q_values only.
                 random_action = random_action.numpy().astype(np.bool)
-                return random_action, q_values, random_action_decoder_context
+                return random_action, random_q_values, random_action_decoder_context
         else:
             # in test time, take greedy action
             with torch.no_grad():
@@ -600,7 +605,7 @@ class CutDQNAgent(Sepa):
             for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
                 # get the next n-step state and q values. if the episode already terminated,
                 # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
-                next_state, _, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
+                next_state, next_action, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
@@ -633,31 +638,30 @@ class CutDQNAgent(Sepa):
                     #        compute the TD error for each action in the current state as we do in sgd_step,
                     #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
                     selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
-                    q_values = q_values.gather(1, selected_action)
-                    # todo verify behavior with terminal state
+                    # q_values = q_values.gather(1, selected_action)  # gathering is done now in _select_action
                     if next_q_values is None:
                         # next state is terminal, and its q_values are 0 by convention
                         target_q_values = torch.from_numpy(reward)
                     else:
-                        max_next_q_values = next_q_values.max(1)[0]  # todo - verify there are no -Inf or nan here
-                        if self.hparams.get('value_aggr', 'mean') == 'max':
-                            max_next_q_values_aggr = max_next_q_values.max()
-                        if self.hparams.get('value_aggr', 'mean') == 'mean':
-                            # todo - correct this for tqnet v2:
-                            #  average only the "select" q values which are strictly higher than the max discard value.
-                            max_next_q_values_aggr = max_next_q_values.mean()
+                        # todo - tqnet v2:
+                        #  take only the max q value over the "select" entries
+                        if self.use_transformer and self.tqnet_version == 'v2':
+                            max_next_q_values_aggr = next_q_values[next_action == 1].max()  # todo - verification
+                        else:
+                            max_next_q_values = next_q_values.max(1)[0]
+                            if self.hparams.get('value_aggr', 'mean') == 'max':
+                                max_next_q_values_aggr = max_next_q_values.max()
+                            if self.hparams.get('value_aggr', 'mean') == 'mean':
+                                max_next_q_values_aggr = max_next_q_values.mean()
+
                         max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
                         target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
                     td_error = torch.abs(q_values - target_q_values)
                     td_error = torch.clamp(td_error, min=1e-8)
-                    # todo - support pq norm
                     initial_priority = torch.norm(td_error).item()  # default L2 norm
-                    # todo - support PER, local buffer and remote PER
                     trajectory.append((transition, initial_priority))
-                    # self.memory.add((transition, initial_priority))
                 else:
                     trajectory.append(transition)
-                    # self.memory.add(transition)
 
         # compute some stats and store in buffer
         active_applied_ratio = []
