@@ -345,7 +345,7 @@ class CutDQNAgent(Sepa):
                     if self.use_transformer and self.tqnet_version == 'v2':
                         # the action is not necessarily q_values.argmax(dim=1).
                         # take the action built internally in the transformer, and the corresponding q_values
-                        greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action).detach().cpu()  # todo - verification return the relevant q values only
+                        greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
                         greedy_action = self.policy_net.decoder_greedy_action.numpy()
                     else:
                         greedy_q_values, greedy_action = q_values.max(1)  # todo - verification
@@ -427,7 +427,7 @@ class CutDQNAgent(Sepa):
                     edge_index_dec=random_edge_index_dec.to(self.device),
                     edge_attr_dec=random_edge_attr_dec.to(self.device)
                 ).detach().cpu()
-                random_q_values = q_values.gather(1, random_action)  # todo - verification. take the relevant q_values only.
+                random_q_values = q_values.gather(1, random_action.long().unsqueeze(1))  # todo - verification. take the relevant q_values only.
                 random_action = random_action.numpy().astype(np.bool)
                 return random_action, random_q_values, random_action_decoder_context
         else:
@@ -646,7 +646,7 @@ class CutDQNAgent(Sepa):
                         # todo - tqnet v2:
                         #  take only the max q value over the "select" entries
                         if self.use_transformer and self.tqnet_version == 'v2':
-                            max_next_q_values_aggr = next_q_values[next_action == 1].max()  # todo - verification
+                            max_next_q_values_aggr = next_q_values[next_action['applied'] == 1].max()  # todo - verification
                         else:
                             max_next_q_values = next_q_values.max(1)[0]
                             if self.hparams.get('value_aggr', 'mean') == 'max':
@@ -809,11 +809,11 @@ class CutDQNAgent(Sepa):
         if self.use_transformer and self.tqnet_version == 'v2':
             if self.hparams.get('update_rule', 'DQN') == 'DQN':
                 # y = r + gamma max_a' target_net(s', a')
-                max_target_next_q_values_aggr = scatter_max(target_next_q_values[:, 1],  # find max across the "select" q values only
-                                                            batch.ns_x_a_batch,
-                                                            # target index of each element in source
-                                                            dim=0,  # scattering dimension
-                                                            dim_size=self.batch_size)
+                max_target_next_q_values_aggr, _ = scatter_max(target_next_q_values[:, 1],  # find max across the "select" q values only
+                                                               batch.ns_x_a_batch,
+                                                               # target index of each element in source
+                                                               dim=0,  # scattering dimension
+                                                               dim_size=self.batch_size)
             elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
                 raise NotImplementedError
                 # # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
