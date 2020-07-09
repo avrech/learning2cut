@@ -49,7 +49,7 @@ verbose: 2
 debug: False
 debug_cuda: False
 overfit: validset25
-sanity_check: True
+sanity_check: False
 
 # SCIP STUFF
 reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
