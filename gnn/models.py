@@ -784,7 +784,9 @@ class TQnet(torch.nn.Module):
                 edge_index_a2a,
                 edge_attr_a2a,
                 edge_attr_dec=None,
-                edge_index_dec=None
+                edge_index_dec=None,
+                random_action=None,
+                **kwargs
                 ):
         """
         :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
@@ -799,6 +801,10 @@ class TQnet(torch.nn.Module):
         cut_encoding, _, _ = self.cut_conv(cut_conv_inputs)
 
         # decoding - inference
+        if random_action is not None:
+            # build corresponding context and run in parallel
+            edge_index_dec, edge_attr_dec = self.get_random_context(random_action)
+
         if edge_attr_dec is None:
             if self.version == 'v1':
                 q_vals = self.inference_v1(cut_encoding)
@@ -970,6 +976,42 @@ class TQnet(torch.nn.Module):
         self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
         return q_vals
 
+    def get_random_context(self, random_action):
+        ncuts = random_action.shape[0]
+        if self.version == 'v1':
+            inference_order = torch.randperm(ncuts)
+        elif self.version == 'v2':
+            selected_idxes = random_action.nonzero()
+            inference_order = torch.cat([selected_idxes[torch.randperm(len(selected_idxes))],
+                                         random_action.logical_not().nonzero()])
+
+        decoder_edge_attr_list = []
+        decoder_edge_index_list = []
+        edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                    torch.empty((1, ncuts), dtype=torch.long)], dim=0)
+        edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32)
+        # iterate over all cuts, and assign a context to each one
+        for cut_index in inference_order:
+            # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+            edge_index_dec[1, :] = cut_index
+            # store the context (edge_index_dec and edge_attr_dec) of the current iteration
+            decoder_edge_attr_list.append(edge_attr_dec.clone())
+            decoder_edge_index_list.append(edge_index_dec.clone())
+            # assign the random action of cut_index to the context of the next round
+            edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
+            edge_attr_dec[cut_index, 1] = random_action[cut_index]  # mark the cut as selected or not
+
+        # finally, stack the decoder edge_attr and edge_index tensors, and make a transformer context
+        random_edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+        if self.version == 'v2':
+            # take only the "selected" attribute
+            random_edge_attr_dec = random_edge_attr_dec[:, 1].unsqueeze(dim=1)
+
+        random_edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
+        random_action_decoder_context = TransformerDecoderContext(random_edge_index_dec, random_edge_attr_dec)
+        self.decoder_context = random_action_decoder_context
+
+        return random_edge_index_dec.to(self.device), random_edge_attr_dec.to(self.device)
 
 # feed forward Q network - no recurrence
 class Qnet(torch.nn.Module):
