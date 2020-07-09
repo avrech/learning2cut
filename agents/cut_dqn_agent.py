@@ -815,26 +815,28 @@ class CutDQNAgent(Sepa):
                                                                dim=0,  # scattering dimension
                                                                dim_size=self.batch_size)
             elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
-                raise NotImplementedError
-                # # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-                # policy_next_q_values = self.policy_net(
-                #     x_c=batch.ns_x_c,
-                #     x_v=batch.ns_x_v,
-                #     x_a=batch.ns_x_a,
-                #     edge_index_c2v=batch.ns_edge_index_c2v,
-                #     edge_index_a2v=batch.ns_edge_index_a2v,
-                #     edge_attr_c2v=batch.ns_edge_attr_c2v,
-                #     edge_attr_a2v=batch.ns_edge_attr_a2v,
-                #     edge_index_a2a=batch.ns_edge_index_a2a,
-                #     edge_attr_a2a=batch.ns_edge_attr_a2a,
-                #     edge_index_dec=ns_edge_index_dec,
-                #     edge_attr_dec=ns_edge_attr_dec
-                # )
-                # # compute the 'select' argmax for each graph in batch
-                #
+                # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
+                policy_next_q_values = self.policy_net(
+                    x_c=batch.ns_x_c,
+                    x_v=batch.ns_x_v,
+                    x_a=batch.ns_x_a,
+                    edge_index_c2v=batch.ns_edge_index_c2v,
+                    edge_index_a2v=batch.ns_edge_index_a2v,
+                    edge_attr_c2v=batch.ns_edge_attr_c2v,
+                    edge_attr_a2v=batch.ns_edge_attr_a2v,
+                    edge_index_a2a=batch.ns_edge_index_a2a,
+                    edge_attr_a2a=batch.ns_edge_attr_a2a,
+                    edge_index_dec=ns_edge_index_dec,
+                    edge_attr_dec=ns_edge_attr_dec
+                )
+                # compute the 'select' argmax for each graph in batch
+                _, argmax_policy_next_q_values = scatter_max(policy_next_q_values[:, 1], # find max across the "select" q values only
+                                                             batch.ns_x_a_batch, # target index of each element in source
+                                                             dim=0,  # scattering dimension
+                                                             dim_size=self.batch_size)
+                max_target_next_q_values_aggr = target_next_q_values[argmax_policy_next_q_values, 1].detach()
                 # argmax_policy_next_q_values = policy_next_q_values.max(1)[1].detach()
                 # max_target_next_q_values = target_next_q_values.gather(1, argmax_policy_next_q_values).detach()
-                #
                 # # aggregate the action-wise values using mean or max,
                 # # and generate for each graph in the batch a single value
                 # max_target_next_q_values_aggr = self.value_aggr(max_target_next_q_values,  # source vector
