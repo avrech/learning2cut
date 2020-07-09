@@ -15,8 +15,8 @@ TransitionNumpyTuple = namedtuple(
         'edge_attr_a2v',
         'edge_index_a2a',
         'edge_attr_a2a',
-        'edge_index_dec',
-        'edge_attr_dec',
+        # 'edge_index_dec',
+        # 'edge_attr_dec',
         'stats',
         'a',
         'r',
@@ -50,8 +50,8 @@ class Transition(Data):
                  edge_attr_a2v=None,
                  edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
                  edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
-                 edge_index_dec=None, # transformer decoder context
-                 edge_attr_dec=None, # transformer decoder context
+                 # edge_index_dec=None, # transformer decoder context
+                 # edge_attr_dec=None, # transformer decoder context
                  stats=None,
                  # action
                  a=None,  # cuts clique graph node labels  - the action whether to apply the cut or not.
@@ -80,8 +80,8 @@ class Transition(Data):
         self.edge_attr_a2v = edge_attr_a2v
         self.edge_index_a2a = edge_index_a2a
         self.edge_attr_a2a = edge_attr_a2a
-        self.edge_index_dec = edge_index_dec
-        self.edge_attr_dec = edge_attr_dec
+        # self.edge_index_dec = edge_index_dec
+        # self.edge_attr_dec = edge_attr_dec
         self.stats = stats
         self.a = a
         self.r = r
@@ -104,8 +104,8 @@ class Transition(Data):
             return torch.tensor([[self.x_a.size(0)], [self.x_v.size(0)]])
         if key == 'edge_index_a2a':
             return self.x_a.size(0)
-        if key == 'edge_index_dec':
-            return self.x_a.size(0)
+        # if key == 'edge_index_dec':
+        #     return self.x_a.size(0)
         if key == 'ns_edge_index_c2v':
             return torch.tensor([[self.ns_x_c.size(0)], [self.ns_x_v.size(0)]])
         if key == 'ns_edge_index_a2v':
@@ -128,7 +128,7 @@ def get_transition(scip_state,
                    transformer_decoder_context=None,
                    reward=None,
                    scip_next_state=None,
-                   tqnet_version='v2'):
+                   tqnet_version='v3'):
     """
     Creates a torch_geometric.data.Data object from SCIP state
     produced by scip.Model.getState(state_format='tensor')
@@ -164,31 +164,40 @@ def get_transition(scip_state,
     edge_attr_a2v = torch.from_numpy(cuts_nzrcoef).unsqueeze(dim=1)
 
     # build the clique graph of the candidate cuts:
-    if x_a.shape[0] > 1:
-        # we add 1 to cuts_orthogonality to ensure that all edges are created
-        # including the self edges
-        edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality + 1))
-        # assert that edge_index_a2a is sorted
-        test_ei, test_at = sort_edge_index(edge_index_a2a, edge_attr_a2a) # todo - verification
-        assert (test_ei == edge_index_a2a).all() and (test_at == edge_attr_a2a).all()
-        edge_attr_a2a -= 1  # subtract 1 to set back the correct orthogonality values
-        edge_attr_a2a.unsqueeze_(dim=1)
-    elif x_a.shape[0] == 1:
-        edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # single self loop
-        edge_attr_a2a = torch.zeros(size=(1, 1), dtype=torch.float32)  # self orthogonality
-    else:
-        raise ValueError
-
     # if using transformer, take the decoder context and edge_index from the input, else generate empty one
     if transformer_decoder_context is not None:
-        edge_index_dec, edge_attr_dec = transformer_decoder_context
+        edge_index_a2a, edge_attr_a2a = transformer_decoder_context
     else:
-        # create dummy edge_index_dec and edge_attr_dec, only for batching correctly
-        edge_index_dec = torch.tensor([[0], [0]], dtype=torch.long)  # self loop
+        # create basic edge_attr_a2a
+        if x_a.shape[0] > 1:
+            # we add 1 to cuts_orthogonality to ensure that all edges are created
+            # including the self edges
+            edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality + 1))
+            # assert that edge_index_a2a is sorted
+            test_ei, test_at = sort_edge_index(edge_index_a2a, edge_attr_a2a) # todo - verification
+            assert (test_ei == edge_index_a2a).all() and (test_at == edge_attr_a2a).all()
+            edge_attr_a2a -= 1  # subtract 1 to set back the correct orthogonality values
+            edge_attr_a2a.unsqueeze_(dim=1)
+        elif x_a.shape[0] == 1:
+            edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # single self loop
+            edge_attr_a2a = torch.zeros(size=(1, 1), dtype=torch.float32)  # self orthogonality
+        else:
+            raise ValueError
+
+        # attach initial transformer context if needed
         if tqnet_version == 'v1':
-            edge_attr_dec = torch.zeros(size=(1, 2), dtype=torch.float32)
+            # edge_attr_a2a = [o_ij, processed_i, selected_i]
+            edge_attr_a2a = torch.cat([edge_attr_a2a, torch.zeros((edge_attr_a2a.shape[0], 2))], dim=-1)
         elif tqnet_version == 'v2':
-            edge_attr_dec = torch.zeros(size=(1, 1), dtype=torch.float32)
+            # edge_attr_a2a = [o_ij, selected_i]
+            edge_attr_a2a = torch.cat([edge_attr_a2a, torch.zeros((edge_attr_a2a.shape[0], 1))], dim=-1)
+        elif tqnet_version == 'v3':
+            # edge_attr_a2a = [o_ij, o_iS, selected_i]
+            # o_iS, the orthogonality to the selected group is initialized to 1 (the orthogonality to "nothing" is 1 by convenetion)
+            edge_attr_a2a = torch.cat([edge_attr_a2a, torch.ones_like(edge_attr_a2a), torch.zeros_like(edge_attr_a2a)], dim=-1)
+        elif tqnet_version == 'none':
+            # don't do anything. transformer is not in use.
+            pass
         else:
             raise ValueError
 
@@ -226,7 +235,7 @@ def get_transition(scip_state,
         ns_edge_attr_c2v = torch.from_numpy(ns_nzrcoef).unsqueeze(dim=1)
         ns_edge_attr_a2v = torch.from_numpy(ns_cuts_nzrcoef).unsqueeze(dim=1)
 
-        # build the clique graph of the candidate cuts:
+        # build the clique graph of the candidate cuts,
         if ns_x_a.shape[0] > 1:
             ns_edge_index_a2a, ns_edge_attr_a2a = dense_to_sparse(torch.from_numpy(ns_cuts_orthogonality + 1))
             ns_edge_attr_a2a -= 1
@@ -236,6 +245,22 @@ def get_transition(scip_state,
         elif ns_x_a.shape[0] == 1:
             ns_edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # single self loop
             ns_edge_attr_a2a = torch.zeros(size=(1, 1), dtype=torch.float32)  # self orthogonality
+        else:
+            raise ValueError
+        # attach initial transformer context if needed
+        if tqnet_version == 'v1':
+            # edge_attr_a2a = [o_ij, processed_i, selected_i]
+            ns_edge_attr_a2a = torch.cat([ns_edge_attr_a2a, torch.zeros((ns_edge_attr_a2a.shape[0], 2))], dim=-1)
+        elif tqnet_version == 'v2':
+            # edge_attr_a2a = [o_ij, selected_i]
+            ns_edge_attr_a2a = torch.cat([ns_edge_attr_a2a, torch.zeros_like(ns_edge_attr_a2a)], dim=-1)
+        elif tqnet_version == 'v3':
+            # edge_attr_a2a = [o_ij, o_iS, selected_i]
+            # o_iS, the orthogonality to the selected group is initialized to 1 (the orthogonality to "nothing" is 1 by convenetion)
+            ns_edge_attr_a2a = torch.cat([ns_edge_attr_a2a, torch.ones_like(ns_edge_attr_a2a), torch.zeros_like(ns_edge_attr_a2a)], dim=-1)
+        elif tqnet_version == 'none':
+            # don't do anything. transformer is not in use.
+            pass
         else:
             raise ValueError
 
@@ -251,7 +276,8 @@ def get_transition(scip_state,
         ns_edge_index_a2v = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
         ns_edge_attr_a2v = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
         ns_edge_index_a2a = torch.tensor([[0], [0]], dtype=torch.long)  # self loops
-        ns_edge_attr_a2a = torch.zeros(size=(1, 1), dtype=torch.float32)  # null attributes
+        edge_attr_a2a_dim = {'v1': 3, 'v2': 2, 'v3': 3, 'none': 1}.get(tqnet_version)
+        ns_edge_attr_a2a = torch.zeros(size=(1, edge_attr_a2a_dim), dtype=torch.float32)  # null attributes
         ns_stats = torch.zeros_like(stats)
         ns_terminal = torch.tensor([1], dtype=torch.bool)
 
@@ -273,8 +299,8 @@ def get_transition(scip_state,
         edge_attr_a2v=edge_attr_a2v,
         edge_index_a2a=edge_index_a2a,
         edge_attr_a2a=edge_attr_a2a,
-        edge_index_dec=edge_index_dec,
-        edge_attr_dec=edge_attr_dec,
+        # edge_index_dec=edge_index_dec,
+        # edge_attr_dec=edge_attr_dec,
         stats=stats,
         a=a,
         r=r,
