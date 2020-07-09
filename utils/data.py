@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from torch_geometric.data.data import Data
-from torch_geometric.utils import dense_to_sparse, add_remaining_self_loops
+from torch_geometric.utils import dense_to_sparse, add_remaining_self_loops, sort_edge_index
 from collections import namedtuple
 TransitionNumpyTuple = namedtuple(
     'TransitionTuple',
@@ -168,6 +168,9 @@ def get_transition(scip_state,
         # we add 1 to cuts_orthogonality to ensure that all edges are created
         # including the self edges
         edge_index_a2a, edge_attr_a2a = dense_to_sparse(torch.from_numpy(cuts_orthogonality + 1))
+        # assert that edge_index_a2a is sorted
+        test_ei, test_at = sort_edge_index(edge_index_a2a, edge_attr_a2a) # todo - verification
+        assert (test_ei == edge_index_a2a).all() and (test_at == edge_attr_a2a).all()
         edge_attr_a2a -= 1  # subtract 1 to set back the correct orthogonality values
         edge_attr_a2a.unsqueeze_(dim=1)
     elif x_a.shape[0] == 1:
