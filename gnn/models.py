@@ -407,6 +407,319 @@ class CutConv(MessagePassing):
                                                      self.edge_attr_dim)
 
 
+# graph self attention convolution
+class SelfAttention(MessagePassing):
+    r"""Graph self attention
+
+    .. math::
+        \mathbf{x}^{\prime}_i = \mathbf{f} \left([\mathbf{x}_i, \square_{j \in \mathcal{N}(i)}
+        \mathbf{g}(\mathbf{z}_{ij})]\right)
+
+    Where :math:`\mathbf{f}` and :math:`\mathbf{g}` denote some NN operator, e.g. mlp.
+
+    and :math:`\mathbf{z}_{ij} = [ \mathbf{x}_i, \mathbf{x}_j, \mathbf{e}_{i,j} ]`
+
+    The aggregation function :math:`\square` can be either 'add' or 'mean'
+
+    Args:
+        channels (int): Size of each input sample.
+        edge_attr_dim (int): Edge feature dimensionality.
+        aggr (string, optional): The aggregation operator to use
+            (:obj:`"add"`, :obj:`"mean"`, :obj:`"max"`).
+            (default: :obj:`"add"`)
+        hidden_relu (bool, optional): Apply ReLU to :math:`\mathbf{G}` before aggregation. (default: :obj:`True`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+    """
+    def __init__(self, channels, edge_attr_dim, aggr='mean', hidden_relu=True, output_relu=True, **kwargs):
+        super(SelfAttention, self).__init__(aggr=aggr, **kwargs)
+        self.in_channels = channels
+        self.out_channels = channels
+        self.edge_attr_dim = edge_attr_dim
+
+        self.f = Seq(Lin(2 * channels, channels) , ReLU()) if output_relu else Lin(2 * channels, channels)
+        self.g = Seq(Lin(2 * channels + edge_attr_dim, channels), ReLU()) if hidden_relu else Lin(2 * channels + edge_attr_dim, channels)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.f.reset_parameters()
+        self.g.reset_parameters()
+
+    def forward(self, inputs):
+        """"""
+        x, edge_index, edge_attr = inputs
+        return self.propagate(edge_index, x=x, edge_attr=edge_attr), edge_index, edge_attr
+
+    def message(self, x_i, x_j, edge_attr):
+        z_ij = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        return self.g(z_ij)
+
+    def update(self, aggr_out, x):
+        x = torch.cat([x, aggr_out], dim=-1)
+        return self.f(x)
+
+    def __repr__(self):
+        return '{}({}, {}, edge_attr_dim={})'.format(self.__class__.__name__,
+                                                     self.in_channels, self.out_channels,
+                                                     self.edge_attr_dim)
+
+
+# transformer Q network
+class TransformerQnet(torch.nn.Module):
+    def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
+        super(TransformerQnet, self).__init__()
+        self.hparams = hparams
+        cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
+        self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
+        self.select_at_least_one_cut = hparams.get('select_at_least_one_cut', True)
+
+        ###########
+        # Encoder #
+        ###########
+        # stack lp conv layers todo consider skip connections
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
+                                                                emb_dim=hparams.get('emb_dim', 32),                   # default
+                                                                aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
+                                                                cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1) - 1)))
+                                        for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
+
+        ###########
+        # Decoder #
+        ###########
+        # decoder edge attributes are
+        # [o_ij, o_iS, is_i_selected]
+        # for all ij in the candidate cuts bidirected complete graph (including self edges)
+        # where o_ij is the orthogonality between i and j,
+        # o_iS is the min orthogonality between i and the selected group S
+        decoder_edge_attr_dim = 3
+        self.decoder_conv = {
+            'SelfAttention': Seq(OrderedDict([(f'self_attention_{i}', SelfAttention(channels=hparams.get('emb_dim', 32),
+                                                                                    edge_attr_dim=decoder_edge_attr_dim,
+                                                                                    aggr=hparams.get('decoder_conv_aggr', 'mean')))
+                                              for i in range(hparams.get('decoder_conv_layers', 1))])),
+            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+                                                                  edge_attr_dim=decoder_edge_attr_dim,
+                                                                  aggr=hparams.get('decoder_conv_aggr', 'mean')))
+                                        for i in range(hparams.get('decoder_conv_layers', 1))])),
+            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+                                                                  edge_attr_dim=decoder_edge_attr_dim,
+                                                                  edge_attr_emb=8,
+                                                                  heads=hparams.get('attention_heads', 4)))
+                                        for i in range(hparams.get('decoder_conv_layers', 1))])),
+        }.get(hparams.get('decoder_conv', 'SelfAttention'))
+        self.decoder_edge_attr_list = None
+        self.decoder_edge_index_list = None
+        self.decoder_context = None
+        self.decoder_greedy_action = None
+
+        ##########
+        # Q head #
+        ##########
+        self.q = Lin(hparams.get('emb_dim', 32), 2)  # Q-values for adding a cut or not
+
+    def forward(self,
+                x_c,
+                x_v,
+                x_a,
+                edge_index_c2v,
+                edge_index_a2v,
+                edge_attr_c2v,
+                edge_attr_a2v,
+                edge_index_a2a,
+                edge_attr_a2a,
+                edge_attr_dec=None,
+                edge_index_dec=None
+                ):
+        """
+        :return: torch.Tensor([nvars, out_channels]) if self.cuts_only=True
+                 torch.Tensor([x.shape[0], out_channels]) otherwise
+        """
+        # encoding
+        # run lp conv and generate cut embedding
+        lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
+        x_a = self.lp_conv(lp_conv_inputs)
+        # run cut conv and generate cut encoding
+        cut_conv_inputs = x_a, edge_index_a2a, edge_attr_a2a
+        cut_encoding, _, _ = self.cut_conv(cut_conv_inputs)
+
+        # decoding - inference
+        if edge_attr_dec is None:
+            if self.version == 'v1':
+                q_vals = self.inference_v1(cut_encoding)
+                return q_vals
+            elif self.version == 'v2':
+                q_vals = self.inference_v2(cut_encoding, edge_index_a2a)
+                return q_vals
+            else:
+                raise ValueError
+        else:
+            # we are in training.
+            # produce all q values in parallel
+            # todo - support multi-layered decoder:
+            #        1. break batch into individual graphs
+            #        2. for each graph:
+            #           (i)     repeat cut_encoding and edge_index_dec ncuts times,
+            #                   and increment edge_index_dec for each replication by ncuts.
+            #           (ii)    expand edge_index_dec such that the ith replica's edge_attr_dec
+            #                   takes its values from the ith cut incoming edges.
+            #           (iii)   decode q_values
+            #           (iv)    q_vals[i] <- the ith cut q_values from the ith replica's
+            decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
+            cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+            # take the decoder output only at the cut_index and estimate q values
+            return self.q(cut_decoding)
+
+    def inference_v1(self, cut_encoding):
+        ncuts = cut_encoding.shape[0]
+        # rand permutation over available cuts
+        inference_order = torch.randperm(ncuts)
+        edge_index_dec = torch.cat([torch.arange(ncuts).view(1, -1),
+                                    torch.empty((1, ncuts), dtype=torch.long)], dim=0).to(self.device)
+
+        # initialize the decoder with all cuts marked as not (processed, selected)
+        self.decoder_edge_index_list = []
+        self.decoder_edge_attr_list = []
+        edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32).to(self.device)
+
+        # create a tensor of all q values to return to user
+        q_vals = torch.empty_like(edge_attr_dec)
+
+        # iterate over all cuts in random order, and process one cut each time
+        for cut_index in inference_order:
+            # set all edges to point from all cuts to the currently processed one (focus the attention mechanism)
+            edge_index_dec[1, :] = cut_index
+
+            # store the context (edge_index_dec and edge_attr_dec) of the current iteration
+            self.decoder_edge_attr_list.append(edge_attr_dec.detach().cpu().clone())
+            self.decoder_edge_index_list.append(edge_index_dec.detach().cpu().clone())
+
+            # decode
+            decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
+            cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+            # take the decoder output only at the cut_index and estimate q values
+            q = self.q(cut_decoding[cut_index, :])
+            edge_attr_dec[cut_index, 0] = 1  # mark the current cut as processed
+            edge_attr_dec[cut_index, 1] = q.argmax()  # mark the cut as selected or not, greedily according to q
+            # store q in the output q_vals tensor
+            q_vals[cut_index, :] = q
+
+        # finally, stack the decoder edge_attr and edge_index tensors,
+        # and make a transformer context in order to generate later a Transition for training,
+        # allowing by that fast parallel backprop
+        edge_attr_dec = torch.cat(self.decoder_edge_attr_list, dim=0)
+        edge_index_dec = torch.cat(self.decoder_edge_index_list, dim=1)
+        self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
+        return q_vals
+
+    def inference_v2(self, cut_encoding, edge_index_a2a):
+        ncuts = cut_encoding.shape[0]
+
+        # Build the action iteratively by picking the argmax across all q_values
+        # of all cuts.
+        # The edge_index_dec at each iteration is the same as edge_index_a2a,
+        # and the edge_attr_dec is 1-dim vector indicating whether a cut has been already selected.
+        # The not(edge_attr_dec) will serve as mask for finding the next argmax
+        # At the end of each iteration, before updating edge_attr_dec with the newly selected cut,
+        # the edges pointing to the selected cut are stored in edge_index_list,
+        # together with the corresponding edge_attr_dec entries.
+        # Those will serve as transformer context to train the selected cut Q value.
+
+        # initialize the decoder with all cuts marked as (not selected)
+        edge_attr_dec = torch.zeros((edge_index_a2a.shape[1], ), dtype=torch.float32).to(self.device)
+        # todo assert that edge_index_a2a contains all the self loops
+        edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec, fill_value=0)
+        edge_attr_dec.unsqueeze_(dim=1)
+        self.decoder_edge_index_list = []
+        self.decoder_edge_attr_list = []
+
+        # create a tensor of all q values to return to user
+        q_vals = torch.empty(size=(ncuts, 2), dtype=torch.float32)
+        selected_cuts_mask = torch.zeros(size=(ncuts,), dtype=torch.bool)
+
+        # run loop until all cuts are selected, or the first one is discarded
+        for _ in range(ncuts):
+            # decode
+            decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
+            cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+
+            # compute q values for all cuts
+            q = self.q(cut_decoding)
+
+            # mask already selected cuts, overriding their q_values by -inf
+            q[selected_cuts_mask, :] = -float('Inf')
+
+            # force selecting at least one cut
+            # by setting the "discard" q_values of all cuts to -Inf at the first iteration only
+            if self.select_at_least_one_cut and not selected_cuts_mask.any():
+                masked_q = q.clone()
+                masked_q[:, 0] = -float('Inf')
+                serial_index = masked_q.argmax()
+            else:
+                # find argmax [cut_index, selected] and max q_value
+                serial_index = q.argmax()
+
+            # translate the serial index to [row, col] (or in other words [cut_index, selected])
+            cut_index = torch.floor(serial_index.float() / 2).long()
+            # a cut is selected if the maximal value is q[cut_index, 1]
+            selected = serial_index % 2
+
+            if selected:
+                # append to the context list the edges pointing to the selected cut,
+                # and their corresponding attr
+                cut_incoming_edges_mask = edge_index_dec[1, :] == cut_index
+                incoming_edges = edge_index_dec[:, cut_incoming_edges_mask]
+                incoming_attr = edge_attr_dec[cut_incoming_edges_mask]
+                self.decoder_edge_attr_list.append(incoming_attr.detach().cpu())
+                self.decoder_edge_index_list.append(incoming_edges.detach().cpu())
+
+                # update the decoder context for the next iteration
+                # a. update the cut outgoing edges attribute to "selected"
+                cut_outgoing_edges_mask = edge_index_dec[0, :] == cut_index
+                edge_attr_dec[cut_outgoing_edges_mask] = selected.float()
+                # b. store the q values of the selected cut in the output q_vals
+                q_vals[cut_index, :] = q[cut_index, :]
+                # c. update the selected_cuts_mask
+                selected_cuts_mask[cut_index] = True
+                # go to the next iteration to see if there are more useful cuts
+            else:
+                # stop adding cuts
+                # store the current context for the remaining cuts
+                remaining_cuts_mask = selected_cuts_mask.logical_not()
+                remaining_cuts_idxs = remaining_cuts_mask.nonzero()
+                edge_attr_dec = edge_attr_dec.detach().cpu()
+                edge_index_dec = edge_index_dec.detach().cpu()
+                for cut_index in remaining_cuts_idxs:
+                    # append to the context list the edges pointing to the cut_index,
+                    # and their corresponding attr
+                    cut_incoming_edges_mask = edge_index_dec[1, :] == cut_index
+                    incoming_edges = edge_index_dec[:, cut_incoming_edges_mask]
+                    incoming_attr = edge_attr_dec[cut_incoming_edges_mask]
+                    self.decoder_edge_attr_list.append(incoming_attr)
+                    self.decoder_edge_index_list.append(incoming_edges)
+                # store the last q values of the remaining cuts in the output q_vals
+                q_vals[remaining_cuts_mask, :] = q.detach().cpu()[remaining_cuts_mask, :]
+                break
+
+        if self.select_at_least_one_cut and ncuts > 0:
+            assert selected_cuts_mask.any()
+
+        # store the greedy action built on the fly to return to user,
+        # since the q_values.argmax(1) is not necessarily equal to selected_cuts_mask
+        self.decoder_greedy_action = selected_cuts_mask
+
+        # finally, stack the decoder edge_attr and edge_index lists,
+        # and make a "decoder context" for training the transformer
+        edge_attr_dec = torch.cat(self.decoder_edge_attr_list, dim=0)
+        edge_index_dec = torch.cat(self.decoder_edge_index_list, dim=1)
+        self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
+        return q_vals
+
+
 # transformer Q network
 class TQnet(torch.nn.Module):
     def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
@@ -828,124 +1141,3 @@ class CutSelectionModel(torch.nn.Module):
         return y, probs
 
 
-class GraphUNet(torch.nn.Module):
-    r"""The Graph U-Net model from the `"Graph U-Nets"
-    <https://arxiv.org/abs/1905.05178>`_ paper which implements a U-Net like
-    architecture with graph pooling and unpooling operations.
-    This version allows also edge attributes.
-    Args:
-        in_channels (int): Size of each input sample.
-        hidden_channels (int): Size of each hidden sample.
-        out_channels (int): Size of each output sample.
-        depth (int): The depth of the U-Net architecture.
-        pool_ratios (float or [float], optional): Graph pooling ratio for each
-            depth. (default: :obj:`0.5`)
-        sum_res (bool, optional): If set to :obj:`False`, will use
-            concatenation for integration of skip connections instead
-            summation. (default: :obj:`True`)
-        act (torch.nn.functional, optional): The nonlinearity to use.
-            (default: :obj:`torch.nn.functional.relu`)
-    """
-
-    def __init__(self, in_channels, hidden_channels, out_channels, depth,
-                 pool_ratios=0.5, sum_res=True, act=F.relu):
-        super(GraphUNet, self).__init__()
-        assert depth >= 1
-        self.in_channels = in_channels
-        self.hidden_channels = hidden_channels
-        self.out_channels = out_channels
-        self.depth = depth
-        self.pool_ratios = repeat(pool_ratios, depth)
-        self.act = act
-        self.sum_res = sum_res
-
-        channels = hidden_channels
-
-        self.down_convs = torch.nn.ModuleList()
-        self.pools = torch.nn.ModuleList()
-        self.down_convs.append(GCNConv(in_channels, channels, improved=True))
-        for i in range(depth):
-            self.pools.append(TopKPooling(channels, self.pool_ratios[i]))
-            self.down_convs.append(GCNConv(channels, channels, improved=True))
-
-        in_channels = channels if sum_res else 2 * channels
-
-        self.up_convs = torch.nn.ModuleList()
-        for i in range(depth - 1):
-            self.up_convs.append(GCNConv(in_channels, channels, improved=True))
-        self.up_convs.append(GCNConv(in_channels, out_channels, improved=True))
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        for conv in self.down_convs:
-            conv.reset_parameters()
-        for pool in self.pools:
-            pool.reset_parameters()
-        for conv in self.up_convs:
-            conv.reset_parameters()
-
-    def forward(self, x, edge_index, edge_weight=None, batch=None):
-        """"""
-        if batch is None:
-            batch = edge_index.new_zeros(x.size(0))
-        if edge_weight is None:
-            edge_weight = x.new_ones(edge_index.size(1))
-        else:
-            edge_weight.squeeze_()
-
-        x = self.down_convs[0](x, edge_index, edge_weight)
-        x = self.act(x)
-
-        xs = [x]
-        edge_indices = [edge_index]
-        edge_weights = [edge_weight]
-        perms = []
-
-        for i in range(1, self.depth + 1):
-            edge_index, edge_weight = self.augment_adj(edge_index, edge_weight,
-                                                       x.size(0))
-            x, edge_index, edge_weight, batch, perm, _ = self.pools[i - 1](
-                x, edge_index, edge_weight, batch)
-
-            x = self.down_convs[i](x, edge_index, edge_weight)
-            x = self.act(x)
-
-            if i < self.depth:
-                xs += [x]
-                edge_indices += [edge_index]
-                edge_weights += [edge_weight]
-            perms += [perm]
-
-        for i in range(self.depth):
-            j = self.depth - 1 - i
-
-            res = xs[j]
-            edge_index = edge_indices[j]
-            edge_weight = edge_weights[j]
-            perm = perms[j]
-
-            up = torch.zeros_like(res)
-            up[perm] = x
-            x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
-
-            x = self.up_convs[i](x, edge_index, edge_weight)
-            x = self.act(x) if i < self.depth - 1 else x
-
-        return x
-
-    def augment_adj(self, edge_index, edge_weight, num_nodes):
-        edge_index, edge_weight = add_self_loops(edge_index, edge_weight,
-                                                 num_nodes=num_nodes)
-        edge_index, edge_weight = sort_edge_index(edge_index, edge_weight,
-                                                  num_nodes)
-        edge_index, edge_weight = spspmm(edge_index, edge_weight, edge_index,
-                                         edge_weight, num_nodes, num_nodes,
-                                         num_nodes)
-        edge_index, edge_weight = remove_self_loops(edge_index, edge_weight)
-        return edge_index, edge_weight
-
-    def __repr__(self):
-        return '{}({}, {}, {}, depth={}, pool_ratios={})'.format(
-            self.__class__.__name__, self.in_channels, self.hidden_channels,
-            self.out_channels, self.depth, self.pool_ratios)
