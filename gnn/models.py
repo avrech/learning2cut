@@ -473,13 +473,14 @@ class SelfAttention(MessagePassing):
 
 
 # transformer Q network
-class TransformerQnet(torch.nn.Module):
+class TQnet(torch.nn.Module):
     def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
-        super(TransformerQnet, self).__init__()
+        super(TQnet, self).__init__()
         self.hparams = hparams
         cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         self.select_at_least_one_cut = hparams.get('select_at_least_one_cut', True)
+        assert hparams.get('tqnet_version', 'v3') == 'v3', 'v1 and v2 are deprecated'
 
         ###########
         # Encoder #
@@ -519,8 +520,8 @@ class TransformerQnet(torch.nn.Module):
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_conv_layers', 1))])),
         }.get(hparams.get('decoder_conv', 'SelfAttention'))
-        self.decoder_edge_attr_list = None
-        self.decoder_edge_index_list = None
+        self.decoder_edge_attr_list = None  # moved to local context_edge_atter_list
+        self.decoder_edge_index_list = None  # moved to local context_edge_index_list
         self.decoder_context = None
         self.decoder_greedy_action = None
 
@@ -539,9 +540,8 @@ class TransformerQnet(torch.nn.Module):
                 edge_attr_a2v,
                 edge_index_a2a,
                 edge_attr_a2a,
-                edge_attr_dec=None,
-                edge_index_dec=None,
                 mode='inference',
+                random_action=None,
                 compute_J_E=False
                 ):
         """
@@ -557,11 +557,20 @@ class TransformerQnet(torch.nn.Module):
         ###########
         # decoding - inference
         if mode == 'inference':
-            q_vals = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
-            return q_vals
+            if random_action is None:
+                # run greedy inference
+                q_vals = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
+            else:
+                # construct decoder context according to random action, and generate the q_values in parallel.
+                edge_index_a2a, edge_attr_a2a = self.get_random_context(random_action=random_action,
+                                                                        initial_edge_index_a2a=edge_index_a2a,
+                                                                        initial_edge_attr_a2a=edge_attr_a2a)
+                decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
+                cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
+                q_vals = self.q(cut_decoding)
         elif mode == 'training':
             # we are in training.
-            # produce all q values in parallel
+            # decode cuts in parallel given the cut-level context,
             # todo - support multi-layered decoder:
             #        1. break batch into individual graphs
             #        2. for each graph:
@@ -572,10 +581,12 @@ class TransformerQnet(torch.nn.Module):
             #           (iii)   decode q_values
             #           (iv)    q_vals[i] <- the ith cut q_values from the ith replica's
             #      - support computing J_E. (depending on the bullet above)
-            decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
+            decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
             cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
-            # take the decoder output only at the cut_index and estimate q values
-            return self.q(cut_decoding)
+            # and estimate q values
+            q_vals = self.q(cut_decoding)
+
+        return q_vals
 
     def inference(self, cuts_encoding, edge_index_a2a, edge_attr_a2a):
         ncuts = cuts_encoding.shape[0]
@@ -603,8 +614,8 @@ class TransformerQnet(torch.nn.Module):
         # edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec, fill_value=0)
         # context_edge_attr.unsqueeze_(dim=1)
 
-        self.decoder_edge_index_list = []
-        self.decoder_edge_attr_list = []
+        context_edge_index_list = []
+        context_edge_attr_list = []
 
         # create a tensor of all q values to return to user
         q_vals = torch.empty(size=(ncuts, 2), dtype=torch.float32)
@@ -652,8 +663,8 @@ class TransformerQnet(torch.nn.Module):
                 incoming_edges_idxes = (context_edge_index[1, :] == cut_index).nonzero()
                 incoming_edges = context_edge_index[:, incoming_edges_idxes]
                 incoming_attr = context_edge_attr[incoming_edges_idxes, :]  # take the rows corresponding to the incoming edges
-                self.decoder_edge_attr_list.append(incoming_attr.detach().cpu())
-                self.decoder_edge_index_list.append(incoming_edges.detach().cpu())
+                context_edge_attr_list.append(incoming_attr.detach().cpu())
+                context_edge_index_list.append(incoming_edges.detach().cpu())
 
                 # update the decoder context for the next iteration
                 # a. update the cut outgoing edges attributes
@@ -686,8 +697,8 @@ class TransformerQnet(torch.nn.Module):
                     incoming_edges_idxes = context_edge_index[1, :] == cut_index
                     incoming_edges = context_edge_index[:, incoming_edges_idxes]
                     incoming_attr = context_edge_attr[incoming_edges_idxes, :]
-                    self.decoder_edge_attr_list.append(incoming_attr)
-                    self.decoder_edge_index_list.append(incoming_edges)
+                    context_edge_attr_list.append(incoming_attr)
+                    context_edge_index_list.append(incoming_edges)
                 # store the last q values of the remaining cuts in the output q_vals
                 q_vals[remaining_cuts_mask, :] = q.detach().cpu()[remaining_cuts_mask, :]
                 break
@@ -701,16 +712,72 @@ class TransformerQnet(torch.nn.Module):
 
         # finally, stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer
-        context_edge_attr = torch.cat(self.decoder_edge_attr_list, dim=0)
-        context_edge_index = torch.cat(self.decoder_edge_index_list, dim=1)
+        context_edge_attr = torch.cat(context_edge_attr_list, dim=0)
+        context_edge_index = torch.cat(context_edge_index_list, dim=1)
         self.decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
         return q_vals
 
+    def get_random_context(self, random_action, initial_edge_index_a2a, initial_edge_attr_a2a):
+        """ Construct random context according to random_action, for parallel inference. """
+        ncuts = random_action.shape[0]
+        # find the randomly selected cuts.
+        selected_idxes = random_action.nonzero()
+        # permute selection order
+        selected_idxes = selected_idxes[torch.randperm(len(selected_idxes))]
+        discarded_idxes = random_action.logical_not().nonzero()
+
+        # initialize context
+        context_edge_index = initial_edge_index_a2a
+        context_edge_attr = initial_edge_attr_a2a
+
+        context_edge_index_list = []
+        context_edge_attr_list = []
+
+        # process the selected cuts first
+        for cut_index in selected_idxes:
+            # append to the context list the edges pointing to the selected cut,
+            # and their corresponding attributes
+            incoming_edges_idxes = (context_edge_index[1, :] == cut_index).nonzero()
+            incoming_edges = context_edge_index[:, incoming_edges_idxes]
+            incoming_attr = context_edge_attr[incoming_edges_idxes, :]  # take the rows corresponding to the incoming edges
+            context_edge_attr_list.append(incoming_attr.detach().cpu())
+            context_edge_index_list.append(incoming_edges.detach().cpu())
+
+            # update the decoder context for the next iteration
+            # a. update the cut outgoing edges attributes
+            outgoing_edges_idxes = (context_edge_index[0, :] == cut_index).nonzero()
+            # mark cut_index as "selected"
+            context_edge_attr[outgoing_edges_idxes, -1] = 1
+            # update o_iS of all (remaining) cuts to min(o_iS, o_i<cut_index>)
+            k = cut_index
+            o_iS = context_edge_attr[:, 1]
+            # broadcast the orthogonality with cut_index to all the edges
+            o_ik = context_edge_attr[outgoing_edges_idxes, 0][context_edge_index[0, :]]
+            # the updated o_iS is the min between the current value and the orthogonality to cut_index.
+            context_edge_attr[:, 1] = torch.min(o_iS, o_ik)
+
+        # assign the final context to all the remaining cuts
+        for cut_index in discarded_idxes:
+            # append to the context list the edges pointing to the cut_index,
+            # and their corresponding attr
+            incoming_edges_idxes = context_edge_index[1, :] == cut_index
+            incoming_edges = context_edge_index[:, incoming_edges_idxes]
+            incoming_attr = context_edge_attr[incoming_edges_idxes, :]
+            context_edge_attr_list.append(incoming_attr)
+            context_edge_index_list.append(incoming_edges)
+
+        random_action_edge_index_a2a = torch.cat(context_edge_index_list, dim=1)
+        random_action_edge_attr_a2a = torch.cat(context_edge_attr_list, dim=0)
+        random_action_decoder_context = TransformerDecoderContext(random_action_edge_index_a2a, random_action_edge_attr_a2a)
+        self.decoder_context = random_action_decoder_context
+
+        return random_action_edge_index_a2a.to(self.device), random_action_edge_attr_a2a.to(self.device)
+
 
 # transformer Q network - old version
-class TQnet(torch.nn.Module):
+class TQnetOld(torch.nn.Module):
     def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
-        super(TQnet, self).__init__()
+        super(TQnetOld, self).__init__()
         self.hparams = hparams
         cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
@@ -763,7 +830,7 @@ class TQnet(torch.nn.Module):
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_cut_conv_layers', 1))])),
         }.get(hparams.get('cut_conv', 'CATConv'))
-        self.decoder_edge_attr_list = None
+        decoder_edge_attr_list = None
         self.decoder_edge_index_list = None
         self.decoder_context = None
         self.decoder_greedy_action = None
@@ -839,8 +906,8 @@ class TQnet(torch.nn.Module):
                                     torch.empty((1, ncuts), dtype=torch.long)], dim=0).to(self.device)
 
         # initialize the decoder with all cuts marked as not (processed, selected)
-        self.decoder_edge_index_list = []
-        self.decoder_edge_attr_list = []
+        decoder_edge_index_list = []
+        decoder_edge_attr_list = []
         edge_attr_dec = torch.zeros((ncuts, 2), dtype=torch.float32).to(self.device)
 
         # create a tensor of all q values to return to user
@@ -852,8 +919,8 @@ class TQnet(torch.nn.Module):
             edge_index_dec[1, :] = cut_index
 
             # store the context (edge_index_dec and edge_attr_dec) of the current iteration
-            self.decoder_edge_attr_list.append(edge_attr_dec.detach().cpu().clone())
-            self.decoder_edge_index_list.append(edge_index_dec.detach().cpu().clone())
+            decoder_edge_attr_list.append(edge_attr_dec.detach().cpu().clone())
+            decoder_edge_index_list.append(edge_index_dec.detach().cpu().clone())
 
             # decode
             decoder_inputs = (cut_encoding, edge_index_dec, edge_attr_dec)
@@ -868,8 +935,8 @@ class TQnet(torch.nn.Module):
         # finally, stack the decoder edge_attr and edge_index tensors,
         # and make a transformer context in order to generate later a Transition for training,
         # allowing by that fast parallel backprop
-        edge_attr_dec = torch.cat(self.decoder_edge_attr_list, dim=0)
-        edge_index_dec = torch.cat(self.decoder_edge_index_list, dim=1)
+        edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+        edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
         self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
         return q_vals
 
@@ -891,8 +958,8 @@ class TQnet(torch.nn.Module):
         # todo assert that edge_index_a2a contains all the self loops
         edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec, fill_value=0)
         edge_attr_dec.unsqueeze_(dim=1)
-        self.decoder_edge_index_list = []
-        self.decoder_edge_attr_list = []
+        decoder_edge_index_list = []
+        decoder_edge_attr_list = []
 
         # create a tensor of all q values to return to user
         q_vals = torch.empty(size=(ncuts, 2), dtype=torch.float32)
@@ -931,8 +998,8 @@ class TQnet(torch.nn.Module):
                 cut_incoming_edges_mask = edge_index_dec[1, :] == cut_index
                 incoming_edges = edge_index_dec[:, cut_incoming_edges_mask]
                 incoming_attr = edge_attr_dec[cut_incoming_edges_mask]
-                self.decoder_edge_attr_list.append(incoming_attr.detach().cpu())
-                self.decoder_edge_index_list.append(incoming_edges.detach().cpu())
+                decoder_edge_attr_list.append(incoming_attr.detach().cpu())
+                decoder_edge_index_list.append(incoming_edges.detach().cpu())
 
                 # update the decoder context for the next iteration
                 # a. update the cut outgoing edges attribute to "selected"
@@ -956,8 +1023,8 @@ class TQnet(torch.nn.Module):
                     cut_incoming_edges_mask = edge_index_dec[1, :] == cut_index
                     incoming_edges = edge_index_dec[:, cut_incoming_edges_mask]
                     incoming_attr = edge_attr_dec[cut_incoming_edges_mask]
-                    self.decoder_edge_attr_list.append(incoming_attr)
-                    self.decoder_edge_index_list.append(incoming_edges)
+                    decoder_edge_attr_list.append(incoming_attr)
+                    decoder_edge_index_list.append(incoming_edges)
                 # store the last q values of the remaining cuts in the output q_vals
                 q_vals[remaining_cuts_mask, :] = q.detach().cpu()[remaining_cuts_mask, :]
                 break
@@ -971,8 +1038,8 @@ class TQnet(torch.nn.Module):
 
         # finally, stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer
-        edge_attr_dec = torch.cat(self.decoder_edge_attr_list, dim=0)
-        edge_index_dec = torch.cat(self.decoder_edge_index_list, dim=1)
+        edge_attr_dec = torch.cat(decoder_edge_attr_list, dim=0)
+        edge_index_dec = torch.cat(decoder_edge_index_list, dim=1)
         self.decoder_context = TransformerDecoderContext(edge_index_dec, edge_attr_dec)
         return q_vals
 

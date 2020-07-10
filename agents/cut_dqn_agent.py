@@ -52,11 +52,12 @@ class CutDQNAgent(Sepa):
         self.eps_start = hparams.get('eps_start', 0.9)
         self.eps_end = hparams.get('eps_end', 0.05)
         self.eps_decay = hparams.get('eps_decay', 200)
+        assert hparams.get('tqnet_version', 'v3') == 'v3', 'v1 and v2 are no longer supported. need to adapt to new decoder context'
         self.policy_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.target_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
-        self.tqnet_version = hparams.get('tqnet_version', 'v2')
+        self.tqnet_version = hparams.get('tqnet_version', 'v3')
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
         # value aggregation method for the target Q values
         if hparams.get('value_aggr', 'mean') == 'max':
@@ -340,22 +341,22 @@ class CutDQNAgent(Sepa):
                         edge_attr_c2v=batch.edge_attr_c2v,
                         edge_attr_a2v=batch.edge_attr_a2v,
                         edge_index_a2a=batch.edge_index_a2a,
-                        edge_attr_a2a=batch.edge_attr_a2a,
+                        edge_attr_a2a=batch.edge_attr_a2a
                     )
-                    if self.use_transformer and self.tqnet_version == 'v2':
+                    if self.use_transformer:
+                        # todo- verification v3
                         # the action is not necessarily q_values.argmax(dim=1).
-                        # take the action built internally in the transformer, and the corresponding q_values
+                        # take the action constructed internally in the transformer, and the corresponding q_values
                         greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
                         greedy_action = self.policy_net.decoder_greedy_action.numpy()
-                    else:
-                        greedy_q_values, greedy_action = q_values.max(1)  # todo - verification
-                        greedy_action = greedy_action.detach().cpu().numpy().astype(np.bool)
-                        greedy_q_values = greedy_q_values.detach().cpu()
-                    if self.use_transformer:
                         # return also the decoder context to store for backprop
                         greedy_action_decoder_context = self.policy_net.decoder_context
                     else:
+                        greedy_q_values, greedy_action = q_values.max(1)  # todo - verification
+                        greedy_action = greedy_action.detach().cpu().numpy().astype(np.bool)
+                        greedy_q_values = greedy_q_values.detach().cpu()  # todo - detach() is not necessary due to torch.no_grad()
                         greedy_action_decoder_context = None
+
                     return greedy_action, greedy_q_values, greedy_action_decoder_context
 
             else:
@@ -402,7 +403,7 @@ class CutDQNAgent(Sepa):
                 )
                 # todo enforce select_at_least_one_cut.
                 #  in tqnet v2 it is enforced internally, so that the decoder_greedy_action is valid.
-                if self.use_transformer and self.tqnet_version == 'v2':
+                if self.use_transformer:
                     greedy_action = self.policy_net.decoder_greedy_action.numpy()
                 else:
                     greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
