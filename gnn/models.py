@@ -568,7 +568,7 @@ class TQnet(torch.nn.Module):
                 decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
                 cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
                 q_vals = self.q(cut_decoding)
-        elif mode == 'training':
+        elif mode == 'batch':
             # we are in training.
             # decode cuts in parallel given the cut-level context,
             # todo - support multi-layered decoder:
@@ -585,6 +585,8 @@ class TQnet(torch.nn.Module):
             cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
             # and estimate q values
             q_vals = self.q(cut_decoding)
+        else:
+            raise ValueError
 
         return q_vals
 
