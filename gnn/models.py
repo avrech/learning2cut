@@ -443,9 +443,11 @@ class SelfAttention(MessagePassing):
         self.in_channels = channels
         self.out_channels = channels
         self.edge_attr_dim = edge_attr_dim
+        self.relu_g = hidden_relu
+        self.relu_f = output_relu
 
-        self.f = Seq(Lin(2 * channels, channels) , ReLU()) if output_relu else Lin(2 * channels, channels)
-        self.g = Seq(Lin(2 * channels + edge_attr_dim, channels), ReLU()) if hidden_relu else Lin(2 * channels + edge_attr_dim, channels)
+        self.f = Lin(2 * channels, channels)
+        self.g = Lin(2 * channels + edge_attr_dim, channels)
 
         self.reset_parameters()
 
@@ -460,11 +462,11 @@ class SelfAttention(MessagePassing):
 
     def message(self, x_i, x_j, edge_attr):
         z_ij = torch.cat([x_i, x_j, edge_attr], dim=-1)
-        return self.g(z_ij)
+        return F.relu(self.g(z_ij)) if self.relu_g else self.g(z_ij)
 
     def update(self, aggr_out, x):
         x = torch.cat([x, aggr_out], dim=-1)
-        return self.f(x)
+        return F.relu(self.f(x)) if self.relu_f else self.f(x)
 
     def __repr__(self):
         return '{}({}, {}, edge_attr_dim={})'.format(self.__class__.__name__,
@@ -508,17 +510,17 @@ class TQnet(torch.nn.Module):
             'SelfAttention': Seq(OrderedDict([(f'self_attention_{i}', SelfAttention(channels=hparams.get('emb_dim', 32),
                                                                                     edge_attr_dim=decoder_edge_attr_dim,
                                                                                     aggr=hparams.get('decoder_conv_aggr', 'mean')))
-                                              for i in range(hparams.get('decoder_conv_layers', 1))])),
+                                              for i in range(hparams.get('decoder_layers', 1))])),
             'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
                                                                   edge_attr_dim=decoder_edge_attr_dim,
                                                                   aggr=hparams.get('decoder_conv_aggr', 'mean')))
-                                        for i in range(hparams.get('decoder_conv_layers', 1))])),
+                                        for i in range(hparams.get('decoder_layers', 1))])),
             'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
                                                                   out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
                                                                   edge_attr_dim=decoder_edge_attr_dim,
                                                                   edge_attr_emb=8,
                                                                   heads=hparams.get('attention_heads', 4)))
-                                        for i in range(hparams.get('decoder_conv_layers', 1))])),
+                                        for i in range(hparams.get('decoder_layers', 1))])),
         }.get(hparams.get('decoder_conv', 'SelfAttention'))
         self.decoder_edge_attr_list = None  # moved to local context_edge_atter_list
         self.decoder_edge_index_list = None  # moved to local context_edge_index_list
@@ -662,22 +664,22 @@ class TQnet(torch.nn.Module):
             if selected:
                 # append to the context list the edges pointing to the selected cut,
                 # and their corresponding attr
-                incoming_edges_idxes = (context_edge_index[1, :] == cut_index).nonzero()
-                incoming_edges = context_edge_index[:, incoming_edges_idxes]
-                incoming_attr = context_edge_attr[incoming_edges_idxes, :]  # take the rows corresponding to the incoming edges
+                incoming_edges = context_edge_index[1, :] == cut_index
+                incoming_edge_index = context_edge_index[:, incoming_edges]
+                incoming_attr = context_edge_attr[incoming_edges, :]  # take the rows corresponding to the incoming edges
                 context_edge_attr_list.append(incoming_attr.detach().cpu())
-                context_edge_index_list.append(incoming_edges.detach().cpu())
+                context_edge_index_list.append(incoming_edge_index.detach().cpu())
 
                 # update the decoder context for the next iteration
                 # a. update the cut outgoing edges attributes
-                outgoing_edges_idxes = (context_edge_index[0, :] == cut_index).nonzero()
+                outgoing_edges = context_edge_index[0, :] == cut_index
                 # mark cut_index as "selected"
-                context_edge_attr[outgoing_edges_idxes, -1] = selected.float()
+                context_edge_attr[outgoing_edges, -1] = float(selected)
                 # update o_iS of all (remaining) cuts to min(o_iS, o_i<cut_index>)
                 k = cut_index
                 o_iS = context_edge_attr[:, 1]
                 # broadcast the orthogonality with cut_index to all the edges
-                o_ik = context_edge_attr[outgoing_edges_idxes, 0][context_edge_index[0, :]]
+                o_ik = context_edge_attr[outgoing_edges, 0][context_edge_index[0, :]]
                 # the updated o_iS is the min between the current value and the orthogonality to cut_index.
                 context_edge_attr[:, 1] = torch.min(o_iS, o_ik)
 
@@ -696,11 +698,11 @@ class TQnet(torch.nn.Module):
                 for cut_index in remaining_cuts_idxs:
                     # append to the context list the edges pointing to the cut_index,
                     # and their corresponding attr
-                    incoming_edges_idxes = context_edge_index[1, :] == cut_index
-                    incoming_edges = context_edge_index[:, incoming_edges_idxes]
-                    incoming_attr = context_edge_attr[incoming_edges_idxes, :]
+                    incoming_edges = context_edge_index[1, :] == cut_index
+                    incoming_edge_index = context_edge_index[:, incoming_edges]
+                    incoming_attr = context_edge_attr[incoming_edges, :]
                     context_edge_attr_list.append(incoming_attr)
-                    context_edge_index_list.append(incoming_edges)
+                    context_edge_index_list.append(incoming_edge_index)
                 # store the last q values of the remaining cuts in the output q_vals
                 q_vals[remaining_cuts_mask, :] = q.detach().cpu()[remaining_cuts_mask, :]
                 break
@@ -739,15 +741,15 @@ class TQnet(torch.nn.Module):
         for cut_index in selected_idxes:
             # append to the context list the edges pointing to the selected cut,
             # and their corresponding attributes
-            incoming_edges_idxes = (context_edge_index[1, :] == cut_index).nonzero()
-            incoming_edges = context_edge_index[:, incoming_edges_idxes]
-            incoming_attr = context_edge_attr[incoming_edges_idxes, :]  # take the rows corresponding to the incoming edges
+            incoming_edges = context_edge_index[1, :] == cut_index
+            incoming_edge_index = context_edge_index[:, incoming_edges]
+            incoming_attr = context_edge_attr[incoming_edges, :]  # take the rows corresponding to the incoming edges
             context_edge_attr_list.append(incoming_attr.detach().cpu())
-            context_edge_index_list.append(incoming_edges.detach().cpu())
+            context_edge_index_list.append(incoming_edge_index.detach().cpu())
 
             # update the decoder context for the next iteration
             # a. update the cut outgoing edges attributes
-            outgoing_edges_idxes = (context_edge_index[0, :] == cut_index).nonzero()
+            outgoing_edges_idxes = context_edge_index[0, :] == cut_index
             # mark cut_index as "selected"
             context_edge_attr[outgoing_edges_idxes, -1] = 1
             # update o_iS of all (remaining) cuts to min(o_iS, o_i<cut_index>)
@@ -762,11 +764,11 @@ class TQnet(torch.nn.Module):
         for cut_index in discarded_idxes:
             # append to the context list the edges pointing to the cut_index,
             # and their corresponding attr
-            incoming_edges_idxes = context_edge_index[1, :] == cut_index
-            incoming_edges = context_edge_index[:, incoming_edges_idxes]
-            incoming_attr = context_edge_attr[incoming_edges_idxes, :]
+            incoming_edges = context_edge_index[1, :] == cut_index
+            incoming_edge_index = context_edge_index[:, incoming_edges]
+            incoming_attr = context_edge_attr[incoming_edges, :]
             context_edge_attr_list.append(incoming_attr)
-            context_edge_index_list.append(incoming_edges)
+            context_edge_index_list.append(incoming_edge_index)
 
         random_action_edge_index_a2a = torch.cat(context_edge_index_list, dim=1)
         random_action_edge_attr_a2a = torch.cat(context_edge_attr_list, dim=0)

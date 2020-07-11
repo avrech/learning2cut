@@ -27,12 +27,13 @@ select_at_least_one_cut: True
 
 # DQN ARCHITECTURE HPARAMS
 dqn_arch: TQNet     # options: TQNet , QNet
-tqnet_version: v2   # options: v1, v2
+tqnet_version: v3   # options: v1, v2
 emb_dim: 128
 cut_conv: CutConv   # options: CutConv, CATConv
 encoder_cut_conv_layers: 1
 encoder_lp_conv_layers: 1
-decoder_cut_conv_layers: 1
+decoder_layers: 1
+decoder_conv: SelfAttention
 attention_heads: 4
 lp_conv_aggr: mean
 cut_conv_aggr: mean
