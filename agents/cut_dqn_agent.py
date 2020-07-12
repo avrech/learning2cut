@@ -112,6 +112,8 @@ class CutDQNAgent(Sepa):
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
         self.lp_iterations_limit = -1
         self.terminal_state = False
+        # learning from demonstrations stuff
+        self.learning_from_demonstrations = False
 
         # logging
         self.is_tester = True  # todo set in distributed setting
@@ -167,6 +169,7 @@ class CutDQNAgent(Sepa):
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
+        self.learning_from_demonstrations = False
 
     # done
     def sepaexeclp(self):
@@ -248,6 +251,7 @@ class CutDQNAgent(Sepa):
         if self.prev_action is not None:
             # assert that all the selected cuts were actually applied
             # otherwise, there is either a bug or a cut safety/feasibility issue.
+            # todo - not in learning from demonstrations
             assert (self.prev_action['selected'] == self.prev_action['applied']).all()
 
         # if there are available cuts, select action and continue to the next state
@@ -257,7 +261,7 @@ class CutDQNAgent(Sepa):
             action, q_values, decoder_context = self._select_action(cur_state)
             available_cuts['selected'] = action
 
-            # apply the action
+            # apply the action  todo - not in learning from demonstrations
             if any(action):
                 # force SCIP to take the selected cuts and discard the others
                 self.model.forceCuts(action)
@@ -316,8 +320,8 @@ class CutDQNAgent(Sepa):
         # todo - what should be the return types? action only, or maybe also q values and decoder context?
         #  for simple tracking return all types, for compatibility with non-transformer models return only action.
         # transform scip_state into GNN data type
-        batch = Batch().from_data_list([get_transition(scip_state, tqnet_version=self.tqnet_version)],
-                                       follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        batch = Batch.from_data_list([get_transition(scip_state, tqnet_version=self.tqnet_version)],
+                                     follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
         if self.training:
             # take epsilon-greedy action
@@ -678,7 +682,7 @@ class CutDQNAgent(Sepa):
         # todo consider all features in follow_batch to parse correctly
 
         # old replay buffer returned transitions as separated Transition objects
-        batch = Batch().from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        batch = Batch.from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
         action_batch = batch.a
 

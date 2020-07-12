@@ -204,4 +204,4 @@ params_pubsub_port: 5555
 replay_server_2_learner_port: 5556
 learner_2_replay_server_port: 5557
 workers_2_replay_server_port: 5558
-replay_buffer_minimum_size: 20
+replay_buffer_minimum_size: 2
