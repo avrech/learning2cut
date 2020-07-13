@@ -1,3 +1,4 @@
+from sklearn.metrics import f1_score
 from pyscipopt import Sepa, SCIP_RESULT
 from time import time
 import numpy as np
@@ -126,7 +127,9 @@ class CutDQNAgent(Sepa):
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         self.print_prefix = ''
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
-        self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
+        self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [],
+                                 'accuracy': [], 'f1_score': [] # learning from demonstrations
+                                 }
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
@@ -143,7 +146,7 @@ class CutDQNAgent(Sepa):
         self.initialize_training()
 
     # done
-    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None):
+    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None, learning_from_demonstrations=False):
         self.G = G
         self.x = x
         self.y = y
@@ -169,7 +172,7 @@ class CutDQNAgent(Sepa):
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
-        self.learning_from_demonstrations = False
+        self.learning_from_demonstrations = learning_from_demonstrations
 
     # done
     def sepaexeclp(self):
@@ -228,19 +231,25 @@ class CutDQNAgent(Sepa):
     # done
     def _do_dqn_step(self):
         """
-        Here is the episode inner loop of DQN.
-        This DQN implemention is most vanilla one,
-        in which we sequentially
+        Here is the episode inner loop (DQN)
+        We sequentially
         1. get state
         2. select action
-        3. get the next state and reward (in the next LP round, after the LP solver solved for our cuts)
+        3. get the next state and stats for computing reward (in the next LP round, after the LP solver solved for our cuts)
         4. store transition in memory
-        5. optimize the policy on the replay memory
+        Offline, we optimize the policy on the replay data.
         When the instance is solved, the episode ends, and we start solving another instance,
         continuing with the latest policy parameters.
         This DQN agent should only be included as a separator in the next instance SCIP model.
         The priority of calling the DQN separator should be the lowest, so it will be able to
         see all the available cuts.
+
+        Learning from demonstrations:
+        When learning from demonstrations, the agent doesn't take any action, but rather let SCIP select cuts, and track
+        SCIP's actions.
+        After the episode is done, SCIP actions are analyzed and adquate decoder context is constructed which follows
+        SCIP's policy. The episode transitions are stored with additional flag demonstration=True, to inform
+        the learner to compute the expert loss J_E.
         """
         # get the current state, a dictionary of available cuts (keyed by their names,
         # and query statistics related to the previous action (cut activeness etc.)
@@ -248,10 +257,9 @@ class CutDQNAgent(Sepa):
                                                         query=self.prev_action)
 
         # validate the solver behavior
-        if self.prev_action is not None:
+        if self.prev_action is not None and not self.learning_from_demonstrations:
             # assert that all the selected cuts were actually applied
-            # otherwise, there is either a bug or a cut safety/feasibility issue.
-            # todo - not in learning from demonstrations
+            # otherwise, there is a bug (or maybe safety/feasibility issue?)
             assert (self.prev_action['selected'] == self.prev_action['applied']).all()
 
         # if there are available cuts, select action and continue to the next state
@@ -261,36 +269,40 @@ class CutDQNAgent(Sepa):
             action, q_values, decoder_context = self._select_action(cur_state)
             available_cuts['selected'] = action
 
-            # apply the action  todo - not in learning from demonstrations
-            if any(action):
-                # force SCIP to take the selected cuts and discard the others
-                self.model.forceCuts(action)
-                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
-                # in order to prevent it from adding more or less cuts
-                self.model.setIntParam('separating/maxcuts', int(sum(action)))
-                self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
-                # continue to the next state
-                result = {"result": SCIP_RESULT.SEPARATED}
+            if not self.learning_from_demonstrations:
+                # apply the action
+                if any(action):
+                    # force SCIP to take the selected cuts and discard the others
+                    self.model.forceCuts(action)
+                    # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+                    # in order to prevent it from adding more or less cuts
+                    self.model.setIntParam('separating/maxcuts', int(sum(action)))
+                    self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+                    # continue to the next state
+                    result = {"result": SCIP_RESULT.SEPARATED}
 
+                else:
+                    # todo - This action leads to the terminal state.
+                    #        SCIP may apply now heuristics which will further improve the dualbound/gap.
+                    #        However, those improvements are not related to the currently taken action.
+                    #        So we snapshot here the dualbound and gap and other related stats,
+                    #        and set the terminal_state flag accordingly.
+                    # force SCIP to "discard" all the available cuts by flushing the separation storage
+                    self.model.clearCuts()
+                    if self.hparams.get('verbose', 0) == 2:
+                        print(self.print_prefix + 'discarded all cuts')
+                    self.terminal_state = 'EMPTY_ACTION'
+                    self._update_episode_stats()
+                    self.finished_episode_stats = True
+                    result = {"result": SCIP_RESULT.DIDNOTFIND}
+
+                # SCIP will execute the action,
+                # and return here in the next LP round -
+                # unless the instance is solved and the episode is done.
             else:
-                # todo - This action leads to the terminal state.
-                #        SCIP may apply now heuristics which will further improve the dualbound/gap.
-                #        However, those improvements are not related to the currently taken action.
-                #        So we snapshot here the dualbound and gap and other related stats,
-                #        and set the terminal_state flag accordingly.
-                # force SCIP to "discard" all the available cuts by flushing the separation storage
-                self.model.clearCuts()
-                if self.hparams.get('verbose', 0) == 2:
-                    print(self.print_prefix + 'discarded all cuts')
-                self.terminal_state = 'EMPTY_ACTION'
-                self.prev_action = available_cuts
-                self._update_episode_stats()
-                self.finished_episode_stats = True
-                result = {"result": SCIP_RESULT.DIDNOTFIND}
+                # when learning from demonstrations, we let SCIP select and apply the cuts,
+                result = {"result": SCIP_RESULT.DIDNOTRUN}
 
-            # SCIP will execute the action,
-            # and return here in the next LP round -
-            # unless the instance is solved and the episode is done.
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
             self.state_action_qvalues_context_list.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
@@ -324,11 +336,17 @@ class CutDQNAgent(Sepa):
                                      follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
         if self.training:
-            # take epsilon-greedy action
-            sample = random.random()
-            eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
-                            math.exp(-1. * self.num_env_steps_done / self.eps_decay)
-            self.num_env_steps_done += 1
+            if self.learning_from_demonstrations:
+                # take only greedy actions to compute online policy stats
+                # in demonstration mode, we don't increment num_env_steps_done,
+                # since we want to start exploration from the beginning once the demonstration phase is completed.
+                sample, eps_threshold = 1, 0
+            else:
+                # take epsilon-greedy action
+                sample = random.random()
+                eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
+                                math.exp(-1. * self.num_env_steps_done / self.eps_decay)
+                self.num_env_steps_done += 1
 
             if sample > eps_threshold:
                 # take greedy action
@@ -475,6 +493,8 @@ class CutDQNAgent(Sepa):
         # (it can happen only in terminal_state = OPTIMAL/LP_ITERATIONS_LIMIT_REACHED).
         # we need to evaluate the normalized slack of the applied cuts,
         # and to update the episode stats with the latest SCIP stats.
+        # todo - in learning from demonstrations we must know which cuts were applied, and since we cannot
+        #  get this information in SOLVED stage, we discard the last transition. (just ignore it in _compute_reward_and_stats()
         if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None:
             assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED']
             nvars = self.model.getNVars()
@@ -502,7 +522,11 @@ class CutDQNAgent(Sepa):
             self.prev_action['normalized_slack'][self.prev_action['selected']] = normalized_slack[self.prev_action['selected']]
             # assume that all the selected actions were actually applied,
             # although we cannot verify it
-            self.prev_action['applied'] = self.prev_action['selected']
+            # todo - verification
+            if not self.learning_from_demonstrations:
+                self.prev_action['applied'] = self.prev_action['selected']
+            else:
+                raise NotImplementedError
 
             # update the rest of statistics needed to compute rewards
             self._update_episode_stats()
@@ -536,6 +560,7 @@ class CutDQNAgent(Sepa):
             print(self.episode_stats)
             print(self.state_action_qvalues_context_list)
 
+        # todo - consider squaring the dualbound/gap before computing the AUC.
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
         gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
         if self.dqn_objective == 'db_auc':
@@ -549,6 +574,7 @@ class CutDQNAgent(Sepa):
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
             # and store a transition (s_t, a_t, r_t, s_{t+n}
+            # todo - in learning from demonstrations we used to compute both 1-step and n-step returns.
             n_transitions = len(self.state_action_qvalues_context_list)
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
@@ -564,6 +590,10 @@ class CutDQNAgent(Sepa):
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
             for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
+                if self.learning_from_demonstrations and step >= n_transitions-n_steps:
+                    # todo - verification learning from demonstrations
+                    #  we discard the last transition, because we don't know what is the expert action
+                    raise NotImplementedError
                 # get the next n-step state and q values. if the episode already terminated,
                 # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
                 next_state, next_action, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
@@ -648,6 +678,9 @@ class CutDQNAgent(Sepa):
             # this is evaluation round.
             self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
             self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+        if self.learning_from_demonstrations:
+            self.tmp_stats_buffer['accuracy'].append(np.mean(action['applied'] == action['selected']))
+            self.tmp_stats_buffer['f1_score'].append(f1_score(action['applied'], action['selected']))
 
         return trajectory
 
@@ -1071,6 +1104,8 @@ class CutDQNAgent(Sepa):
         if self.is_worker:
             # plot normalized dualbound and gap auc
             for k, vals in self.tmp_stats_buffer.items():
+                if len(vals) == 0:
+                    continue
                 avg = np.mean(vals)
                 std = np.std(vals)
                 print('{}: {:.4f} | '.format(k, avg), end='')
