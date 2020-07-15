@@ -446,7 +446,7 @@ class MccormickCycleSeparator(Sepa):
         self.added_cuts.add(cut_id)
 
         # create a Row object, and add the variables and the coefficients
-        name = "probingcycle%d" % self.ncuts_probing if probing else "cycle%d" % self.ncuts
+        name = "pc%d" % self.ncuts_probing if probing else "c%d" % self.ncuts
         cut = model.createEmptyRowSepa(self, name, rhs=cutrhs, lhs=cutlhs,
                                        local=self.local,
                                        removable=self.removable)
