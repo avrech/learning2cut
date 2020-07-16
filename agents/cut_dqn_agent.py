@@ -498,26 +498,21 @@ class CutDQNAgent(Sepa):
         if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None:
             ncuts = self.prev_action['ncuts']
             # todo not verified.
-            #  restore the applied cuts from selected cuts names
+            #  restore the applied cuts from sepastore->selectedcutsnames
             selected_cuts_names = self.model.getSelectedCutsNames()
             for i, cut_name in enumerate(selected_cuts_names):
                 self.prev_action[cut_name]['applied'] = True
                 self.prev_action[cut_name]['selection_order'] = i
-            selected = np.zeros((ncuts,), dtype=np.bool)
-            applied = np.zeros_like(selected)
-            selection_order = np.full_like(selected, fill_value=ncuts, dtype=np.long)
+            applied = np.zeros((ncuts,), dtype=np.bool)
+            selection_order = np.full_like(applied, fill_value=ncuts, dtype=np.long)
             for i, cut in enumerate(self.prev_action.values()):
                 if i == ncuts:
                     break
                 applied[i] = cut['applied']
                 selection_order[i] = cut['selection_order']
-                selected[i] = cut['applied']
             self.prev_action['applied'] = applied
             self.prev_action['selection_order'] = np.argsort(selection_order)[len(selected_cuts_names)]
-            if self.learning_from_demonstrations:
-                # restore SCIP selected action
-                self.prev_action['selected'] = selected
-            else:
+            if not self.learning_from_demonstrations:
                 # assert that the action taken by agent was actually applied
                 assert all(self.prev_action['selected'] == self.prev_action['applied'])
 
@@ -615,7 +610,7 @@ class CutDQNAgent(Sepa):
                     #  b. create context
                     transformer_decoder_context = self.policy_net.get_complete_context(action, initial_edge_index_a2a, initial_edge_attr_a2a,
                                                                                        selection_order=action['selection_order'])
-                
+
                 # get the next n-step state and q values. if the episode already terminated,
                 # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
                 next_state, next_action, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
@@ -640,7 +635,7 @@ class CutDQNAgent(Sepa):
                     reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
 
                 transition = Transition.create(scip_state=state,
-                                               action=action['selected'],
+                                               action=action['applied'],
                                                transformer_decoder_context=transformer_decoder_context,
                                                reward=reward,
                                                scip_next_state=next_state,
