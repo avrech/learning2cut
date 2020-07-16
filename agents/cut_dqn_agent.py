@@ -2,7 +2,7 @@ from sklearn.metrics import f1_score
 from pyscipopt import Sepa, SCIP_RESULT
 from time import time
 import numpy as np
-from utils.data import get_transition
+from utils.data import Transition
 import os
 import math
 import random
@@ -300,7 +300,7 @@ class CutDQNAgent(Sepa):
                 # and return here in the next LP round -
                 # unless the instance is solved and the episode is done.
             else:
-                # when learning from demonstrations, we let SCIP select and apply the cuts,
+                # when learning from demonstrations, we use SCIP's cut selection, so don't do anything.
                 result = {"result": SCIP_RESULT.DIDNOTRUN}
 
             # store the current state and action for
@@ -332,8 +332,10 @@ class CutDQNAgent(Sepa):
         # todo - what should be the return types? action only, or maybe also q values and decoder context?
         #  for simple tracking return all types, for compatibility with non-transformer models return only action.
         # transform scip_state into GNN data type
-        batch = Batch.from_data_list([get_transition(scip_state, tqnet_version=self.tqnet_version)],
-                                     follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+
+        # batch = Batch.from_data_list([Transition.create(scip_state, tqnet_version=self.tqnet_version)],
+        #                              follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        batch = Transition.create(scip_state, tqnet_version=self.tqnet_version).as_batch().to(self.device)
 
         if self.training:
             if self.learning_from_demonstrations:
@@ -493,12 +495,35 @@ class CutDQNAgent(Sepa):
         # (it can happen only in terminal_state = OPTIMAL/LP_ITERATIONS_LIMIT_REACHED).
         # we need to evaluate the normalized slack of the applied cuts,
         # and to update the episode stats with the latest SCIP stats.
-        # todo - in learning from demonstrations we must know which cuts were applied, and since we cannot
-        #  get this information in SOLVED stage, we discard the last transition. (just ignore it in _compute_reward_and_stats()
         if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None:
+            ncuts = self.prev_action['ncuts']
+            # todo not verified.
+            #  restore the applied cuts from selected cuts names
+            selected_cuts_names = self.model.getSelectedCutsNames()
+            for i, cut_name in enumerate(selected_cuts_names):
+                self.prev_action[cut_name]['applied'] = True
+                self.prev_action[cut_name]['selection_order'] = i
+            selected = np.zeros((ncuts,), dtype=np.bool)
+            applied = np.zeros_like(selected)
+            selection_order = np.full_like(selected, fill_value=ncuts, dtype=np.long)
+            for i, cut in enumerate(self.prev_action.values()):
+                if i == ncuts:
+                    break
+                applied[i] = cut['applied']
+                selection_order[i] = cut['selection_order']
+                selected[i] = cut['applied']
+            self.prev_action['applied'] = applied
+            self.prev_action['selection_order'] = np.argsort(selection_order)[len(selected_cuts_names)]
+            if self.learning_from_demonstrations:
+                # restore SCIP selected action
+                self.prev_action['selected'] = selected
+            else:
+                # assert that the action taken by agent was actually applied
+                assert all(self.prev_action['selected'] == self.prev_action['applied'])
+
             assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED']
             nvars = self.model.getNVars()
-            ncuts = self.prev_action['ncuts']
+
             cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
             cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
             cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
@@ -520,13 +545,6 @@ class CutDQNAgent(Sepa):
             # assign tightness penalty only to the selected cuts.
             self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
             self.prev_action['normalized_slack'][self.prev_action['selected']] = normalized_slack[self.prev_action['selected']]
-            # assume that all the selected actions were actually applied,
-            # although we cannot verify it
-            # todo - verification
-            if not self.learning_from_demonstrations:
-                self.prev_action['applied'] = self.prev_action['selected']
-            else:
-                raise NotImplementedError
 
             # update the rest of statistics needed to compute rewards
             self._update_episode_stats()
@@ -590,10 +608,14 @@ class CutDQNAgent(Sepa):
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
             for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
-                if self.learning_from_demonstrations and step >= n_transitions-n_steps:
-                    # todo - verification learning from demonstrations
-                    #  we discard the last transition, because we don't know what is the expert action
-                    raise NotImplementedError
+                if self.learning_from_demonstrations:
+                    # todo - create a decoder context that imitates SCIP cut selection
+                    #  a. get initial_edge_index_a2a and initial_edge_attr_a2a
+                    initial_edge_index_a2a, initial_edge_attr_a2a = Transition.get_initial_decoder_context(scip_state=state, tqnet_version=self.tqnet_version)
+                    #  b. create context
+                    transformer_decoder_context = self.policy_net.get_complete_context(action, initial_edge_index_a2a, initial_edge_attr_a2a,
+                                                                                       selection_order=action['selection_order'])
+                
                 # get the next n-step state and q values. if the episode already terminated,
                 # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
                 next_state, next_action, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
@@ -617,12 +639,12 @@ class CutDQNAgent(Sepa):
                 if self.empty_action_penalty is not None and is_empty_action:
                     reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
 
-                transition = get_transition(scip_state=state,
-                                            action=action['selected'],
-                                            transformer_decoder_context=transformer_decoder_context,
-                                            reward=reward,
-                                            scip_next_state=next_state,
-                                            tqnet_version=self.tqnet_version)
+                transition = Transition.create(scip_state=state,
+                                               action=action['selected'],
+                                               transformer_decoder_context=transformer_decoder_context,
+                                               reward=reward,
+                                               scip_next_state=next_state,
+                                               tqnet_version=self.tqnet_version)
 
                 if self.use_per:
                     # todo - compute initial priority for PER based on the policy q_values.
@@ -715,7 +737,7 @@ class CutDQNAgent(Sepa):
         # todo consider all features in follow_batch to parse correctly
 
         # old replay buffer returned transitions as separated Transition objects
-        batch = Batch.from_data_list(transitions, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        batch = Transition.create_batch(transitions).to(self.device)  #, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
 
         action_batch = batch.a
 
@@ -958,7 +980,7 @@ class CutDQNAgent(Sepa):
         cur_n_original_cuts = self.sanity_check_stats['cur_n_original_cuts']
         if cur_n_original_cuts == 0:
             return
-
+        # todo move to str
         cut_names = [bytes(name).decode('utf-8') for name in list(self.prev_action.keys())[:cur_n_original_cuts*3]]
         cur_n_duplicated_cuts = 0
         cur_n_weak_cuts = 0

@@ -564,9 +564,10 @@ class TQnet(torch.nn.Module):
                 q_vals = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
             else:
                 # construct decoder context according to random action, and generate the q_values in parallel.
-                edge_index_a2a, edge_attr_a2a = self.get_random_context(random_action=random_action,
-                                                                        initial_edge_index_a2a=edge_index_a2a,
-                                                                        initial_edge_attr_a2a=edge_attr_a2a)
+                edge_index_a2a, edge_attr_a2a = self.get_complete_context(action=random_action,
+                                                                          initial_edge_index_a2a=edge_index_a2a,
+                                                                          initial_edge_attr_a2a=edge_attr_a2a)
+                edge_index_a2a, edge_attr_a2a = edge_index_a2a.to(self.device), edge_attr_a2a.to(self.device)
                 decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
                 cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
                 q_vals = self.q(cut_decoding)
@@ -721,14 +722,17 @@ class TQnet(torch.nn.Module):
         self.decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
         return q_vals
 
-    def get_random_context(self, random_action, initial_edge_index_a2a, initial_edge_attr_a2a):
+    def get_complete_context(self, action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
         """ Construct random context according to random_action, for parallel inference. """
-        ncuts = random_action.shape[0]
         # find the randomly selected cuts.
-        selected_idxes = random_action.nonzero()
-        # permute selection order
-        selected_idxes = selected_idxes[torch.randperm(len(selected_idxes))]
-        discarded_idxes = random_action.logical_not().nonzero()
+        if selection_order is None:
+            # randperm selection order
+            selected_idxes = action.nonzero()
+            selected_idxes = selected_idxes[torch.randperm(len(selected_idxes))]
+        else:
+            selected_idxes = selection_order
+
+        discarded_idxes = action.logical_not().nonzero()
 
         # initialize context
         context_edge_index = initial_edge_index_a2a
@@ -775,7 +779,7 @@ class TQnet(torch.nn.Module):
         random_action_decoder_context = TransformerDecoderContext(random_action_edge_index_a2a, random_action_edge_attr_a2a)
         self.decoder_context = random_action_decoder_context
 
-        return random_action_edge_index_a2a.to(self.device), random_action_edge_attr_a2a.to(self.device)
+        return random_action_edge_index_a2a, random_action_edge_attr_a2a
 
 
 # transformer Q network - old version
