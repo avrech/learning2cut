@@ -114,7 +114,7 @@ class CutDQNAgent(Sepa):
         self.lp_iterations_limit = -1
         self.terminal_state = False
         # learning from demonstrations stuff
-        self.learning_from_demonstrations = False
+        self.demonstration_episode = False
 
         # logging
         self.is_tester = True  # todo set in distributed setting
@@ -146,7 +146,7 @@ class CutDQNAgent(Sepa):
         self.initialize_training()
 
     # done
-    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None, learning_from_demonstrations=False):
+    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None, demonstration_episode=False):
         self.G = G
         self.x = x
         self.y = y
@@ -172,7 +172,7 @@ class CutDQNAgent(Sepa):
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
-        self.learning_from_demonstrations = learning_from_demonstrations
+        self.demonstration_episode = demonstration_episode
 
     # done
     def sepaexeclp(self):
@@ -247,9 +247,10 @@ class CutDQNAgent(Sepa):
         Learning from demonstrations:
         When learning from demonstrations, the agent doesn't take any action, but rather let SCIP select cuts, and track
         SCIP's actions.
-        After the episode is done, SCIP actions are analyzed and adquate decoder context is constructed which follows
-        SCIP's policy. The episode transitions are stored with additional flag demonstration=True, to inform
-        the learner to compute the expert loss J_E.
+        After the episode is done, SCIP actions are analyzed and a decoder context is reconstructed following
+        SCIP's policy.
+        TODO demonstration data is stored with additional flag demonstration=True, to inform
+         the learner to compute the expert loss J_E.
         """
         # get the current state, a dictionary of available cuts (keyed by their names,
         # and query statistics related to the previous action (cut activeness etc.)
@@ -257,7 +258,7 @@ class CutDQNAgent(Sepa):
                                                         query=self.prev_action)
 
         # validate the solver behavior
-        if self.prev_action is not None and not self.learning_from_demonstrations:
+        if self.prev_action is not None and not self.demonstration_episode:
             # assert that all the selected cuts were actually applied
             # otherwise, there is a bug (or maybe safety/feasibility issue?)
             assert (self.prev_action['selected'] == self.prev_action['applied']).all()
@@ -269,7 +270,7 @@ class CutDQNAgent(Sepa):
             action, q_values, decoder_context = self._select_action(cur_state)
             available_cuts['selected'] = action
 
-            if not self.learning_from_demonstrations:
+            if not self.demonstration_episode:
                 # apply the action
                 if any(action):
                     # force SCIP to take the selected cuts and discard the others
@@ -338,7 +339,7 @@ class CutDQNAgent(Sepa):
         batch = Transition.create(scip_state, tqnet_version=self.tqnet_version).as_batch().to(self.device)
 
         if self.training:
-            if self.learning_from_demonstrations:
+            if self.demonstration_episode:
                 # take only greedy actions to compute online policy stats
                 # in demonstration mode, we don't increment num_env_steps_done,
                 # since we want to start exploration from the beginning once the demonstration phase is completed.
@@ -512,7 +513,7 @@ class CutDQNAgent(Sepa):
                 selection_order[i] = cut['selection_order']
             self.prev_action['applied'] = applied
             self.prev_action['selection_order'] = np.argsort(selection_order)[len(selected_cuts_names)]
-            if not self.learning_from_demonstrations:
+            if not self.demonstration_episode:
                 # assert that the action taken by agent was actually applied
                 assert all(self.prev_action['selected'] == self.prev_action['applied'])
 
@@ -603,16 +604,17 @@ class CutDQNAgent(Sepa):
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
             for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
-                if self.learning_from_demonstrations:
+                if self.demonstration_episode:
                     # todo - create a decoder context that imitates SCIP cut selection
                     #  a. get initial_edge_index_a2a and initial_edge_attr_a2a
                     initial_edge_index_a2a, initial_edge_attr_a2a = Transition.get_initial_decoder_context(scip_state=state, tqnet_version=self.tqnet_version)
                     #  b. create context
-                    transformer_decoder_context = self.policy_net.get_complete_context(action, initial_edge_index_a2a, initial_edge_attr_a2a,
-                                                                                       selection_order=action['selection_order'])
+                    transformer_decoder_context = self.policy_net.get_complete_context(
+                        torch.from_numpy(action['applied']), initial_edge_index_a2a, initial_edge_attr_a2a,
+                        selection_order=action['selection_order'])
 
-                # get the next n-step state and q values. if the episode already terminated,
-                # return 0 as q_values, since the q value of the terminal state and afterward is zero by convention
+                # get the next n-step state and q values. if the next state is terminal
+                # return 0 as q_values (by convention)
                 next_state, next_action, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
 
                 # credit assignment:
@@ -695,7 +697,7 @@ class CutDQNAgent(Sepa):
             # this is evaluation round.
             self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
             self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
-        if self.learning_from_demonstrations:
+        if self.demonstration_episode:
             self.tmp_stats_buffer['accuracy'].append(np.mean(action['applied'] == action['selected']))
             self.tmp_stats_buffer['f1_score'].append(f1_score(action['applied'], action['selected']))
 
@@ -715,13 +717,13 @@ class CutDQNAgent(Sepa):
         if self.use_per:
             # todo sample with beta
 
-            transitions, weights, idxes, time_stamps = self.memory.sample(self.batch_size)
+            transitions, is_demonstration, weights, idxes, data_ids = self.memory.sample(self.batch_size)
             new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights))
             # update priorities
-            self.memory.update_priorities(idxes, new_priorities, time_stamps)
+            self.memory.update_priorities(idxes, new_priorities, data_ids)
 
         else:
-            transitions = self.memory.sample(self.batch_size)
+            transitions, is_demonstration = self.memory.sample(self.batch_size)
             self.sgd_step(transitions)
         self.num_param_updates += 1
         if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
@@ -1397,9 +1399,10 @@ class CutDQNAgent(Sepa):
                           "Generate cycle inequalities for the MaxCut McCormic formulation",
                           priority=1000000, freq=1)
 
-        # reset self to start a new episode
+        # reset new episode
         self.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline,
-                          dataset_name=dataset_name, scip_seed=scip_seed)
+                          dataset_name=dataset_name, scip_seed=scip_seed,
+                          demonstration_episode=(self.i_episode < self.hparams.get('n_demonstration_episodes', 0)))
 
         # include self, setting lower priority than the cycle inequalities separator
         model.includeSepa(self, 'DQN', 'Cut selection agent',

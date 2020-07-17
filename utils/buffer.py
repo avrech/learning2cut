@@ -6,36 +6,41 @@ import math
 
 
 class ReplayBuffer(object):
-    def __init__(self, capacity):
+    def __init__(self, capacity, n_demonstrations=0):
         """
-        Create Replay buffer of Transition objects
-        Parameters
-        ----------
-        capacity: int
+        Create Replay buffer of Transition objects.
+        The first n_demonstrations samples (assumed to come from expert behaviour) remain permanently in the buffer.
+
+        :param capacity: int
             Max number of transitions to store in the buffer. When the buffer
             overflows the old memories are dropped.
+        :param n_demonstrations: int
+            number of samples to save for demonstration data
         """
+        assert n_demonstrations <= capacity
         self.storage = []
         self.capacity = capacity
+        self.n_demonstrations = n_demonstrations
         self.next_idx = 0
 
     def __len__(self):
         return len(self.storage)
 
-    def add(self, data: Transition):
+    def add(self, data):
         """
         append data to storage list, overriding the oldest elements (round robin)
         :param data: Transition object
-        :param kwargs:
         :return:
         """
         if len(self.storage) < self.capacity:
             # extend the memory for storing the new data
             self.storage.append(None)
         self.storage[self.next_idx] = data
-        # todo support heap.pop to override the min prioritized data, must be synchronized with PER priority updates
-        # increment the next index round robin
-        self.next_idx = (self.next_idx + 1) % self.capacity
+
+        # increment the next index round robin, overriding the oldest non-demonstration data
+        self.next_idx = self.next_idx + 1
+        if self.next_idx >= self.capacity:
+            self.next_idx = self.n_demonstrations
 
     def add_data_list(self, buffer):
         # push all transitions from local_buffer into memory
@@ -45,8 +50,10 @@ class ReplayBuffer(object):
     def sample(self, batch_size):
         assert batch_size <= len(self.storage)
         # sample batch_size unique transitions
-        transitions = random.sample(self.storage, batch_size)
-        return transitions
+        idxes = random.sample(range(len(self.storage)), batch_size)
+        transitions = [self.storage[idx] for idx in idxes]
+        is_demonstration = idxes < self.n_demonstrations
+        return transitions, is_demonstration  # TODO continue
 
     def __len__(self):
         return len(self.storage)
@@ -67,7 +74,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         --------
         ReplayBuffer.__init__
         """
-        super(PrioritizedReplayBuffer, self).__init__(config.get('replay_buffer_capacity', 2 ** 16))
+        super(PrioritizedReplayBuffer, self).__init__(config.get('replay_buffer_capacity', 2 ** 16),
+                                                      n_demonstrations=config.get('n_demonstrations', 10000))
         self.config = config
         self.batch_size = config.get('batch_size', 128)
         self._alpha = config.get('priority_alpha', 0.4)
@@ -181,12 +189,13 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         weights = np.array(weights, dtype=np.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
         transitions = [self.storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
-
+        is_demonstration = idxes < self.n_demonstrations
         self.num_sgd_steps_done += 1  # increment global counter to decay beta across training
+
         data_ids = self._data_unique_ids[idxes]
 
         # return a tuple of transitions, importance sampling correction weights, idxes to update later the priorities and data unique ids
-        return transitions, weights, idxes, data_ids
+        return transitions, is_demonstration, weights, idxes, data_ids
 
     def update_priorities(self, idxes, priorities, data_ids):
         """Update priorities of sampled transitions.

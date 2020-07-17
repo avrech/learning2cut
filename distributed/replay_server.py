@@ -54,12 +54,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
 
     def get_batch_packet(self):
-        transitions, weights, idxes, data_ids = self.sample()
-        # weights returned as torch.tensor by default.
-        # transitions remain Transition.to_numpy_tuple() object,
-        # idxes are list.
-        # need only to convert weights to standard numpy array
-        batch = (transitions, weights, idxes, data_ids)
+        batch = self.sample()
         batch_packet = pa.serialize(batch).to_buffer()
         return batch_packet
 

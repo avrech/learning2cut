@@ -127,10 +127,10 @@ class CutDQNLearner(CutDQNAgent):
     @staticmethod
     def unpack_batch_packet(batch_packet):
         """ inverse operation to PERServer.get_replay_data_packet() """
-        transition_numpy_tuples, weights_numpy, idxes, data_ids = pa.deserialize(batch_packet)
+        transition_numpy_tuples, is_demonstration, weights_numpy, idxes, data_ids = pa.deserialize(batch_packet)
         weights = torch.from_numpy(weights_numpy)
         transitions = [Transition.from_numpy_tuple(npt) for npt in transition_numpy_tuples]
-        return transitions, weights, idxes, data_ids
+        return transitions, is_demonstration, weights, idxes, data_ids
 
     def recv_batch(self, blocking=True):
         """
@@ -203,8 +203,8 @@ class CutDQNLearner(CutDQNAgent):
         self.idle_time_sec = idle_time_end - idle_time_start
 
         # pop one batch and perform one SGD step
-        transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
-        new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights)
+        transitions, is_demonstration, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
+        new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights)  # todo- sgd demonstrations
         packet = (idxes, new_priorities, data_ids)
         self.new_priorities_queue.append(packet)  # thread safe append
         # todo verify
