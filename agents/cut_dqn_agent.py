@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from torch_geometric.data.batch import Batch
 from torch_scatter import scatter_mean, scatter_max, scatter_add
 from torch.utils.tensorboard import SummaryWriter
+from torch_geometric.data import Data
 from tqdm import tqdm
 from utils.functions import get_normalized_areas
 from collections import namedtuple
@@ -134,6 +135,8 @@ class CutDQNAgent(Sepa):
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
         self.loss_moving_avg = 0
+        self.demonstration_loss_moving_avg = 0
+
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
         self.figures = {}
 
@@ -357,7 +360,8 @@ class CutDQNAgent(Sepa):
                     # t.max(1) will return largest column value of each row.
                     # second column on max result is the index of where max element was found.
                     # we pick action with the larger expected reward.
-                    q_values = self.policy_net(
+                    # todo - move all architectures to output dict format
+                    output = self.policy_net(
                         x_c=batch.x_c,
                         x_v=batch.x_v,
                         x_a=batch.x_a,
@@ -372,14 +376,16 @@ class CutDQNAgent(Sepa):
                         # todo- verification v3
                         # the action is not necessarily q_values.argmax(dim=1).
                         # take the action constructed internally in the transformer, and the corresponding q_values
-                        greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
-                        greedy_action = self.policy_net.decoder_greedy_action.numpy()
+                        greedy_q_values = output['q_values'].gather(1, output['action'].long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
+                        # greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
+                        greedy_action = output['action'].numpy()  # self.policy_net.decoder_greedy_action.numpy()
                         # return also the decoder context to store for backprop
-                        greedy_action_decoder_context = self.policy_net.decoder_context
+                        greedy_action_decoder_context = output['decoder_context']
+                        # greedy_action_decoder_context = self.policy_net.decoder_context
                     else:
-                        greedy_q_values, greedy_action = q_values.max(1)  # todo - verification
-                        greedy_action = greedy_action.detach().cpu().numpy().astype(np.bool)
-                        greedy_q_values = greedy_q_values.detach().cpu()  # todo - detach() is not necessary due to torch.no_grad()
+                        greedy_q_values, greedy_action = output['q_values'].max(1)  # todo - verification
+                        greedy_action = greedy_action.cpu().numpy().astype(np.bool)  # todo - verify detach()
+                        greedy_q_values = greedy_q_values.cpu()  # todo - detach() is not necessary due to torch.no_grad()
                         greedy_action_decoder_context = None
 
                     return greedy_action, greedy_q_values, greedy_action_decoder_context
@@ -396,7 +402,7 @@ class CutDQNAgent(Sepa):
                 # For transformer, we compute the random action q_values based on the random decoder context,
                 # and we do it in parallel like we do in sgd_step()
                 # For non-transformer model, it doesn't affect anything
-                q_values = self.policy_net(
+                output = self.policy_net(
                     x_c=batch.x_c,
                     x_v=batch.x_v,
                     x_a=batch.x_a,
@@ -407,15 +413,15 @@ class CutDQNAgent(Sepa):
                     edge_index_a2a=batch.edge_index_a2a,
                     edge_attr_a2a=batch.edge_attr_a2a,
                     random_action=random_action  # for transformer to set context
-                ).detach().cpu()
-                random_action_decoder_context = self.policy_net.decoder_context if self.use_transformer else None
-                random_q_values = q_values.gather(1, random_action.long().unsqueeze(1))  # todo - verification. take the relevant q_values only.
+                )
+                random_action_decoder_context = output['decoder_context'] if self.use_transformer else None
+                random_action_q_values = output['q_values'].detach().cpu().gather(1, random_action.long().unsqueeze(1))  # todo - verification. take the relevant q_values only.
                 random_action = random_action.numpy().astype(np.bool)
-                return random_action, random_q_values, random_action_decoder_context
+                return random_action, random_action_q_values, random_action_decoder_context
         else:
             # in test time, take greedy action
             with torch.no_grad():
-                q_values = self.policy_net(
+                output = self.policy_net(
                     x_c=batch.x_c,
                     x_v=batch.x_v,
                     x_a=batch.x_a,
@@ -429,9 +435,9 @@ class CutDQNAgent(Sepa):
                 # todo enforce select_at_least_one_cut.
                 #  in tqnet v2 it is enforced internally, so that the decoder_greedy_action is valid.
                 if self.use_transformer:
-                    greedy_action = self.policy_net.decoder_greedy_action.numpy()
+                    greedy_action = output['action'].numpy()
                 else:
-                    greedy_action = q_values.max(1)[1].cpu().numpy().astype(np.bool)
+                    greedy_action = output['q_values'].max(1)[1].cpu().numpy().astype(np.bool)
                 assert not self.select_at_least_one_cut or any(greedy_action)
                 # return None, None for q_values and decoder context,
                 # since they are used only while generating experience
@@ -718,20 +724,19 @@ class CutDQNAgent(Sepa):
             # todo sample with beta
 
             transitions, is_demonstration, weights, idxes, data_ids = self.memory.sample(self.batch_size)
-            new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights))
+            new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights), is_demonstration=is_demonstration)
             # update priorities
             self.memory.update_priorities(idxes, new_priorities, data_ids)
 
         else:
             transitions, is_demonstration = self.memory.sample(self.batch_size)
-            self.sgd_step(transitions)
+            self.sgd_step(transitions, is_demonstration=is_demonstration)
         self.num_param_updates += 1
         if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
             self.update_target()
 
-    def sgd_step(self, transitions, importance_sampling_correction_weights=None):
+    def sgd_step(self, transitions, importance_sampling_correction_weights=None, is_demonstration=None):
         """ implement the basic DQN optimization step """
-        # todo consider all features in follow_batch to parse correctly
 
         # old replay buffer returned transitions as separated Transition objects
         batch = Transition.create_batch(transitions).to(self.device)  #, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
@@ -757,7 +762,7 @@ class CutDQNAgent(Sepa):
         #  selected cut, and for the last replication representing the q values of all the discarded cuts,
         #  we need to compute the |discarded| J_E losses for all the discarded cuts.
         #  Note: each one of those J_E losses should consider only the "remaining" cuts.
-        q_values = self.policy_net(
+        policy_output = self.policy_net(
             x_c=batch.x_c,
             x_v=batch.x_v,
             x_a=batch.x_a,
@@ -769,7 +774,12 @@ class CutDQNAgent(Sepa):
             edge_attr_a2a=batch.edge_attr_a2a,
             mode='batch'
         )
-        q_values = q_values.gather(1, action_batch.unsqueeze(1))
+        q_values = policy_output['q_values'].gather(1, action_batch.unsqueeze(1))
+
+        # demonstration loss:
+        # TODO - currently implemented only for tqnet v3
+        if is_demonstration.any():
+            demonstation_loss = self.compute_demonstration_loss(policy_output['cut_encoding'], batch.x_a_batch, transitions, is_demonstration, importance_sampling_correction_weights)
 
         # Compute the Bellman target for all next states.
         # Expected values of actions for non_terminal_next_states are computed based
@@ -781,7 +791,7 @@ class CutDQNAgent(Sepa):
 
         # for each graph in the next state batch, and for each cut, compute the q_values
         # using the target network.
-        target_next_q_values = self.target_net(
+        target_next_output = self.target_net(
             x_c=batch.ns_x_c,
             x_v=batch.ns_x_v,
             x_a=batch.ns_x_a,
@@ -793,7 +803,7 @@ class CutDQNAgent(Sepa):
             edge_attr_a2a=batch.ns_edge_attr_a2a,
             mode='batch'
         )
-
+        target_next_q_values = target_next_output['q_values']
         # compute the target using either DQN or DDQN formula
         # todo: TQNet v2:
         #  compute the argmax across the "select" q values only.
@@ -808,7 +818,7 @@ class CutDQNAgent(Sepa):
                                                                dim_size=self.batch_size)
             elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
                 # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-                policy_next_q_values = self.policy_net(
+                policy_next_output = self.policy_net(
                     x_c=batch.ns_x_c,
                     x_v=batch.ns_x_v,
                     x_a=batch.ns_x_a,
@@ -820,6 +830,7 @@ class CutDQNAgent(Sepa):
                     edge_attr_a2a=batch.ns_edge_attr_a2a,
                     mode='batch'
                 )
+                policy_next_q_values = policy_next_output['q_values']
                 # compute the argmax over 'select' for each graph in batch
                 _, argmax_policy_next_q_values = scatter_max(policy_next_q_values[:, 1], # find max across the "select" q values only
                                                              batch.ns_x_a_batch, # target index of each element in source
@@ -833,7 +844,7 @@ class CutDQNAgent(Sepa):
                 max_target_next_q_values = target_next_q_values.max(1)[0].detach()
             elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
                 # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-                policy_next_q_values = self.policy_net(
+                policy_next_output = self.policy_net(
                     x_c=batch.ns_x_c,
                     x_v=batch.ns_x_v,
                     x_a=batch.ns_x_a,
@@ -844,6 +855,7 @@ class CutDQNAgent(Sepa):
                     edge_index_a2a=batch.ns_edge_index_a2a,
                     edge_attr_a2a=batch.ns_edge_attr_a2a,
                 )
+                policy_next_q_values = policy_next_output['q_values']
                 argmax_policy_next_q_values = policy_next_q_values.max(1)[1].detach()
                 max_target_next_q_values = target_next_q_values.gather(1, argmax_policy_next_q_values).detach()
 
@@ -900,6 +912,107 @@ class CutDQNAgent(Sepa):
             return new_priorities
         else:
             return None
+
+    def compute_demonstration_loss(self, cut_encoding_batch, cut_encoding_transition_id, transitions, is_demonstration, weights):
+        """
+        break batch cut encoding to graph level.
+        expand decoder context
+        mask irrelevant entries
+        create l(a,a_E)
+        J_E scatter_max q(s,a) + l(a,a_E) - q(s, a_E)
+
+        :param cut_encoding_transition_id:
+        :param transitions:
+        :param is_demonstration: indicate on deomnstration data
+        :param weights: importance sampling weights
+        :return: loss (scalar or array)?
+        """
+        # expand graph-level encoding
+        # todo - consider removing all edges whose target nodes will be masked anyway, and save computations.
+        encoding_list, edge_index_list, edge_attr_list, q_mask_list, large_margin_list, a_E_list, weights_list = [], [], [], [], [], [], []
+        for idx, (transition, demonstration_data, weight) in enumerate(zip(transitions, is_demonstration, weights)):
+            if not demonstration_data:
+                continue
+            encoding = cut_encoding_batch[cut_encoding_transition_id == idx]
+
+            # expand decoder input to full context
+            n = encoding.shape[0]
+            dense_attr = torch.sparse.FloatTensor(transition.edge_index_a2a, transition.edge_attr_a2a).to_dense()  # n x n x d
+            expanded_o_ij = dense_attr[:, :, :1].unsqueeze(0).expand(n, -1, -1, -1)
+            expanded_i_features = dense_attr[:, :, 1:].transpose(0, 1).unsqueeze(2).expand(-1, -1, n, -1)
+            expanded_context = torch.cat([expanded_o_ij, expanded_i_features], dim=-1)
+
+            # create Data object for each context slice, and the corresponding masks and margin
+
+            selected_cuts = transition.a.nonzero().view(-1).tolist() if transition.a.bool().any() else []
+            for i in selected_cuts:
+                context = expanded_context[i, :, :, :]
+                edge_index = (context[:, :, 0] + 1).nonzero().t()  # get matrix indices sorted
+                edge_attr = context[edge_index[0], edge_index[1], :]
+                q_mask = torch.zeros((n, 2), dtype=torch.bool)
+                q_mask[context[:, i, -1] == 1] = True  # mask the already selected cuts
+                a_E = torch.zeros((n, 2), dtype=torch.bool)
+                a_E[i, 1] = True
+                large_margin = torch.full_like(q_mask, fill_value=self.hparams.get('demonstration_large_margin', 0.1), dtype=torch.float32)
+                large_margin[a_E] = 0
+                edge_index_list.append(edge_index)
+                edge_attr_list.append(edge_attr)
+                encoding_list.append(encoding)
+                q_mask_list.append(q_mask)
+                large_margin_list.append(large_margin)
+                a_E_list.append(a_E)
+            # expand context for the first discarded cut only
+            # todo - consider penalizing for all discarded cuts, not only the first one.
+            #  it can be straightforwardly done by repeating the same computation for all discarded cuts.
+            if transition.a.logical_not().any():
+                i = transition.a.logical_not().nonzero().view(-1)[0]
+                context = expanded_context[i, :, :, :]
+                edge_index = (context[:, :, 0] + 1).nonzero().t()  # get matrix indices sorted
+                edge_attr = context[edge_index[0], edge_index[1], :]
+                q_mask = torch.zeros((n, 2), dtype=torch.bool)
+                q_mask[context[:, i, -1] == 1] = True  # mask the already selected cuts
+                q_mask[:, 0] = True   # mask the discard options
+                q_mask[i, 0] = False  # except of discard cut i
+                a_E = torch.zeros((n, 2), dtype=torch.bool)
+                a_E[i, 0] = True
+                large_margin = torch.full_like(q_mask, fill_value=self.hparams.get('demonstration_large_margin', 0.1), dtype=torch.float32)
+                large_margin[a_E] = 0
+                edge_index_list.append(edge_index)
+                edge_attr_list.append(edge_attr)
+                encoding_list.append(encoding)
+                q_mask_list.append(q_mask)
+                large_margin_list.append(large_margin)
+                a_E_list.append(a_E)
+            # broadcast the transition weight to all its related losses
+            weights_list.append(torch.full((len(selected_cuts)+1, ), fill_value=weight, dtype=torch.float32))
+
+        # build helper graphs to compute the demonstration loss in parallel
+        expanded_data_list = [Data(x=x, edge_index=edge_index, edge_attr=edge_attr) for x, edge_index, edge_attr in zip(encoding_list, edge_index_list, edge_attr_list)]
+        expanded_batch = Batch.from_data_list(expanded_data_list).to(self.device)
+        batch_q_mask = torch.cat(q_mask_list, dim=0).to(self.device)
+        batch_large_margin = torch.cat(large_margin_list, dim=0).to(self.device)
+        batch_a_E = torch.cat(a_E_list, dim=0).to(self.device)
+        batch_weights = torch.cat(weights_list, dim=0)
+
+        # decode the full set of q values
+        x, _, _ = self.policy_net.decoder_conv((expanded_batch.x, expanded_batch.edge_index, expanded_batch.edge_attr))
+        q = self.policy_net.q(x)
+        q_a_E = q[batch_a_E]                    # expert action q values
+        q_plus_l = q + batch_large_margin       # add large margin and
+        q_plus_l[batch_q_mask] = -float('Inf')  # mask the non-relevant entries
+
+        # compute max graph-wise
+        max_q_plus_l, _ = scatter_max(q_plus_l, expanded_batch.batch, dim=0, dim_size=expanded_batch.num_graphs)
+        max_q_plus_l, _ = max_q_plus_l.max(dim=1)
+
+        # compute demonstration loss J_E = max [Q(s,a) + large margin] - Q(s, a_E)
+        losses = max_q_plus_l - q_a_E
+        loss = (losses * batch_weights).mean()
+
+        # log demonstration loss moving average
+        self.demonstration_loss_moving_avg = 0.95 * self.demonstration_loss_moving_avg + 0.05 * loss.detach().cpu().numpy()
+
+        return loss
 
     # done
     def update_target(self):

@@ -496,6 +496,7 @@ class TQnet(torch.nn.Module):
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
                                                                 cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1) - 1)))
                                         for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
+        self.cut_encoding = None
 
         ###########
         # Decoder #
@@ -522,10 +523,10 @@ class TQnet(torch.nn.Module):
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_layers', 1))])),
         }.get(hparams.get('decoder_conv', 'SelfAttention'))
-        self.decoder_edge_attr_list = None  # moved to local context_edge_atter_list
-        self.decoder_edge_index_list = None  # moved to local context_edge_index_list
-        self.decoder_context = None
-        self.decoder_greedy_action = None
+        # self.decoder_edge_attr_list = None  # moved to local context_edge_atter_list
+        # self.decoder_edge_index_list = None  # moved to local context_edge_index_list
+        # self.decoder_context = None
+        # self.decoder_greedy_action = None
 
         ##########
         # Q head #
@@ -543,16 +544,17 @@ class TQnet(torch.nn.Module):
                 edge_index_a2a,
                 edge_attr_a2a,
                 mode='inference',
-                random_action=None,
-                compute_J_E=False
+                random_action=None
                 ):
         """
         """
         ###########
         # Encoder #
         ###########
+        output = {}
         lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
         cut_encoding = self.lp_conv(lp_conv_inputs)
+        output['cut_encoding'] = cut_encoding  # store for demonstration J_E loss
 
         ###########
         # Decoder #
@@ -561,16 +563,22 @@ class TQnet(torch.nn.Module):
         if mode == 'inference':
             if random_action is None:
                 # run greedy inference
-                q_vals = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
+                q_values, greedy_action, decoder_context = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
+                output['action'] = greedy_action
+                output['decoder_context'] = decoder_context
+                output['q_values'] = q_values
             else:
                 # construct decoder context according to random action, and generate the q_values in parallel.
                 edge_index_a2a, edge_attr_a2a = self.get_complete_context(action=random_action,
                                                                           initial_edge_index_a2a=edge_index_a2a,
                                                                           initial_edge_attr_a2a=edge_attr_a2a)
+                output['decoder_context'] = TransformerDecoderContext(edge_index_a2a, edge_attr_a2a)
                 edge_index_a2a, edge_attr_a2a = edge_index_a2a.to(self.device), edge_attr_a2a.to(self.device)
                 decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
                 cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
-                q_vals = self.q(cut_decoding)
+                q_values = self.q(cut_decoding)
+                output['q_values'] = q_values
+                output['action'] = random_action
         elif mode == 'batch':
             # we are in training.
             # decode cuts in parallel given the cut-level context,
@@ -587,11 +595,12 @@ class TQnet(torch.nn.Module):
             decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
             cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
             # and estimate q values
-            q_vals = self.q(cut_decoding)
+            q_values = self.q(cut_decoding)
+            output['q_values'] = q_values
         else:
             raise ValueError
 
-        return q_vals
+        return output
 
     def inference(self, cuts_encoding, edge_index_a2a, edge_attr_a2a):
         ncuts = cuts_encoding.shape[0]
@@ -713,14 +722,16 @@ class TQnet(torch.nn.Module):
 
         # store the greedy action built on the fly to return to user,
         # since the q_values.argmax(1) is not necessarily equal to selected_cuts_mask
-        self.decoder_greedy_action = selected_cuts_mask
+        greedy_action = selected_cuts_mask
+        # self.decoder_greedy_action = selected_cuts_mask
 
         # finally, stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer
         context_edge_attr = torch.cat(context_edge_attr_list, dim=0)
         context_edge_index = torch.cat(context_edge_index_list, dim=1)
-        self.decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
-        return q_vals
+        decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
+        # self.decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
+        return q_vals, greedy_action, decoder_context
 
     def get_complete_context(self, action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
         """ Construct random context according to random_action, for parallel inference. """
@@ -777,9 +788,32 @@ class TQnet(torch.nn.Module):
         random_action_edge_index_a2a = torch.cat(context_edge_index_list, dim=1)
         random_action_edge_attr_a2a = torch.cat(context_edge_attr_list, dim=0)
         random_action_decoder_context = TransformerDecoderContext(random_action_edge_index_a2a, random_action_edge_attr_a2a)
-        self.decoder_context = random_action_decoder_context
+        # self.decoder_context = random_action_decoder_context
 
         return random_action_edge_index_a2a, random_action_edge_attr_a2a
+
+    @staticmethod
+    def expand_decoder_input(encoding, compact_edge_index, compact_edge_attr):
+        """ Expand compact decoder context to the full sequence of contexts as seen in inference
+        :param encoding: [n x d_enc] - node features
+        :param compact_edge_index: [2 x n**2] - edge index
+        :param compact_edge_attr: [n**2 x d_edge] - edge attributes
+        :return: List of n (x, edge_index, edge_attr), each set corresponds to one inference iteration
+        TODO - complete accurate doc
+        """
+        n = encoding.shape[0]
+        dense_attr = torch.sparse.FloatTensor(compact_edge_index, compact_edge_attr).to_dense()  # n x n x d
+        dense_attr.unsqueeze_(dim=1)  # n x 1 x n x d
+        expanded_attr = dense_attr.expand(-1, n, -1, -1)  # expanded_attr[:,:,i,:] is the ith edge_attr replica
+        expanded_attr.transpose_(0, 2)  # reshape such that replica ith is expanded_attr[i, :, :, :]
+        edge_attr_list, edge_index_list = [], []
+        for i in range(n):
+            replica_i = expanded_attr[i, :, :, :]
+            edge_index = (replica_i[:, :, 0] + 1).nonzero().t()  # get matrix indices sorted
+            edge_attr = replica_i[edge_index[0], edge_index[1], :]
+            edge_index_list.append(edge_index)
+            edge_attr_list.append(edge_attr)
+        return [encoding]*n, edge_index_list, edge_attr_list
 
 
 # transformer Q network - old version
