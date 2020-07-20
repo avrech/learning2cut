@@ -219,6 +219,8 @@ class CutDQNAgent(Sepa):
             if self.hparams.get('verbose', 0) == 2:
                 print(self.print_prefix + 'LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
             self.terminal_state = 'LP_ITERATIONS_LIMIT_REACHED'
+            # get stats of prev_action
+            self.model.getState(query=self.prev_action)
             # finish collecting episode stats
             self.finished_episode_stats = True
             # clear cuts and terminate
