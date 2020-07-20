@@ -986,7 +986,8 @@ class CutDQNAgent(Sepa):
                 large_margin_list.append(large_margin)
                 a_E_list.append(a_E)
             # broadcast the transition weight to all its related losses
-            weights_list.append(torch.full((len(selected_cuts)+1, ), fill_value=weight, dtype=torch.float32))
+            # the number of losses is the number of selected cuts plus (1 if there are discarded cuts else 0)
+            weights_list.append(torch.full((len(selected_cuts)+transition.a.logical_not().any(), ), fill_value=weight, dtype=torch.float32))
 
         # build helper graphs to compute the demonstration loss in parallel
         expanded_data_list = [Data(x=x, edge_index=edge_index, edge_attr=edge_attr) for x, edge_index, edge_attr in zip(encoding_list, edge_index_list, edge_attr_list)]
