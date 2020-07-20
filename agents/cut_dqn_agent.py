@@ -134,7 +134,7 @@ class CutDQNAgent(Sepa):
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
-        self.loss_moving_avg = 0
+        self.n_step_loss_moving_avg = 0
         self.demonstration_loss_moving_avg = 0
 
         # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
@@ -781,7 +781,9 @@ class CutDQNAgent(Sepa):
         # demonstration loss:
         # TODO - currently implemented only for tqnet v3
         if is_demonstration.any():
-            demonstation_loss = self.compute_demonstration_loss(policy_output['cut_encoding'], batch.x_a_batch, transitions, is_demonstration, importance_sampling_correction_weights)
+            demonstration_loss = self.compute_demonstration_loss(policy_output['cut_encoding'], batch.x_a_batch, transitions, is_demonstration, importance_sampling_correction_weights)
+        else:
+            demonstration_loss = 0
 
         # Compute the Bellman target for all next states.
         # Expected values of actions for non_terminal_next_states are computed based
@@ -883,13 +885,16 @@ class CutDQNAgent(Sepa):
             # broadcast each transition importance sampling weight to all its related losses
             importance_sampling_correction_weights = importance_sampling_correction_weights.to(self.device)[batch.x_a_batch]
             # multiply each action loss by its importance sampling correction weight and average
-            loss = (importance_sampling_correction_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
+            n_step_loss = (importance_sampling_correction_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
         else:
             # generate equal weights for all losses
-            loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1))
+            n_step_loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1))
 
         # loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1)) - original pytorch example
-        self.loss_moving_avg = 0.95*self.loss_moving_avg + 0.05*loss.detach().cpu().numpy()
+        self.n_step_loss_moving_avg = 0.95 * self.n_step_loss_moving_avg + 0.05 * n_step_loss.detach().cpu().numpy()
+
+        # sum all losses
+        loss = n_step_loss + self.hparams.get('demonstraion_loss_coef', 0.5) * demonstration_loss
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -1014,6 +1019,8 @@ class CutDQNAgent(Sepa):
 
         # log demonstration loss moving average
         self.demonstration_loss_moving_avg = 0.95 * self.demonstration_loss_moving_avg + 0.05 * loss.detach().cpu().numpy()
+
+        # todo - compute accuracy
 
         return loss
 
@@ -1250,8 +1257,10 @@ class CutDQNAgent(Sepa):
 
         if self.is_learner:
             # log the average loss of the last training session
-            print('Loss: {:.4f} | '.format(self.loss_moving_avg), end='')
-            self.writer.add_scalar('Training_Loss', self.loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
+            print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
+            print('Demonstration Loss: {:.4f} | '.format(self.demonstration_loss_moving_avg), end='')
+            self.writer.add_scalar('Nstep_Loss', self.n_step_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
+            self.writer.add_scalar('Demonstration_Loss', self.n_step_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
             print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
 
         # print the additional info
@@ -1368,7 +1377,7 @@ class CutDQNAgent(Sepa):
             'i_episode': self.i_episode,
             'walltime_offset': time() - self.start_time + self.walltime_offset,
             'best_perf': self.best_perf,
-            'loss_moving_avg': self.loss_moving_avg,
+            'n_step_loss_moving_avg': self.n_step_loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
         if self.hparams.get('verbose', 1) > 1:
             print(self.print_prefix, 'Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
@@ -1398,7 +1407,7 @@ class CutDQNAgent(Sepa):
         self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
         self.best_perf = checkpoint['best_perf']
-        self.loss_moving_avg = checkpoint['loss_moving_avg']
+        self.n_step_loss_moving_avg = checkpoint['n_step_loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
         print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
