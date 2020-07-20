@@ -725,14 +725,16 @@ class CutDQNAgent(Sepa):
         if self.use_per:
             # todo sample with beta
 
-            transitions, is_demonstration, weights, idxes, data_ids = self.memory.sample(self.batch_size)
+            transitions, weights, idxes, data_ids = self.memory.sample(self.batch_size)
+            is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
             new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights), is_demonstration=is_demonstration)
             # update priorities
             self.memory.update_priorities(idxes, new_priorities, data_ids)
 
         else:
-            transitions, is_demonstration = self.memory.sample(self.batch_size)
-            self.sgd_step(transitions, is_demonstration=is_demonstration)
+            # learning from demonstration is disabled with simple replay buffer.
+            transitions = self.memory.sample(self.batch_size)
+            self.sgd_step(transitions)
         self.num_param_updates += 1
         if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
             self.update_target()

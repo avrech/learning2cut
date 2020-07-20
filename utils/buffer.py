@@ -52,8 +52,7 @@ class ReplayBuffer(object):
         # sample batch_size unique transitions
         idxes = random.sample(range(len(self.storage)), batch_size)
         transitions = [self.storage[idx] for idx in idxes]
-        is_demonstration = idxes < self.n_demonstrations
-        return transitions, is_demonstration  # TODO continue
+        return transitions
 
     def __len__(self):
         return len(self.storage)
@@ -75,7 +74,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         ReplayBuffer.__init__
         """
         super(PrioritizedReplayBuffer, self).__init__(config.get('replay_buffer_capacity', 100000),
-                                                      n_demonstrations=config.get('replay_buffer_n_demonstrations', 10000))
+                                                      n_demonstrations=config.get('replay_buffer_n_demonstrations', 0))
         self.config = config
         self.batch_size = config.get('batch_size', 128)
         self.demonstration_priority_bonus = config.get('replay_buffer_demonstration_priority_bonus', 0.00001)
@@ -190,13 +189,12 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         weights = np.array(weights, dtype=np.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
         transitions = [self.storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
-        is_demonstration = idxes < self.n_demonstrations
         self.num_sgd_steps_done += 1  # increment global counter to decay beta across training
 
         data_ids = self._data_unique_ids[idxes]
 
         # return a tuple of transitions, importance sampling correction weights, idxes to update later the priorities and data unique ids
-        return transitions, is_demonstration, weights, idxes, data_ids
+        return transitions, weights, idxes, data_ids
 
     def update_priorities(self, idxes, priorities, data_ids):
         """Update priorities of sampled transitions.

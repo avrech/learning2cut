@@ -26,7 +26,7 @@ select_at_least_one_cut: True
 update_rule: DQN
 
 # LEARNING FROM DEMONSTRATIONS
-n_demonstration_episodes: 10000
+n_demonstration_episodes: 1000
 demonstration_loss_coef: 0.5
 demonstration_large_margin: 0.1
 
