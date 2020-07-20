@@ -894,7 +894,7 @@ class CutDQNAgent(Sepa):
         self.n_step_loss_moving_avg = 0.95 * self.n_step_loss_moving_avg + 0.05 * n_step_loss.detach().cpu().numpy()
 
         # sum all losses
-        loss = n_step_loss + self.hparams.get('demonstraion_loss_coef', 0.5) * demonstration_loss
+        loss = n_step_loss + self.hparams.get('demonstration_loss_coef', 0.5) * demonstration_loss
 
         # Optimize the model
         self.optimizer.zero_grad()

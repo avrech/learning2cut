@@ -74,10 +74,11 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         --------
         ReplayBuffer.__init__
         """
-        super(PrioritizedReplayBuffer, self).__init__(config.get('replay_buffer_capacity', 2 ** 16),
-                                                      n_demonstrations=config.get('n_demonstrations', 10000))
+        super(PrioritizedReplayBuffer, self).__init__(config.get('replay_buffer_capacity', 100000),
+                                                      n_demonstrations=config.get('replay_buffer_n_demonstrations', 10000))
         self.config = config
         self.batch_size = config.get('batch_size', 128)
+        self.demonstration_priority_bonus = config.get('replay_buffer_demonstration_priority_bonus', 0.00001)
         self._alpha = config.get('priority_alpha', 0.4)
         assert self._alpha >= 0
 
@@ -212,13 +213,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         """
         assert len(idxes) == len(priorities)
         assert len(idxes) == len(data_ids)
-        # assert all(time_stamps <= self._time_stamp)
         assert all(priorities > 0)
-        # todo - this might cause undesired crash when the replay server is restarted.
-        #  a probable failing case is where old waiting packets are now received, while their idxes refer to the
-        #  old replay server storage. So we only need to check idxes for overflow,
-        #  and the validity of the data itself will be done by comparing the received data_id to the existing one.
-        # assert all(0 <= idxes) and all(idxes < len(self.storage))
 
         for idx, priority, data_id in zip(idxes, priorities, data_ids):
             # filter invalid packets
@@ -234,6 +229,13 @@ class PrioritizedReplayBuffer(ReplayBuffer):
                 # the position idx in the storage was overridden by a new replay data,
                 # so the current priority is not relevant any more and can be discarded
                 continue
+
+            # update priority:
+            # for demonstration data (permanently stored in 0 <= idxes < self.n_demonstrations)
+            # we add a positive bonus
+            if idx < self.n_demonstrations:
+                priority += self.demonstration_priority_bonus
+
             self._it_sum[idx] = priority ** self._alpha
             self._it_min[idx] = priority ** self._alpha
             self._max_priority = max(self._max_priority, priority)
