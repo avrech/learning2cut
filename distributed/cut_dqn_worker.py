@@ -59,7 +59,7 @@ class CutDQNWorker(CutDQNAgent):
 
     def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with learner's policy_net params """
-        new_params, params_id = pa.deserialize(new_params_packet)
+        new_params, params_id = new_params_packet
         model = self.get_model()
         for param, new_param in zip(model.parameters(), new_params):
             new_param = torch.FloatTensor(new_param).to(self.device)
