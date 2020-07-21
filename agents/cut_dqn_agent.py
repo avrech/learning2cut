@@ -116,6 +116,7 @@ class CutDQNAgent(Sepa):
         self.terminal_state = False
         # learning from demonstrations stuff
         self.demonstration_episode = False
+        self.num_demonstrations_done = 0
 
         # logging
         self.is_tester = True  # todo set in distributed setting
@@ -677,7 +678,7 @@ class CutDQNAgent(Sepa):
                     td_error = torch.abs(q_values - target_q_values)
                     td_error = torch.clamp(td_error, min=1e-8)
                     initial_priority = torch.norm(td_error).item()  # default L2 norm
-                    trajectory.append((transition, initial_priority))
+                    trajectory.append((transition, initial_priority, self.demonstration_episode))
                 else:
                     trajectory.append(transition)
 
@@ -1514,7 +1515,7 @@ class CutDQNAgent(Sepa):
                 self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
     # done
-    def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None):
+    def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
         # create SCIP model for G
         hparams = self.hparams
         model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts',
@@ -1523,13 +1524,13 @@ class CutDQNAgent(Sepa):
         # include cycle inequalities separator with high priority
         cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
         model.includeSepa(cycle_sepa, 'MLCycles',
-                          "Generate cycle inequalities for the MaxCut McCormic formulation",
+                          "Generate cycle inequalities for the MaxCut McCormick formulation",
                           priority=1000000, freq=1)
 
         # reset new episode
         self.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline,
                           dataset_name=dataset_name, scip_seed=scip_seed,
-                          demonstration_episode=(self.i_episode < self.hparams.get('n_demonstration_episodes', 0)))
+                          demonstration_episode=demonstration_episode)
 
         # include self, setting lower priority than the cycle inequalities separator
         model.includeSepa(self, 'DQN', 'Cut selection agent',
@@ -1609,7 +1610,12 @@ class CutDQNAgent(Sepa):
                 print(f'instance no. {graph_idx}, filename: {filename}')
 
             # execute episode and collect experience
-            trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'])
+            trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'],
+                                              demonstration_episode=(self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0)))
+
+            # increment the counter of demonstrations done
+            if self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0):
+                self.num_demonstrations_done += len(trajectory)
 
             if i_episode % len(graph_indices) == 0:
                 graph_indices = torch.randperm(trainset['num_instances'])

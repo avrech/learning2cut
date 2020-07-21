@@ -22,6 +22,7 @@ class CutDQNWorker(CutDQNAgent):
         self.is_learner = False
         self.is_worker = not is_tester
         self.is_tester = is_tester
+        self.generate_demonstration_data = False
 
         # set worker specific tensorboard logdir
         worker_logdir = os.path.join(self.logdir, 'tensorboard', f'worker-{worker_id}')
@@ -37,13 +38,17 @@ class CutDQNWorker(CutDQNAgent):
         # use socket.connect() instead of .bind() because workers are the least stable part in the system
         # (not supposed to but rather suspected to be)
         print(self.print_prefix, "initializing sockets..")
-        # for receiving params from learner
+        # for receiving params from learner and requests from replay server
         context = zmq.Context()
-        self.params_pubsub_port = hparams["params_pubsub_port"]
-        self.params_sub_socket = context.socket(zmq.SUB)
-        self.params_sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
-        self.params_sub_socket.setsockopt(zmq.CONFLATE, 1)
-        self.params_sub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+        self.params_pubsub_port = hparams["learner_2_workers_pubsub_port"]
+        self.data_requests_pubsub_port = hparams["replay_server_2_workers_pubsub_port"]
+        self.sub_socket = context.socket(zmq.SUB)
+        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
+        self.sub_socket.setsockopt(zmq.CONFLATE, 1)
+        # connect to learner pub socket
+        self.sub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+        # connect to replay_server pub socket
+        self.sub_socket.connect(f"tcp://127.0.0.1:{self.data_requests_pubsub_port}")
 
         # for sending replay data to buffer
         if self.is_worker:
@@ -71,26 +76,47 @@ class CutDQNWorker(CutDQNAgent):
         replay_data_packet = self.pack_replay_data(replay_data)
         self.worker_2_replay_server_socket.send(replay_data_packet)
 
-    def recv_new_params(self, blocking=False):
+    def read_message(self, message):
+        new_params_packet = None
+        message = pa.deserialize(message)
+        if message[0] == 'new_params':
+            new_params_packet = message[1]
+        elif message[0] == 'generate_demonstration_data':
+            print(self.print_prefix, 'collecting demonstration data')
+            self.generate_demonstration_data = True
+        elif message[0] == 'generate_agent_data':
+            self.generate_demonstration_data = False
+            print(self.print_prefix, 'collecting agent data')
+        else:
+            raise ValueError
+        return new_params_packet
+
+    def recv_messages(self, wait_for_new_params=False):
         """
-        Receive the recently published params.
-        The PUB/SUB protocol says that the packet received is the last one sent by the publisher.
-        So, in order to track the correct global step, a
+        Subscribe to learner and replay_server messages.
+        if topic == 'new_params' update model and return received_new_params.
+           topic == 'generate_demonstration_data' set self.generate_demonstration_data True
+           topic == 'generate_egent_data' set self.generate_demonstration_data False
         """
-        if blocking:
-            new_params_packet = self.params_sub_socket.recv()
-            received = True
+        new_params_packet = None
+        if wait_for_new_params:
+            while new_params_packet is None:
+                message = self.sub_socket.recv()
+                new_params_packet = self.read_message(message)
         else:
             try:
-                new_params_packet = self.params_sub_socket.recv(zmq.DONTWAIT)
-                received = True
+                message = self.sub_socket.recv(zmq.DONTWAIT)
+                new_params_packet = self.read_message(message)
             except zmq.Again:
                 # no packets are waiting
-                received = False
+                pass
 
-        if received:
+        if new_params_packet is not None:
             self.synchronize_params(new_params_packet)
-        return received
+            received_new_params = True
+        else:
+            received_new_params = False
+        return received_new_params
 
     def run(self):
         """ uniform remote run wrapper for tester and worker actors """
@@ -103,22 +129,22 @@ class CutDQNWorker(CutDQNAgent):
         self.initialize_training()
         self.load_datasets()
         while True:
-            replay_data = self.collect_data()
-            self.send_replay_data(replay_data)
-            received_new_params = self.recv_new_params()
+            received_new_params = self.recv_messages()
             if received_new_params:
                 # todo - Log stats with global_step == num_param_updates-1 (== the previous params_id).
                 #        This is because the current stats are related to the previous policy.
                 #        In addition, maybe workers shouldn't log stats every update ?
                 # if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
-                self.log_stats(global_step=self.num_param_updates-1)
+                self.log_stats(global_step=self.num_param_updates - 1)
+            replay_data = self.collect_data()
+            self.send_replay_data(replay_data)
 
     def run_test(self):
         # self.eps_greedy = 0
         self.initialize_training()
         datasets = self.load_datasets()
         while True:
-            received = self.recv_new_params(blocking=True)
+            received = self.recv_messages(wait_for_new_params=True)
             assert received
             # todo consider not ignoring eval interval
             self.evaluate(datasets, ignore_eval_interval=True)
@@ -138,7 +164,9 @@ class CutDQNWorker(CutDQNAgent):
 
             # execute episodes, collect experience and append to local_buffer
             trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'],
-                                              dataset_name=trainset['dataset_name'])
+                                              dataset_name=trainset['dataset_name'],
+                                              demonstration_episode=self.generate_demonstration_data)
+
             local_buffer += trajectory
             if self.i_episode + 1 % len(self.graph_indices) == 0:
                 self.graph_indices = torch.randperm(trainset['num_instances'])
@@ -152,7 +180,7 @@ class CutDQNWorker(CutDQNAgent):
         :return:
         """
         replay_data_packet = []
-        for transition, initial_priority in replay_data:
-            replay_data_packet.append((transition.to_numpy_tuple(), initial_priority))
+        for transition, initial_priority, is_demonstration in replay_data:
+            replay_data_packet.append((transition.to_numpy_tuple(), initial_priority, is_demonstration))
         replay_data_packet = pa.serialize(replay_data_packet).to_buffer()
         return replay_data_packet

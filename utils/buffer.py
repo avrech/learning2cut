@@ -105,14 +105,17 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         #        math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
         self.print_prefix = '[ReplayBuffer] '
 
-    def add(self, data: tuple([Transition, float])):
+    def add(self, data: tuple([Transition, float, bool])):
         """
         Push Transition into storage and update its initial priority.
         :param data: Tuple containing Transition and initial_priority float
         :return:
         """
-        transition, initial_priority = data
+        transition, initial_priority, is_demonstration = data
         idx = self.next_idx
+        if idx < self.n_demonstrations and not is_demonstration:
+            # ignore non-demonstration data if in demonstrations collection phase.
+            return
         super().add(transition)
         # assign unique id to data
         # such that new arriving data won't be updated with outdated new_priorities arriving from the learner.

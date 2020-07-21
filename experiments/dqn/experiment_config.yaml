@@ -26,7 +26,6 @@ select_at_least_one_cut: True
 update_rule: DQN
 
 # LEARNING FROM DEMONSTRATIONS
-n_demonstration_episodes: 1000
 demonstration_loss_coef: 0.5
 demonstration_large_margin: 0.1
 
@@ -196,9 +195,8 @@ priority_beta_decay: 100000  # exponentially increase to priority_beta_end like 
 worker_buffer_size: 1000
 local_buffer_size: 200  # todo tune this parameter on the real distributed program
 # Communication configs
-params_pubsub_port: 5555
-#repreq_port: 5556
-#pullpush_port: 5557
+replay_server_2_workers_pubsub_port: 5554
+learner_2_workers_pubsub_port: 5555
 replay_server_2_learner_port: 5556
 learner_2_replay_server_port: 5557
 workers_2_replay_server_port: 5558

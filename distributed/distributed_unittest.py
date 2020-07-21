@@ -104,12 +104,12 @@ if __name__ == '__main__':
         # WORKER SIDE
         # subscribe new_params from learner
         for worker in workers:
-            if worker.recv_new_params():
+            if worker.recv_messages():
                 worker.log_stats(global_step=worker.num_param_updates - 1)
 
         # TEST WORKER
         # if new params have been published, evaluate the new policy
-        if test_worker.recv_new_params():
+        if test_worker.recv_messages():
             test_worker.evaluate()
             test_worker.save_checkpoint()
 

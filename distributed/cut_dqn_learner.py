@@ -61,9 +61,9 @@ class CutDQNLearner(CutDQNAgent):
         self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
         # for publishing new params to workers
         context = zmq.Context()
-        self.params_pubsub_port = hparams["params_pubsub_port"]
+        self.params_pubsub_port = hparams["learner_2_workers_pubsub_port"]
         self.params_pub_socket = context.socket(zmq.PUB)
-        self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+        self.params_pub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
         self.initialize_training()
         if run_io:
             self.background_io = threading.Thread(target=self.run_io, args=())
@@ -95,8 +95,9 @@ class CutDQNLearner(CutDQNAgent):
     def publish_params(self):
         if len(self.new_params_queue) > 0:
             params_packet = self.new_params_queue.popleft()  # thread-safe
-            params_packet = pa.serialize(params_packet).to_buffer()
-            self.params_pub_socket.send(params_packet)
+            # attach a 'topic' to the packet and send
+            message = pa.serialize(('new_params', params_packet)).to_buffer()
+            self.params_pub_socket.send(message)
 
     def prepare_new_params_to_workers(self):
         """
@@ -127,10 +128,10 @@ class CutDQNLearner(CutDQNAgent):
     @staticmethod
     def unpack_batch_packet(batch_packet):
         """ inverse operation to PERServer.get_replay_data_packet() """
-        transition_numpy_tuples, is_demonstration, weights_numpy, idxes, data_ids = pa.deserialize(batch_packet)
+        transition_numpy_tuples, weights_numpy, idxes, data_ids = pa.deserialize(batch_packet)
         weights = torch.from_numpy(weights_numpy)
         transitions = [Transition.from_numpy_tuple(npt) for npt in transition_numpy_tuples]
-        return transitions, is_demonstration, weights, idxes, data_ids
+        return transitions, weights, idxes, data_ids
 
     def recv_batch(self, blocking=True):
         """
@@ -203,8 +204,9 @@ class CutDQNLearner(CutDQNAgent):
         self.idle_time_sec = idle_time_end - idle_time_start
 
         # pop one batch and perform one SGD step
-        transitions, is_demonstration, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
-        new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights)  # todo- sgd demonstrations
+        transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
+        is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
+        new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration)  # todo- sgd demonstrations
         packet = (idxes, new_priorities, data_ids)
         self.new_priorities_queue.append(packet)  # thread safe append
         # todo verify
