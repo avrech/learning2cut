@@ -43,8 +43,8 @@ class CutDQNWorker(CutDQNAgent):
         self.params_pubsub_port = hparams["learner_2_workers_pubsub_port"]
         self.data_requests_pubsub_port = hparams["replay_server_2_workers_pubsub_port"]
         self.sub_socket = context.socket(zmq.SUB)
-        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")
-        self.sub_socket.setsockopt(zmq.CONFLATE, 1)
+        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
+        self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
         # connect to learner pub socket
         self.sub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
         # connect to replay_server pub socket

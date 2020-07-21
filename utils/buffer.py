@@ -115,7 +115,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         idx = self.next_idx
         if idx < self.n_demonstrations and not is_demonstration:
             # ignore non-demonstration data if in demonstrations collection phase.
-            return
+            return 0
         super().add(transition)
         # assign unique id to data
         # such that new arriving data won't be updated with outdated new_priorities arriving from the learner.
@@ -125,11 +125,17 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.update_priorities(np.array([idx]), np.array([initial_priority]), np.array([self._next_unique_id]))  # todo verify
         # increment _next_unique_id
         self._next_unique_id = self._next_unique_id + 1  # todo handle int overflow
+        return 1
 
     def add_data_list(self, buffer):
+        """ Adds a list of  (Transition, priority, is_demonstration) to storage,
+        and returns the number of transitions actually added.
+        In case demonstration data is required, agent data will be ignored. """
         # push all (transitions, initial_priority) tuples from buffer into memory
+        n = 0
         for data in buffer:
-            self.add(data)
+            n += self.add(data)
+        return n
 
     def _sample_proportional(self, batch_size):
         """ todo ask Chris what is going on here """

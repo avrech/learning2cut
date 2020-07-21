@@ -38,7 +38,8 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         context = zmq.Context()
         self.data_request_pubsub_port = config["replay_server_2_workers_pubsub_port"]
         self.data_request_pub_socket = context.socket(zmq.PUB)
-        self.data_request_pub_socket.connect(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
+        self.data_request_pub_socket.bind(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
+        # self.data_request_pub_socket.connect(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
 
         # failure tolerance
         self.logdir = config.get('logdir', 'results')
@@ -123,22 +124,36 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
                 break
 
             new_replay_data_list = self.unpack_replay_data(new_replay_data_packet)
-            # for transition_and_priority_tuple in new_replay_data:
-            #     self.add(transition_and_priority_tuple)
+            # cur_len = len(self.pbar.desc)
+            n_added = self.add_data_list(new_replay_data_list)
             if self.filling:
-                if len(self.storage) + len(new_replay_data_list) < self.capacity:
-                    self.pbar.update(len(new_replay_data_list))
-                else:
-                    # now filled the capacity.
-                    # increment the progress bar by the amount left and close
-                    self.pbar.update(self.capacity - len(self.storage))
+                if len(self.storage) == self.capacity:
+                    self.pbar.update(self.capacity - self.pbar.n)
                     self.pbar.close()
                     self.filling = False
+                else:
+                    self.pbar.update(n_added)
 
-            self.add_data_list(new_replay_data_list)
-            if self.collecting_demonstrations and self.next_idx >= self.n_demonstrations:
+            # if self.filling:
+            #     if len(self.storage) + len(new_replay_data_list) < self.capacity:
+            #         self.pbar.update(len(new_replay_data_list))
+            #     else:
+            #         # now filled the capacity.
+            #         # increment the progress bar by the amount left and close
+            #         self.pbar.update(self.capacity - len(self.storage))
+            #         self.pbar.close()
+            #         self.filling = False
+
+            # self.add_data_list(new_replay_data_list)
+            if self.filling and self.collecting_demonstrations and self.next_idx >= self.n_demonstrations:
                 # change pbar description
                 self.pbar.set_description('[Replay Server] Filling agent data')
+
+    def request_data(self, data_type):
+        assert data_type in ['agent', 'demonstration']
+        print(self.print_prefix, f'Publishing {data_type} data request')
+        message = pa.serialize((f'generate_{data_type}_data',)).to_buffer()
+        self.data_request_pub_socket.send(message)
 
     def run(self):
         if self.config.get('resume_training', False):
@@ -151,9 +166,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             assert not self.collecting_demonstrations
 
         if self.collecting_demonstrations:
-            print(self.print_prefix, 'Publishing demonstration data request')
-            message = pa.serialize(('generate_demonstration_data', )).to_buffer()
-            self.data_request_pub_socket.send(message)
+            self.request_data(data_type='demonstration')
 
         while True:
             self.recv_replay_data()
@@ -165,6 +178,4 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             if self.collecting_demonstrations and self.next_idx >= self.n_demonstrations:
                 # request workers to generate agent data from now on
                 self.collecting_demonstrations = False
-                print(self.print_prefix, 'Publishing agent data request')
-                message = pa.serialize(('generate_agent_data',)).to_buffer()
-                self.data_request_pub_socket.send(message)
+                self.request_data(data_type='agent')

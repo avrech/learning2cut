@@ -63,7 +63,7 @@ class CutDQNLearner(CutDQNAgent):
         context = zmq.Context()
         self.params_pubsub_port = hparams["learner_2_workers_pubsub_port"]
         self.params_pub_socket = context.socket(zmq.PUB)
-        self.params_pub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+        self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
         self.initialize_training()
         if run_io:
             self.background_io = threading.Thread(target=self.run_io, args=())

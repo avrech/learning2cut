@@ -61,19 +61,47 @@ if __name__ == '__main__':
     test_worker.initialize_training()
     test_worker.load_datasets()
     learner.initialize_training()
+    first_time = True
 
     while True:
         # WORKER SIDE
         # collect data and send to replay server, one packet per worker
         for worker in workers:
+            new_params_packet = worker.recv_messages()
             replay_data = worker.collect_data()
             # local_buffer is full enough. pack the local buffer and send packet
             worker.send_replay_data(replay_data)
 
         # REPLAY SERVER SIDE
+        # request demonstration data
+        if replay_server.collecting_demonstrations:
+            replay_server.request_data(data_type='demonstration')
+            first_time = True
+        elif first_time:
+            replay_server.request_data(data_type='agent')
+            first_time = False
+
         # try receiving up to num_workers replay data packets,
         # each received packets is unpacked and pushed into memory
         replay_server.recv_replay_data()
+        # if learning from demonstrations, the data generated before the demonstrations request should be discarded.
+        # collect now demonstration data and receive in server
+        # WORKER SIDE
+        # collect data and send to replay server, one packet per worker
+        for worker in workers:
+            new_params_packet = worker.recv_messages()
+            replay_data = worker.collect_data()
+            # local_buffer is full enough. pack the local buffer and send packet
+            worker.send_replay_data(replay_data)
+
+        # REPLAY SERVER SIDE
+        replay_server.recv_replay_data()
+        # assuming that the amount of demonstrations achieved, request agent data
+        if replay_server.collecting_demonstrations and replay_server.next_idx >= replay_server.n_demonstrations:
+            # request workers to generate agent data from now on
+            replay_server.collecting_demonstrations = False
+            replay_server.request_data(data_type='agent')
+            # see now in the next iterations that workers generate agent data
         # send batches to learner
         replay_server.send_batches()
         # wait for new priorities
@@ -104,12 +132,14 @@ if __name__ == '__main__':
         # WORKER SIDE
         # subscribe new_params from learner
         for worker in workers:
-            if worker.recv_messages():
+            received_new_params = worker.recv_messages()
+            if received_new_params:
                 worker.log_stats(global_step=worker.num_param_updates - 1)
 
         # TEST WORKER
         # if new params have been published, evaluate the new policy
-        if test_worker.recv_messages():
+        received_new_params = test_worker.recv_messages()
+        if received_new_params:
             test_worker.evaluate()
             test_worker.save_checkpoint()
 
