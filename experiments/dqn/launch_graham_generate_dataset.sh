@@ -21,7 +21,7 @@
 #source $HOME/venv/bin/activate\n')
 
 # generate dataset
-srun python generate_dataset.py --configfile trainset_config.yaml --datadir $SCRATCH/dqn/data --mp --nworkers 32
+srun python generate_dataset.py --configfile trainset_config.yaml --datadir $SCRATCH/dqn/data/maxcut --mp --nworkers 32
 
 
 
