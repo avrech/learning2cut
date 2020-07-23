@@ -134,6 +134,12 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
                 else:
                     self.pbar.update(n_added)
 
+            if n_added < len(new_replay_data_list):
+                # apparently agent data was received, while demonstration data is expected.
+                # publish again demonstration data request.
+                assert self.collecting_demonstrations
+                self.request_data('demonstration')
+
             # if self.filling:
             #     if len(self.storage) + len(new_replay_data_list) < self.capacity:
             #         self.pbar.update(len(new_replay_data_list))

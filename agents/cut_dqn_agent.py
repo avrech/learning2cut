@@ -1003,7 +1003,7 @@ class CutDQNAgent(Sepa):
         batch_q_mask = torch.cat(q_mask_list, dim=0).to(self.device)
         batch_large_margin = torch.cat(large_margin_list, dim=0).to(self.device)
         batch_a_E = torch.cat(a_E_list, dim=0).to(self.device)
-        batch_weights = torch.cat(weights_list, dim=0)
+        batch_weights = torch.cat(weights_list, dim=0).to(self.device)
 
         # decode the full set of q values
         x, _, _ = self.policy_net.decoder_conv((expanded_batch.x, expanded_batch.edge_index, expanded_batch.edge_attr))
@@ -1103,8 +1103,7 @@ class CutDQNAgent(Sepa):
         cur_n_original_cuts = self.sanity_check_stats['cur_n_original_cuts']
         if cur_n_original_cuts == 0:
             return
-        # todo move to str
-        cut_names = [bytes(name).decode('utf-8') for name in list(self.prev_action.keys())[:cur_n_original_cuts*3]]
+        cut_names = list(self.prev_action.keys())[:cur_n_original_cuts*3]
         cur_n_duplicated_cuts = 0
         cur_n_weak_cuts = 0
         added_cuts = set()
