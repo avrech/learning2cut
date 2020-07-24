@@ -128,11 +128,19 @@ class CutDQNAgent(Sepa):
         self.checkpoint_filepath = os.path.join(self.logdir, 'checkpoint.pt')
         self.writer = SummaryWriter(log_dir=os.path.join(self.logdir, 'tensorboard'))
         self.print_prefix = ''
+
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
-        self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [],
-                                 'accuracy': [], 'f1_score': [] # learning from demonstrations
-                                 }
+        self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
+
+        # learning from demonstrations stats
+        for k in list(self.tmp_stats_buffer.keys()):
+            self.tmp_stats_buffer['Demonstrations/' + k] = []
+        self.tmp_stats_buffer['Demonstrations/accuracy'] = []
+        self.tmp_stats_buffer['Demonstrations/f1_score'] = []
+        for k in list(self.test_stats_buffer.keys()):
+            self.test_stats_buffer['Demonstrations/' + k] = []
+
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
         self.n_step_loss_moving_avg = 0
@@ -685,6 +693,7 @@ class CutDQNAgent(Sepa):
         # compute some stats and store in buffer
         active_applied_ratio = []
         applied_available_ratio = []
+        accuracy_list, f1_score_list = [], []
         for _, action, _, _ in self.state_action_qvalues_context_list:
             normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
@@ -695,20 +704,25 @@ class CutDQNAgent(Sepa):
             is_active = normalized_slack[applied] == 0
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
+            if self.demonstration_episode:
+                accuracy_list.append(np.mean(action['applied'] == action['selected']))
+                f1_score_list.append(f1_score(action['applied'], action['selected']))
+
         # store episode results in tmp_stats_buffer
         db_auc = sum(dualbound_area)
         gap_auc = sum(gap_area)
-        self.tmp_stats_buffer['db_auc'].append(db_auc)
-        self.tmp_stats_buffer['gap_auc'].append(gap_auc)
-        self.tmp_stats_buffer['active_applied_ratio'].append(np.mean(active_applied_ratio))
-        self.tmp_stats_buffer['applied_available_ratio'].append(np.mean(applied_available_ratio))
+        stats_folder = 'Demonstrations/' if self.demonstration_episode else ''
+        self.tmp_stats_buffer[stats_folder + 'db_auc'].append(db_auc)
+        self.tmp_stats_buffer[stats_folder + 'gap_auc'].append(gap_auc)
+        self.tmp_stats_buffer[stats_folder + 'active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
+        self.tmp_stats_buffer[stats_folder + 'applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
         if self.baseline.get('rootonly_stats', None) is not None:
             # this is evaluation round.
-            self.test_stats_buffer['db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
-            self.test_stats_buffer['gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+            self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
+            self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
         if self.demonstration_episode:
-            self.tmp_stats_buffer['accuracy'].append(np.mean(action['applied'] == action['selected']))
-            self.tmp_stats_buffer['f1_score'].append(f1_score(action['applied'], action['selected']))
+            self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list # .append(np.mean(action['applied'] == action['selected']))
+            self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list # .append(f1_score(action['applied'], action['selected']))
 
         return trajectory
 
@@ -1218,8 +1232,8 @@ class CutDQNAgent(Sepa):
                                            global_step=global_step, walltime=cur_time_sec)
 
             # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
-            if len(self.test_stats_buffer['db_auc_imp']) > 0:
-                for k, vals in self.test_stats_buffer.items():
+            for k, vals in self.test_stats_buffer.items():
+                if len(vals) > 0:
                     avg = np.mean(vals)
                     std = np.std(vals)
                     print('{}: {:.4f} | '.format(k, avg), end='')
@@ -1245,7 +1259,7 @@ class CutDQNAgent(Sepa):
                 self.sanity_check_stats['n_duplicated_cuts'] = []
                 self.sanity_check_stats['n_weak_cuts'] = []
 
-        if self.is_worker:
+        if self.is_worker or self.is_tester:
             # plot normalized dualbound and gap auc
             for k, vals in self.tmp_stats_buffer.items():
                 if len(vals) == 0:
@@ -1561,7 +1575,7 @@ class CutDQNAgent(Sepa):
         return trajectory
 
     # done
-    def evaluate(self, datasets=None, ignore_eval_interval=False):
+    def evaluate(self, datasets=None, ignore_eval_interval=False, eval_demonstration=False):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
@@ -1574,11 +1588,12 @@ class CutDQNAgent(Sepa):
             if 'trainset' in dataset_name:
                 continue
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
-                self.init_figures(nrows=dataset['num_instances'],
-                                  ncols=len(dataset['scip_seed']),
-                                  col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
-                                  row_labels=[f'inst {inst_idx}' for inst_idx in
-                                              range(dataset['num_instances'])])
+                if not eval_demonstration:
+                    self.init_figures(nrows=dataset['num_instances'],
+                                      ncols=len(dataset['scip_seed']),
+                                      col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+                                      row_labels=[f'inst {inst_idx}' for inst_idx in
+                                                  range(dataset['num_instances'])])
                 for inst_idx, (G, baseline) in enumerate(dataset['instances']):
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
                         if self.hparams.get('verbose', 0) == 2:
@@ -1586,9 +1601,15 @@ class CutDQNAgent(Sepa):
                             print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
                             print('##################################################################################')
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
-                                             scip_seed=scip_seed)
-                        self.add_episode_subplot(inst_idx, seed_idx)
-                self.log_stats(save_best=('validset' in dataset_name), plot_figures=True)
+                                             scip_seed=scip_seed, demonstration_episode=eval_demonstration)
+                        if not eval_demonstration:
+                            self.add_episode_subplot(inst_idx, seed_idx)
+
+                if eval_demonstration:
+                    self.log_stats()
+                else:
+                    self.log_stats(save_best=('validset' in dataset_name), plot_figures=True)
+
         self.set_training_mode()
 
     # done

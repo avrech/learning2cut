@@ -148,6 +148,10 @@ class CutDQNWorker(CutDQNAgent):
             assert received
             # todo consider not ignoring eval interval
             self.evaluate(datasets, ignore_eval_interval=True)
+            if self.hparams.get('replay_buffer_n_demonstrations', 0) > 0:
+                # we learn also from demonstrations, so evaluate the agent imitation ability
+                self.evaluate(datasets, ignore_eval_interval=True, eval_demonstration=True)
+
             self.save_checkpoint()
 
     def collect_data(self):
