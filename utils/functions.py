@@ -165,9 +165,10 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
     t = t / t_support
 
     # compute the area under the curve using first order interpolation
-    ft_diff = ft[1:] - ft[:-1]
+    ft_diff = ft[1:] - ft[:-1]  # ft is assumed to be non-decreasing, so ft_diff is non-negative.
+    assert all(ft_diff >= 0)
     t_diff = t[1:] - t[:-1]
-    ft_areas = t_diff * (ft[:-1] + ft_diff / 2)
+    ft_areas = t_diff * (ft[:-1] + ft_diff / 2)  # t_diff *(ft[1:] - ft[:-1]) + t_diff * abs(ft[1:] - ft[:-1]) /2
     if extended:
         # add the extension area to the last transition area
         ft_areas[-2] += ft_areas[-1]
