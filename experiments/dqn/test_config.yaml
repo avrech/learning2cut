@@ -180,8 +180,8 @@ param_update_interval: 2  # number of learner.sgd_steps between workers policy u
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters
-replay_buffer_capacity: 1000
-replay_buffer_n_demonstrations: 100
+replay_buffer_capacity: 10000
+replay_buffer_n_demonstrations: 10000
 use_per: True
 priority_alpha: 0.6
 priority_beta: 0.4
