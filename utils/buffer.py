@@ -40,7 +40,10 @@ class ReplayBuffer(object):
         # increment the next index round robin, overriding the oldest non-demonstration data
         self.next_idx = self.next_idx + 1
         if self.next_idx >= self.capacity:
-            self.next_idx = self.n_demonstrations
+            # if n_demonstrations < capacity, agent data is stored in idxes = [n_demonstrations:capacity]
+            # if n_demonstrations = capacity, only demonstration data is generated and overrides the oldest samples.
+            # (kind of supervised learning in fact)
+            self.next_idx = self.n_demonstrations % self.capacity
 
     def add_data_list(self, buffer):
         # push all transitions from local_buffer into memory
