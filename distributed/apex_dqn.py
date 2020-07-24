@@ -79,7 +79,7 @@ class ApeXDQN:
         ray_worker = ray.remote(CutDQNWorker)
         ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
         ray_replay_server = ray.remote(PrioritizedReplayServer)
-
+        handles = []
         # restart all actors
         for actor_name in actors:
             running_actor = running_actors[actor_name]
@@ -95,19 +95,24 @@ class ApeXDQN:
             print(f'restarting {actor_name}...')
             if actor_name == 'learner':
                 learner = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
-                learner.run.remote()
+                handles.append(learner.run.remote())
             elif actor_name == 'tester':
                 tester = ray_worker.options(name='tester').remote('Test', hparams=self.cfg, is_tester=True)
-                tester.run.remote()
+                handles.append(tester.run.remote())
             elif actor_name == 'replay_server':
                 replay_server = ray_replay_server.options(name='replay_server').remote(config=self.cfg)
-                replay_server.run.remote()
+                handles.append(replay_server.run.remote())
             else:
                 prefix, worker_id = actor_name.split('_')
                 worker_id = int(worker_id)
                 assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
                 worker = ray_worker.options(name=actor_name).remote(worker_id, hparams=self.cfg)
-                worker.run.remote()
+                handles.append(worker.run.remote())
+        if len(handles) > 0:
+            ready_ids, remaining_ids = ray.wait(handles)
+            # todo - find a good way to block the main program here, so ray will continue tracking all actors, restart etc.
+            ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600 * 48))
+        print('finished')
 
     def debug_actor(self, actor_name):
         # kill the existing one if any
