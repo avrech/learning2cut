@@ -9,10 +9,10 @@
 # - num_policy_updates equals to the number of workers' policy updates, which happen every param_update_interval
 # - the hard datasets can be evaluated on the tester in the same frequency as the easy datasets.
 # DQN ALGORITHM HPARAMS
-batch_size: 4
+batch_size: 128  #256
 lr: 0.001
 weight_decay: 0.0001
-nstep_learning: 8 # 1, 8
+nstep_learning: 1 # 1, 8
 target_update_interval: 1000  # num sgd steps between target_net's parameters update
 value_aggr: max  # tqnet v2 works only with max. the other models work also with mean
 credit_assignment: False  # False, True
@@ -26,7 +26,7 @@ select_at_least_one_cut: True
 update_rule: DDQN  # DQN
 
 # LEARNING FROM DEMONSTRATIONS
-demonstration_loss_coef: 0.5
+demonstration_loss_coef: 1
 demonstration_large_margin: 0.1
 
 # DQN ARCHITECTURE HPARAMS
@@ -180,8 +180,8 @@ param_update_interval: 2  # number of learner.sgd_steps between workers policy u
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters
-replay_buffer_capacity: 10000
-replay_buffer_n_demonstrations: 10000
+replay_buffer_capacity: 100000
+replay_buffer_n_demonstrations: 100000
 use_per: True
 priority_alpha: 0.6
 priority_beta: 0.4
@@ -196,4 +196,4 @@ learner_2_workers_pubsub_port: 5555
 replay_server_2_learner_port: 5556
 learner_2_replay_server_port: 5557
 workers_2_replay_server_port: 5558
-replay_buffer_minimum_size: 200
+replay_buffer_minimum_size: 1000

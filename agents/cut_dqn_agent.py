@@ -1227,7 +1227,7 @@ class CutDQNAgent(Sepa):
 
             # add episode figures (for validation and test sets only)
             if plot_figures:
-                for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+                for figname in self.figures['fignames']:
                     self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
                                            global_step=global_step, walltime=cur_time_sec)
 
@@ -1293,8 +1293,8 @@ class CutDQNAgent(Sepa):
         self.last_time_sec = cur_time_sec
 
     # done
-    def init_figures(self, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
-        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+    def init_figures(self, fignames, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
+        for figname in fignames:
             fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
             fig.set_size_inches(w=8, h=10)
             fig.set_tight_layout(True)
@@ -1303,6 +1303,7 @@ class CutDQNAgent(Sepa):
         self.figures['ncols'] = ncols
         self.figures['col_labels'] = col_labels
         self.figures['row_labels'] = row_labels
+        self.figures['fignames'] = fignames
 
     # done
     def add_episode_subplot(self, row, col):
@@ -1311,51 +1312,56 @@ class CutDQNAgent(Sepa):
         plot dqn agent dualbound/gap curves together with the baseline curves.
         should be called after each validation/test episode with row=graph_idx, col=seed_idx
         """
-        dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
-        if dqn_lpiter[-1] < self.lp_iterations_limit:
-            # extend curve to the limit
-            dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
-            dqn_db = dqn_db + dqn_db[-1:]
-            dqn_gap = dqn_gap + dqn_gap[-1:]
-        bsl_lpiter = self.baseline['rootonly_stats'][self.scip_seed]['lp_iterations']
-        bsl_db = self.baseline['rootonly_stats'][self.scip_seed]['dualbound']
-        bsl_gap = self.baseline['rootonly_stats'][self.scip_seed]['gap']
-        if bsl_lpiter[-1] < self.lp_iterations_limit:
-            # extend curve to the limit
-            bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
-            bsl_db = bsl_db + bsl_db[-1:]
-            bsl_gap = bsl_gap + bsl_gap[-1:]
-        # plot dualbound
-        # fig = plt.figure()
+        if 'Dual_Bound_vs_LP_Iterations' in self.figures.keys():
+            bsl = self.baseline['rootonly_stats'][self.scip_seed]
+            bsl_lpiter, bsl_db, bsl_gap = bsl['lp_iterations'], bsl['dualbound'], bsl['gap']
+            dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
+            if dqn_lpiter[-1] < self.lp_iterations_limit:
+                # extend curve to the limit
+                dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
+                dqn_db = dqn_db + dqn_db[-1:]
+                dqn_gap = dqn_gap + dqn_gap[-1:]
+            if bsl_lpiter[-1] < self.lp_iterations_limit:
+                # extend curve to the limit
+                bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
+                bsl_db = bsl_db + bsl_db[-1:]
+                bsl_gap = bsl_gap + bsl_gap[-1:]
+            assert dqn_lpiter[-1] == self.lp_iterations_limit
+            assert bsl_lpiter[-1] == self.lp_iterations_limit
+            # plot dual bound
+            ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+            ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
+            ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
+            ax.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+            # plot gap
+            ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+            ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
+            ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
+            ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
 
-        ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
-        ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
-        ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
-        ax.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
-        # plt.legend()
-        # plt.xlabel('LP Iterations')
-        # plt.ylabel('Dualbound')
-        # plt.title(f'SCIP Seed: {self.scip_seed}')
-        # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
-        # self.figures['Dual_Bound_vs_LP_Iterations'].append(fig)
-
-        # plot gap
-
-        # fig = plt.figure()
-        # ax = fig.add_subplot(111)
-        ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
-        ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
-        ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
-        ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
-        # plt.setp([ax.get_xticklines() + ax.get_yticklines() + ax.get_xgridlines() + ax.get_ygridlines()], antialiased=False)
-        # self.figures['Gap_vs_LP_Iterations'].append(fig)
+        # plot imitation performance bars
+        if 'Imitation_Performance' in self.figures.keys():
+            true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
+            for saqc in self.state_action_qvalues_context_list:
+                scip_action = saqc[1]['applied']
+                agent_action = saqc[1]['selected']
+                true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
+                true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
+                false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
+                false_neg += sum(scip_action[agent_action == 0] != agent_action[agent_action == 0])
+            # lp_rounds = np.arange(1, len(self.state_action_qvalues_context_list)+1)
+            ax = self.figures['Imitation_Performance']['axes'][row, col]
+            ax.bar(-0.3, true_pos, width=0.2, label='true pos')
+            ax.bar(-0.1, true_neg, width=0.2, label='true neg')
+            ax.bar(+0.1, false_pos, width=0.2, label='false pos')
+            ax.bar(+0.3, false_neg, width=0.2, label='false neg')
 
     # done
     def decorate_figures(self, legend=True, col_labels=True, row_labels=True):
         """ save figures to png file """
         # decorate (title, labels etc.)
         nrows, ncols = self.figures['nrows'], self.figures['ncols']
-        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+        for figname in self.figures['fignames']:
             if col_labels:
                 # add col labels at the first row only
                 for col in range(ncols):
@@ -1588,12 +1594,13 @@ class CutDQNAgent(Sepa):
             if 'trainset' in dataset_name:
                 continue
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
-                if not eval_demonstration:
-                    self.init_figures(nrows=dataset['num_instances'],
-                                      ncols=len(dataset['scip_seed']),
-                                      col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
-                                      row_labels=[f'inst {inst_idx}' for inst_idx in
-                                                  range(dataset['num_instances'])])
+                fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations'] if not eval_demonstration else ['Imitation_Performance']
+                self.init_figures(fignames,
+                                  nrows=dataset['num_instances'],
+                                  ncols=len(dataset['scip_seed']),
+                                  col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+                                  row_labels=[f'inst {inst_idx}' for inst_idx in
+                                              range(dataset['num_instances'])])
                 for inst_idx, (G, baseline) in enumerate(dataset['instances']):
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
                         if self.hparams.get('verbose', 0) == 2:
@@ -1602,13 +1609,9 @@ class CutDQNAgent(Sepa):
                             print('##################################################################################')
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
                                              scip_seed=scip_seed, demonstration_episode=eval_demonstration)
-                        if not eval_demonstration:
-                            self.add_episode_subplot(inst_idx, seed_idx)
+                        self.add_episode_subplot(inst_idx, seed_idx)
 
-                if eval_demonstration:
-                    self.log_stats()
-                else:
-                    self.log_stats(save_best=('validset' in dataset_name), plot_figures=True)
+                self.log_stats(save_best=('validset' in dataset_name and not eval_demonstration), plot_figures=True)
 
         self.set_training_mode()
 
