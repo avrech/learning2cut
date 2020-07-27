@@ -911,7 +911,7 @@ class CutDQNAgent(Sepa):
         self.n_step_loss_moving_avg = 0.95 * self.n_step_loss_moving_avg + 0.05 * n_step_loss.detach().cpu().numpy()
 
         # sum all losses
-        loss = n_step_loss + self.hparams.get('demonstration_loss_coef', 0.5) * demonstration_loss
+        loss = self.hparams.get('n_step_loss_coef', 1.0) * n_step_loss + self.hparams.get('demonstration_loss_coef', 0.5) * demonstration_loss
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -1339,7 +1339,7 @@ class CutDQNAgent(Sepa):
             ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
             ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
 
-        # plot imitation performance bars
+        # plot imitation performance bars (in percents)
         if 'Imitation_Performance' in self.figures.keys():
             true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
             for saqc in self.state_action_qvalues_context_list:
@@ -1349,12 +1349,23 @@ class CutDQNAgent(Sepa):
                 true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
                 false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
                 false_neg += sum(scip_action[agent_action == 0] != agent_action[agent_action == 0])
-            # lp_rounds = np.arange(1, len(self.state_action_qvalues_context_list)+1)
+            total_ncuts = true_pos + true_neg + false_pos + false_neg
+            rects = []
             ax = self.figures['Imitation_Performance']['axes'][row, col]
-            ax.bar(-0.3, true_pos, width=0.2, label='true pos')
-            ax.bar(-0.1, true_neg, width=0.2, label='true neg')
-            ax.bar(+0.1, false_pos, width=0.2, label='false pos')
-            ax.bar(+0.3, false_neg, width=0.2, label='false neg')
+            rects += ax.bar(-0.3, true_pos / total_ncuts, width=0.2, label='true pos')
+            rects += ax.bar(-0.1, true_neg / total_ncuts, width=0.2, label='true neg')
+            rects += ax.bar(+0.1, false_pos / total_ncuts, width=0.2, label='false pos')
+            rects += ax.bar(+0.3, false_neg / total_ncuts, width=0.2, label='false neg')
+
+            """Attach a text label above each bar in *rects*, displaying its height."""
+            for rect in rects:
+                height = rect.get_height()
+                ax.annotate('{:.2f}'.format(height),
+                            xy=(rect.get_x() + rect.get_width() / 2, height),
+                            xytext=(0, 3),  # 3 points vertical offset
+                            textcoords="offset points",
+                            ha='center', va='bottom')
+            ax.set_xticks([], [])  # disable x ticks
 
     # done
     def decorate_figures(self, legend=True, col_labels=True, row_labels=True):

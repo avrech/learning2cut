@@ -26,6 +26,7 @@ select_at_least_one_cut: True
 update_rule: DQN
 
 # LEARNING FROM DEMONSTRATIONS
+n_step_loss_coef: 1.0
 demonstration_loss_coef: 0.5
 demonstration_large_margin: 0.1
 
@@ -54,7 +55,7 @@ verbose: 1
 debug: False
 debug_cuda: False
 overfit: validset25
-sanity_check: True
+sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
 
 # SCIP STUFF
 reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
