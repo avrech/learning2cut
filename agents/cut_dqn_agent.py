@@ -622,10 +622,10 @@ class CutDQNAgent(Sepa):
             # assign rewards and store transitions (s,a,r,s')
             for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
                 if self.demonstration_episode:
-                    # todo - create a decoder context that imitates SCIP cut selection
-                    #  a. get initial_edge_index_a2a and initial_edge_attr_a2a
+                    # create a decoder context corresponding to SCIP cut selection order
+                    # a. get initial_edge_index_a2a and initial_edge_attr_a2a
                     initial_edge_index_a2a, initial_edge_attr_a2a = Transition.get_initial_decoder_context(scip_state=state, tqnet_version=self.tqnet_version)
-                    #  b. create context
+                    # b. create context
                     transformer_decoder_context = self.policy_net.get_complete_context(
                         torch.from_numpy(action['applied']), initial_edge_index_a2a, initial_edge_attr_a2a,
                         selection_order=action['selection_order'])
@@ -892,7 +892,7 @@ class CutDQNAgent(Sepa):
         # broadcast the next state q_values graph-wise to update all action-wise rewards
         target_next_q_values_broadcast = max_target_next_q_values_aggr[batch.x_a_batch]
 
-        # now compute the target Q values - action-wise
+        # now compute the cut-level target
         reward_batch = batch.r
         target_q_values = reward_batch + (self.gamma ** self.nstep_learning) * target_next_q_values_broadcast
 
