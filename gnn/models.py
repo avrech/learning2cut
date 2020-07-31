@@ -414,6 +414,75 @@ class CutConv(MessagePassing):
                                                      self.edge_attr_dim)
 
 
+# remaining cuts convolution
+class RemainingCutsConv(torch.nn.Module):
+    r"""Computes new features to nodes pointed by edge_index
+
+        Args:
+            in_channels (int): Size of each input sample.
+            out_channels (int): Size of each output sample.
+            aggr (string, optional): The aggregation scheme to use
+                (:obj:`"add"`, :obj:`"mean"`).
+                (default: :obj:`"add"`)
+            bias (bool, optional): If set to :obj:`False`, the layer will not learn
+                an additive bias. (default: :obj:`True`)
+            **kwargs (optional): Additional arguments of
+                :class:`torch_geometric.nn.conv.MessagePassing`.
+        """
+
+    def __init__(self, channels, edge_attr_dim, aggr='mean', output_relu=True):
+        super(RemainingCutsConv, self).__init__()
+        in_channels = channels
+        out_channels = channels
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.edge_attr_dim = edge_attr_dim
+        self.aggr = aggr
+        if aggr == 'add':
+            self.aggr_func = scatter_add
+        elif aggr == 'mean':
+            self.aggr_func = scatter_mean
+
+        self.g_in_channels = in_channels * 2 + edge_attr_dim
+        self.f_in_channels = in_channels + out_channels
+        self.g = Seq(Lin(self.g_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels), ReLU())
+        if output_relu:
+            self.f = Seq(Lin(self.f_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels), ReLU())
+        else:
+            self.f = Seq(Lin(self.f_in_channels, out_channels), ReLU(), Lin(out_channels, out_channels))
+
+    def forward(self, inputs):
+        """
+        Computes new embeddings for the nodes pointed by edge_index.
+        and returns a tensor containing only the target nodes updated features.
+        :param inputs: tuple(x, edge_index, edge_attr)
+        :return: torch.Tensor of #target_nodes x out_channels
+        """
+        x, edge_index, edge_attr = inputs
+
+        # attend to all src nodes
+        src, dst = edge_index
+        g_input = torch.cat([x[dst],      # v_j
+                             x[src],      # c_i
+                             edge_attr],  # e_ij
+                            dim=1)
+        g_out = self.g(g_input)
+
+        # aggregate messages sent from src to dst nodes
+        aggr_g_out = self.aggr_func(g_out, dst, dim=0)  # todo - ensure that output shape is the number of remaining cuts
+
+        # aggr_g_out may contain zero rows for indices which do not appear in dst.
+        # take only the rows corresponding to dst
+        dst_rows = sorted(list(set(dst.tolist())))
+
+        # compute output features
+        f_input = torch.cat([x[dst_rows, :], aggr_g_out[dst_rows, :]], dim=1)
+        f_out = self.f(f_input)
+
+        # return edge_index and edge_attr also, useful for stacking modules
+        return f_out, edge_index, edge_attr
+
+
 # graph self attention convolution
 class SelfAttention(MessagePassing):
     r"""Graph self attention
@@ -483,7 +552,7 @@ class TQnet(torch.nn.Module):
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         self.select_at_least_one_cut = hparams.get('select_at_least_one_cut', True)
         assert hparams.get('tqnet_version', 'v3') == 'v3', 'v1 and v2 are deprecated'
-
+        assert hparams.get('decoder_conv', 'RemainingCutsConv') == 'RemainingCutsConv' and hparams.get('decoder_conv_layers', 1) == 1
         ###########
         # Encoder #
         ###########
@@ -496,7 +565,6 @@ class TQnet(torch.nn.Module):
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
                                                                 cuts_only=(i == hparams.get('encoder_lp_conv_layers', 1) - 1)))
                                         for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
-        self.cut_encoding = None
 
         ###########
         # Decoder #
@@ -508,6 +576,10 @@ class TQnet(torch.nn.Module):
         # o_iS is the min orthogonality between i and the selected group S
         decoder_edge_attr_dim = 3
         self.decoder_conv = {
+            'RemainingCutsConv': Seq(OrderedDict([(f'remaining_cuts_conv_{i}', RemainingCutsConv(channels=hparams.get('emb_dim', 32),
+                                                                                                 edge_attr_dim=decoder_edge_attr_dim,
+                                                                                                 aggr=hparams.get('decoder_conv_aggr', 'mean')))
+                                              for i in range(hparams.get('decoder_layers', 1))])),
             'SelfAttention': Seq(OrderedDict([(f'self_attention_{i}', SelfAttention(channels=hparams.get('emb_dim', 32),
                                                                                     edge_attr_dim=decoder_edge_attr_dim,
                                                                                     aggr=hparams.get('decoder_conv_aggr', 'mean')))
@@ -523,10 +595,6 @@ class TQnet(torch.nn.Module):
                                                                   heads=hparams.get('attention_heads', 4)))
                                         for i in range(hparams.get('decoder_layers', 1))])),
         }.get(hparams.get('decoder_conv', 'SelfAttention'))
-        # self.decoder_edge_attr_list = None  # moved to local context_edge_atter_list
-        # self.decoder_edge_index_list = None  # moved to local context_edge_index_list
-        # self.decoder_context = None
-        # self.decoder_greedy_action = None
 
         ##########
         # Q head #
@@ -605,135 +673,150 @@ class TQnet(torch.nn.Module):
     def inference(self, cuts_encoding, edge_index_a2a, edge_attr_a2a):
         ncuts = cuts_encoding.shape[0]
 
-        # Build the action iteratively by picking the argmax over all q_values, given a context.
+        # Build the action iteratively:
+        # 1. compute [n_remaining_cuts x 2] q values
+        # 2. average the "discard" q values and append to the "select" q values
+        # 3. find argmax across the n_remaining_cuts+1 q_values
+        #    if argmax in 0:n_remaining_cuts - select the argmax cut,
+        #    otherwise - discard all the remaining cuts.
+        #
         # A context is defined by edge_attr_a2a:
-        # To each directed edge in edge_index_a2a we assign 3-dim vector [o_ij, oiS, is_selected(i)]
+        # Each directed edge in edge_index_a2a is assigned 3 attributes [o_ij, oiS, is_selected(i)]
         # where o_ij is the pairwise orthogonality between cut i and cut j,
         # o_iS is the min orthogonality between cut i and the cuts in the currently selected group,
         # and is_selected(i) is indicating if i is in S or not.
         #
-        # The edge index is permanent through the inference process, and only the edge attributes change.
         #
-        # At the end of each iteration, before updating edge_attr_dec with the newly selected cut,
-        # the edges pointing to the selected cut are stored in edge_index_list
-        # together with the corresponding edge_attr_dec entries.
-        # Those will serve as transformer context to train the selected cut Q value.
+        # The edge_index and edge_attr change every time a cut is selected.
+        # All the edges (attr) pointing to the selected cut are removed from
+        # the edge_index (edge_attr),
+        # and are stored in edge_index_list (edge_attr_list) to compactly represent the decoder context
+        # when the current cut was selected. The edge_index_list (edge_attr_list) will finally
+        # concatenated and returned for training the transformer in the SGD phase.
 
-        # initialize the decoder with all cuts marked as (not selected)
-        # old - edge_attr_dec = torch.zeros((edge_index_a2a.shape[1], ), dtype=torch.float32).to(self.device)
-
+        # the decoder is initialized with all cuts marked as "not selected",
+        # i.e edge_attr_ij = [o_ij, o_iS=1, is_selected(i)=0] for all ij in edge_index
         context_edge_attr = edge_attr_a2a
         context_edge_index = edge_index_a2a
-        # todo assert that edge_index_a2a contains all the self loops
-        # edge_index_dec, edge_attr_dec = add_remaining_self_loops(edge_index_a2a, edge_weight=edge_attr_dec, fill_value=0)
-        # context_edge_attr.unsqueeze_(dim=1)
 
         context_edge_index_list = []
         context_edge_attr_list = []
 
         # create a tensor of all q values to return to user
         q_vals = torch.empty(size=(ncuts, 2), dtype=torch.float32)
-        selected_cuts_mask = torch.zeros(size=(ncuts,), dtype=torch.bool)
+        remaining_cuts_idxes = torch.arange(ncuts).tolist()
+        selected_cuts_idxes = []
 
-        # run loop until all cuts are selected, or the first one is discarded
+        # run loop until all cuts are selected, or until 'discard' is selected
         for _ in range(ncuts):
             # decode
             decoder_inputs = (cuts_encoding, context_edge_index, context_edge_attr)
-            cuts_decoding, _, _ = self.decoder_conv(decoder_inputs)
+            remaining_cuts_decoding, _, _ = self.decoder_conv(decoder_inputs)
 
-            # compute q values for all cuts
-            q = self.q(cuts_decoding)
-
-            # mask already selected cuts, overriding their q_values by -inf
-            q[selected_cuts_mask, :] = -float('Inf')
+            # compute q values for all *remaining* cuts
+            q = self.q(remaining_cuts_decoding)
+            select_q_values = q[:, 1]
 
             # force selecting at least one cut
-            # by setting the "discard" q_values of all cuts to -Inf at the first iteration only
-            if self.select_at_least_one_cut and not selected_cuts_mask.any():
-                cut_index = q[:, 1].argmax()
+            if self.select_at_least_one_cut and len(selected_cuts_idxes) == 0:
+                argmax = select_q_values.argmax()
                 selected = 1
 
-                # todo - verification. remove this code after test passed
-                masked_q = q.clone()
-                masked_q[:, 0] = -float('Inf')
-                serial_index = masked_q.argmax()
-                # translate the serial index to [row, col] (or in other words [cut_index, selected])
-                cut_index_old = torch.floor(serial_index.float() / 2).long()
-                # a cut is selected if the maximal value is q[cut_index, 1]
-                selected_old = serial_index % 2
-                assert selected == selected_old and cut_index == cut_index_old
-
             else:
-                # find argmax [cut_index, selected] and max q_value
-                serial_index = q.argmax()
-                # translate the serial index to [row, col] (or in other words [cut_index, selected])
-                cut_index = torch.floor(serial_index.float() / 2).long()
-                # a cut is selected if the maximal value is q[cut_index, 1]
-                selected = serial_index % 2
+                # append the option to discard all the remaining cuts
+                discard_q_value = q[:, 0].mean(dim=0, keepdim=True)
+                q_values = torch.cat([select_q_values, discard_q_value], dim=0)  # [n_remaining_cuts + 1]
+                # find argmax action
+                argmax = q_values.argmax()
+                # a cut was selected if the argmax is in [0:n_remaining_cuts]
+                selected = int(argmax < len(remaining_cuts_idxes))
 
             if selected:
-                # append to the context list the edges pointing to the selected cut,
+                # the cut index in the available cuts array
+                selected_cut_index = remaining_cuts_idxes[argmax]
+
+                # append to the context list the edges pointing to the selected cut
                 # and their corresponding attr
-                incoming_edges = context_edge_index[1, :] == cut_index
+                incoming_edges = context_edge_index[1, :] == selected_cut_index
                 incoming_edge_index = context_edge_index[:, incoming_edges]
-                incoming_attr = context_edge_attr[incoming_edges, :]  # take the rows corresponding to the incoming edges
+                incoming_attr = context_edge_attr[incoming_edges, :]
                 context_edge_attr_list.append(incoming_attr.detach().cpu())
                 context_edge_index_list.append(incoming_edge_index.detach().cpu())
 
                 # update the decoder context for the next iteration
-                # a. update the cut outgoing edges attributes
-                outgoing_edges = context_edge_index[0, :] == cut_index
+                # a. remove the selected cut from the remaining_cuts and append to the selected_cuts
+                remaining_cuts_idxes.pop(argmax)
+                selected_cuts_idxes.append(selected_cut_index)
+
+                # b. remove the selected cut incoming edges and attrs from the context
+                remaining_edges = incoming_edges.logical_not()
+                context_edge_index = context_edge_index[:, remaining_edges]
+                context_edge_attr = context_edge_attr[remaining_edges, :]
+
+                # c. update the selected cut outgoing edge attributes
+                outgoing_edges = context_edge_index[0, :] == selected_cut_index
                 # mark cut_index as "selected"
                 context_edge_attr[outgoing_edges, -1] = float(selected)
-                # update o_iS of all (remaining) cuts to min(o_iS, o_i<cut_index>)
-                k = cut_index
+                # update o_iS of all remaining cuts to min(o_iS, o_i<selected_cut_index>)
+                # the orthogonality of the remaining cuts to the selected group excluding the currently selected cut
                 o_iS = context_edge_attr[:, 1]
-                # broadcast the orthogonality with cut_index to all the edges
-                o_ik = context_edge_attr[outgoing_edges, 0][context_edge_index[0, :]]
-                # the updated o_iS is the min between the current value and the orthogonality to cut_index.
-                context_edge_attr[:, 1] = torch.min(o_iS, o_ik)
+                # the orthogonality of the remaining cuts to the selected cut
+                o_i_selected_cut = torch.zeros((ncuts, ), dtype=torch.float32).to(self.device)
+                o_i_selected_cut[remaining_cuts_idxes] = context_edge_attr[outgoing_edges, 0]
+                # broadcast o_i_selected_cut to o_iS
+                o_i_selected_cut_broadcasted = o_i_selected_cut[context_edge_index[0, :]]
+                # the updated o_iS is the min between the current value and the orthogonality to the currently selected cut
+                context_edge_attr[:, 1] = torch.min(o_iS, o_i_selected_cut_broadcasted)
 
-                # b. store the q values of the selected cut in the output q_vals
-                q_vals[cut_index, :] = q[cut_index, :]
-                # c. update the selected_cuts_mask
-                selected_cuts_mask[cut_index] = True
+                # d. store the q values of the selected cut in the output q_vals
+                q_vals[selected_cut_index, :] = q[argmax, :]
+
                 # go to the next iteration to see if there are more useful cuts
+
             else:
                 # stop adding cuts
+
                 # store the current context for the remaining cuts
-                remaining_cuts_mask = selected_cuts_mask.logical_not()
-                remaining_cuts_idxs = remaining_cuts_mask.nonzero()
-                context_edge_attr = context_edge_attr.detach().cpu()
-                context_edge_index = context_edge_index.detach().cpu()
-                for cut_index in remaining_cuts_idxs:
-                    # append to the context list the edges pointing to the cut_index,
-                    # and their corresponding attr
-                    incoming_edges = context_edge_index[1, :] == cut_index
-                    incoming_edge_index = context_edge_index[:, incoming_edges]
-                    incoming_attr = context_edge_attr[incoming_edges, :]
-                    context_edge_attr_list.append(incoming_attr)
-                    context_edge_index_list.append(incoming_edge_index)
+                context_edge_attr_list.append(context_edge_attr.detach().cpu())
+                context_edge_index_list.append(context_edge_index.detach().cpu())
+
+                # context_edge_attr = context_edge_attr.detach().cpu()
+                # context_edge_index = context_edge_index.detach().cpu()
+                # for discarded_cut_index in remaining_cuts_idxes:
+                #     # append to the context list the edges pointing to discarded_cut_index,
+                #     # and their corresponding attr
+                #     incoming_edges = context_edge_index[1, :] == discarded_cut_index
+                #     incoming_edge_index = context_edge_index[:, incoming_edges]
+                #     incoming_attr = context_edge_attr[incoming_edges, :]
+                #     context_edge_attr_list.append(incoming_attr)
+                #     context_edge_index_list.append(incoming_edge_index)
+
                 # store the last q values of the remaining cuts in the output q_vals
-                q_vals[remaining_cuts_mask, :] = q.detach().cpu()[remaining_cuts_mask, :]
+                # cut-wise "select" q values
+                q_vals[remaining_cuts_idxes, 1] = q_values.detach().cpu()[:-1]
+                # average "discard" q value
+                q_vals[remaining_cuts_idxes, 0] = q_values.detach().cpu()[-1]
+
                 break
 
         if self.select_at_least_one_cut and ncuts > 0:
-            assert selected_cuts_mask.any()
+            assert len(selected_cuts_idxes) > 0
+        assert len(selected_cuts_idxes) + len(remaining_cuts_idxes) == ncuts
 
         # store the greedy action built on the fly to return to user,
-        # since the q_values.argmax(1) is not necessarily equal to selected_cuts_mask
-        greedy_action = selected_cuts_mask
-        # self.decoder_greedy_action = selected_cuts_mask
+        greedy_action = torch.zeros((ncuts,), dtype=torch.bool)
+        greedy_action[selected_cuts_idxes] = True
 
         # finally, stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer
         context_edge_attr = torch.cat(context_edge_attr_list, dim=0)
         context_edge_index = torch.cat(context_edge_index_list, dim=1)
         decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
-        # self.decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
+
         return q_vals, greedy_action, decoder_context
 
-    def get_complete_context(self, action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
+    @staticmethod
+    def get_complete_context(action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
         """ Construct random context according to random_action, for parallel inference. """
         # find the randomly selected cuts.
         if selection_order is None:

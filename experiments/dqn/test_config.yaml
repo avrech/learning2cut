@@ -38,7 +38,7 @@ cut_conv: CutConv
 encoder_cut_conv_layers: 1
 encoder_lp_conv_layers: 1
 decoder_layers: 1
-decoder_conv: SelfAttention
+decoder_conv: RemainingCutsConv
 attention_heads: 4
 lp_conv_aggr: mean
 cut_conv_aggr: mean
