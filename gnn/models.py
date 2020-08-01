@@ -612,7 +612,7 @@ class TQnet(torch.nn.Module):
                 edge_index_a2a,
                 edge_attr_a2a,
                 mode='inference',
-                random_action=None
+                query_action=None
                 ):
         """
         """
@@ -622,31 +622,33 @@ class TQnet(torch.nn.Module):
         output = {}
         lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
         cut_encoding = self.lp_conv(lp_conv_inputs)
-        output['cut_encoding'] = cut_encoding  # store for demonstration J_E loss
 
         ###########
         # Decoder #
         ###########
         # decoding - inference
         if mode == 'inference':
-            if random_action is None:
+            if query_action is None:
                 # run greedy inference
-                q_values, greedy_action, decoder_context = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
-                output['action'] = greedy_action
-                output['decoder_context'] = decoder_context
-                output['q_values'] = q_values
+                output = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
+
             else:
                 # construct decoder context according to random action, and generate the q_values in parallel.
-                edge_index_a2a, edge_attr_a2a = self.get_complete_context(action=random_action,
-                                                                          initial_edge_index_a2a=edge_index_a2a,
-                                                                          initial_edge_attr_a2a=edge_attr_a2a)
-                output['decoder_context'] = TransformerDecoderContext(edge_index_a2a, edge_attr_a2a)
+                output = self.get_context(action=query_action,
+                                          initial_edge_index_a2a=edge_index_a2a.cpu(),
+                                          initial_edge_attr_a2a=edge_attr_a2a.cpu())
+                edge_index_a2a, edge_attr_a2a = output['context_edge_index'], output['context_edge_attr']
                 edge_index_a2a, edge_attr_a2a = edge_index_a2a.to(self.device), edge_attr_a2a.to(self.device)
                 decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
                 cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
                 q_values = self.q(cut_decoding)
-                output['q_values'] = q_values
-                output['action'] = random_action
+                # average the discard q values as in inference()
+                avg_discard_q_value = q_values[query_action.logical_not(), 0].mean()
+                q_values[query_action.logical_not(), 0] = avg_discard_q_value
+                # todo old: output['q_values'] = q_values
+                output['selected'] = query_action
+                output['selected_q_values'] = q_values.gather(1, query_action.long().unsqueeze(1)).detach().cpu()  # todo continue
+
         elif mode == 'batch':
             # we are in training.
             # decode cuts in parallel given the cut-level context,
@@ -668,6 +670,7 @@ class TQnet(torch.nn.Module):
         else:
             raise ValueError
 
+        output['cut_encoding'] = cut_encoding  # store for demonstration J_E loss
         return output
 
     def inference(self, cuts_encoding, edge_index_a2a, edge_attr_a2a):
@@ -703,7 +706,8 @@ class TQnet(torch.nn.Module):
         context_edge_attr_list = []
 
         # create a tensor of all q values to return to user
-        q_vals = torch.empty(size=(ncuts, 2), dtype=torch.float32)
+        # todo old: output_q_values = torch.empty(size=(ncuts, 2), dtype=torch.float32)
+        selected_q_values = torch.empty(size=(ncuts,), dtype=torch.float32)  # q values of the cut-level decisions
         remaining_cuts_idxes = torch.arange(ncuts).tolist()
         selected_cuts_idxes = []
 
@@ -719,21 +723,21 @@ class TQnet(torch.nn.Module):
 
             # force selecting at least one cut
             if self.select_at_least_one_cut and len(selected_cuts_idxes) == 0:
-                argmax = select_q_values.argmax()
-                selected = 1
+                argmax_action = select_q_values.argmax()
+                cut_selected = 1
 
             else:
                 # append the option to discard all the remaining cuts
                 discard_q_value = q[:, 0].mean(dim=0, keepdim=True)
-                q_values = torch.cat([select_q_values, discard_q_value], dim=0)  # [n_remaining_cuts + 1]
+                action_q_values = torch.cat([select_q_values, discard_q_value], dim=0)  # [n_remaining_cuts + 1]
                 # find argmax action
-                argmax = q_values.argmax()
+                argmax_action = action_q_values.argmax()
                 # a cut was selected if the argmax is in [0:n_remaining_cuts]
-                selected = int(argmax < len(remaining_cuts_idxes))
+                cut_selected = int(argmax_action < len(remaining_cuts_idxes))
 
-            if selected:
+            if cut_selected:
                 # the cut index in the available cuts array
-                selected_cut_index = remaining_cuts_idxes[argmax]
+                selected_cut_index = remaining_cuts_idxes[argmax_action]
 
                 # append to the context list the edges pointing to the selected cut
                 # and their corresponding attr
@@ -745,7 +749,7 @@ class TQnet(torch.nn.Module):
 
                 # update the decoder context for the next iteration
                 # a. remove the selected cut from the remaining_cuts and append to the selected_cuts
-                remaining_cuts_idxes.pop(argmax)
+                remaining_cuts_idxes.remove(selected_cut_index)
                 selected_cuts_idxes.append(selected_cut_index)
 
                 # b. remove the selected cut incoming edges and attrs from the context
@@ -756,7 +760,7 @@ class TQnet(torch.nn.Module):
                 # c. update the selected cut outgoing edge attributes
                 outgoing_edges = context_edge_index[0, :] == selected_cut_index
                 # mark cut_index as "selected"
-                context_edge_attr[outgoing_edges, -1] = float(selected)
+                context_edge_attr[outgoing_edges, -1] = float(cut_selected)
                 # update o_iS of all remaining cuts to min(o_iS, o_i<selected_cut_index>)
                 # the orthogonality of the remaining cuts to the selected group excluding the currently selected cut
                 o_iS = context_edge_attr[:, 1]
@@ -769,8 +773,8 @@ class TQnet(torch.nn.Module):
                 context_edge_attr[:, 1] = torch.min(o_iS, o_i_selected_cut_broadcasted)
 
                 # d. store the q values of the selected cut in the output q_vals
-                q_vals[selected_cut_index, :] = q[argmax, :]
-
+                # todo - old: output_q_values[selected_cut_index, :] = q[argmax_action, :].detach().cpu()
+                selected_q_values[selected_cut_index] = action_q_values[argmax_action].detach().cpu()
                 # go to the next iteration to see if there are more useful cuts
 
             else:
@@ -779,45 +783,43 @@ class TQnet(torch.nn.Module):
                 # store the current context for the remaining cuts
                 context_edge_attr_list.append(context_edge_attr.detach().cpu())
                 context_edge_index_list.append(context_edge_index.detach().cpu())
-
-                # context_edge_attr = context_edge_attr.detach().cpu()
-                # context_edge_index = context_edge_index.detach().cpu()
-                # for discarded_cut_index in remaining_cuts_idxes:
-                #     # append to the context list the edges pointing to discarded_cut_index,
-                #     # and their corresponding attr
-                #     incoming_edges = context_edge_index[1, :] == discarded_cut_index
-                #     incoming_edge_index = context_edge_index[:, incoming_edges]
-                #     incoming_attr = context_edge_attr[incoming_edges, :]
-                #     context_edge_attr_list.append(incoming_attr)
-                #     context_edge_index_list.append(incoming_edge_index)
-
                 # store the last q values of the remaining cuts in the output q_vals
                 # cut-wise "select" q values
-                q_vals[remaining_cuts_idxes, 1] = q_values.detach().cpu()[:-1]
+                # todo old: output_q_values[remaining_cuts_idxes, 1] = action_q_values.detach().cpu()[:-1]
                 # average "discard" q value
-                q_vals[remaining_cuts_idxes, 0] = q_values.detach().cpu()[-1]
-
+                # todo old: output_q_values[remaining_cuts_idxes, 0] = action_q_values.detach().cpu()[-1]
+                selected_q_values[remaining_cuts_idxes] = discard_q_value
                 break
 
         if self.select_at_least_one_cut and ncuts > 0:
             assert len(selected_cuts_idxes) > 0
         assert len(selected_cuts_idxes) + len(remaining_cuts_idxes) == ncuts
 
-        # store the greedy action built on the fly to return to user,
-        greedy_action = torch.zeros((ncuts,), dtype=torch.bool)
-        greedy_action[selected_cuts_idxes] = True
+        # the cut-level decisions
+        selected = torch.zeros((ncuts,), dtype=torch.bool)
+        selected[selected_cuts_idxes] = True
 
-        # finally, stack the decoder edge_attr and edge_index lists,
+        # stack the decoder edge_attr and edge_index lists,
         # and make a "decoder context" for training the transformer
         context_edge_attr = torch.cat(context_edge_attr_list, dim=0)
         context_edge_index = torch.cat(context_edge_index_list, dim=1)
         decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
 
-        return q_vals, greedy_action, decoder_context
+        output = {
+            'selected': selected,
+            'decoder_context': decoder_context,
+            'selected_q_values': selected_q_values
+        }
+        return output
 
     @staticmethod
-    def get_complete_context(action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
-        """ Construct random context according to random_action, for parallel inference. """
+    def get_context(action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
+        """
+        Constructs compact context according to action for parallel computing of the corresponding q values.
+        If selection_order is not None, generate extended context for learning from demonstrations,
+        as well as the expert action and batch arrays needed for batch mode training.
+        """
+        generate_demonstration_context = selection_order is not None
         # find the randomly selected cuts.
         if selection_order is None:
             # randperm selection order
@@ -825,18 +827,24 @@ class TQnet(torch.nn.Module):
             selected_idxes = selected_idxes[torch.randperm(len(selected_idxes))]
         else:
             selected_idxes = selection_order
-
-        discarded_idxes = action.logical_not().nonzero()
+            demonstration_context_edge_index_list = []
+            demonstration_context_edge_attr_list = []
+            demonstration_batch_list = []
+            demonstration_action_list = []
 
         # initialize context
         context_edge_index = initial_edge_index_a2a
         context_edge_attr = initial_edge_attr_a2a
 
+        ncuts = len(action)
         context_edge_index_list = []
         context_edge_attr_list = []
+        remaining_cuts_idxes = torch.arange(ncuts).tolist()
+        selected_cuts_idxes = []
 
-        # process the selected cuts first
-        for cut_index in selected_idxes:
+        # process the selected cuts first.
+        # if selection_order is not None, generate also extended context for learning from demonstrations
+        for batch_id, cut_index in enumerate(selected_idxes):
             # append to the context list the edges pointing to the selected cut,
             # and their corresponding attributes
             incoming_edges = context_edge_index[1, :] == cut_index
@@ -844,36 +852,67 @@ class TQnet(torch.nn.Module):
             incoming_attr = context_edge_attr[incoming_edges, :]  # take the rows corresponding to the incoming edges
             context_edge_attr_list.append(incoming_attr.detach().cpu())
             context_edge_index_list.append(incoming_edge_index.detach().cpu())
+            if generate_demonstration_context:
+                # append the entire edge_index and edge_attr, and create corresponding action and batch
+                demonstration_context_edge_index_list.append(context_edge_index)
+                demonstration_context_edge_attr_list.append(context_edge_attr)
+                a_E = torch.zeros((len(remaining_cuts_idxes)+1, ), dtype=torch.bool)
+                a_E[remaining_cuts_idxes.index(cut_index)] = True
+                demonstration_batch_list.append(torch.full_like(a_E, fill_value=batch_id, dtype=torch.long))
+                demonstration_action_list.append(a_E)
 
             # update the decoder context for the next iteration
-            # a. update the cut outgoing edges attributes
-            outgoing_edges_idxes = context_edge_index[0, :] == cut_index
+            # a. remove the selected cut from the remaining_cuts and append to the selected_cuts
+            remaining_cuts_idxes.remove(cut_index)
+            selected_cuts_idxes.append(cut_index)
+
+            # b. remove the selected cut incoming edges and attrs from the context
+            remaining_edges = incoming_edges.logical_not()
+            context_edge_index = context_edge_index[:, remaining_edges]
+            context_edge_attr = context_edge_attr[remaining_edges, :]
+
+            # c. update the selected cut outgoing edge attributes
+            outgoing_edges = context_edge_index[0, :] == cut_index
             # mark cut_index as "selected"
-            context_edge_attr[outgoing_edges_idxes, -1] = 1
-            # update o_iS of all (remaining) cuts to min(o_iS, o_i<cut_index>)
-            k = cut_index
+            context_edge_attr[outgoing_edges, -1] = 1
+            # update o_iS of all remaining cuts to min(o_iS, o_i<selected_cut_index>)
+            # the orthogonality of the remaining cuts to the selected group excluding the currently selected cut
             o_iS = context_edge_attr[:, 1]
-            # broadcast the orthogonality with cut_index to all the edges
-            o_ik = context_edge_attr[outgoing_edges_idxes, 0][context_edge_index[0, :]]
-            # the updated o_iS is the min between the current value and the orthogonality to cut_index.
-            context_edge_attr[:, 1] = torch.min(o_iS, o_ik)
+            # the orthogonality of the remaining cuts to the selected cut
+            o_i_selected_cut = torch.zeros((ncuts,), dtype=torch.float32)
+            o_i_selected_cut[remaining_cuts_idxes] = context_edge_attr[outgoing_edges, 0]
+            # broadcast o_i_selected_cut to o_iS
+            o_i_selected_cut_broadcasted = o_i_selected_cut[context_edge_index[0, :]]
+            # the updated o_iS is the min between the current value and the orthogonality to the currently selected cut
+            context_edge_attr[:, 1] = torch.min(o_iS, o_i_selected_cut_broadcasted)
+            # go to the next iteration to see if there are more useful cuts
 
-        # assign the final context to all the remaining cuts
-        for cut_index in discarded_idxes:
-            # append to the context list the edges pointing to the cut_index,
-            # and their corresponding attr
-            incoming_edges = context_edge_index[1, :] == cut_index
-            incoming_edge_index = context_edge_index[:, incoming_edges]
-            incoming_attr = context_edge_attr[incoming_edges, :]
-            context_edge_attr_list.append(incoming_attr)
-            context_edge_index_list.append(incoming_edge_index)
+        # store the current context for the remaining cuts
+        context_edge_attr_list.append(context_edge_attr)
+        context_edge_index_list.append(context_edge_index)
 
-        random_action_edge_index_a2a = torch.cat(context_edge_index_list, dim=1)
-        random_action_edge_attr_a2a = torch.cat(context_edge_attr_list, dim=0)
-        random_action_decoder_context = TransformerDecoderContext(random_action_edge_index_a2a, random_action_edge_attr_a2a)
-        # self.decoder_context = random_action_decoder_context
+        # stack all tensors and generate context
+        output = {
+            'context_edge_index': torch.cat(context_edge_index_list, dim=1),
+            'context_edge_attr': torch.cat(context_edge_attr_list, dim=0)
+        }
 
-        return random_action_edge_index_a2a, random_action_edge_attr_a2a
+        if generate_demonstration_context:
+            # append the context of the discard action
+            demonstration_context_edge_index_list.append(context_edge_index)
+            demonstration_context_edge_attr_list.append(context_edge_attr)
+            a_E = torch.zeros((len(remaining_cuts_idxes) + 1,), dtype=torch.bool)
+            a_E[-1] = True  # set the "discard" entry to True
+            demonstration_action_list.append(a_E)
+            # append batch_id of size n_remaining_cuts and value n_selected_cuts
+            demonstration_batch_list.append(torch.full_like(a_E, fill_value=len(selected_cuts_idxes), dtype=torch.long))
+            # concatenate all tensors to generate the demonstration context
+            output['demonstration_context_edge_index'] = torch.cat(demonstration_context_edge_index_list, dim=1)
+            output['demonstration_context_edge_attr'] = torch.cat(demonstration_context_edge_attr_list, dim=0)
+            output['demonstration_action'] = torch.cat(demonstration_action_list, dim=0)
+            output['demonstration_batch'] = torch.cat(demonstration_batch_list, dim=0)
+
+        return output
 
     @staticmethod
     def expand_decoder_input(encoding, compact_edge_index, compact_edge_attr):

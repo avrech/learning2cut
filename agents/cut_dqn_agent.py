@@ -97,7 +97,7 @@ class CutDQNAgent(Sepa):
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_qvalues_context_list = []
+        self.episode_history = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -167,7 +167,7 @@ class CutDQNAgent(Sepa):
         self.action = None
         self.prev_action = None
         self.prev_state = None
-        self.state_action_qvalues_context_list = []
+        self.episode_history = []
         self.episode_stats = {
             'ncuts': [],
             'ncuts_applied': [],
@@ -266,10 +266,12 @@ class CutDQNAgent(Sepa):
         TODO demonstration data is stored with additional flag demonstration=True, to inform
          the learner to compute the expert loss J_E.
         """
+        info = {}
         # get the current state, a dictionary of available cuts (keyed by their names,
         # and query statistics related to the previous action (cut activeness etc.)
         cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True,
                                                         query=self.prev_action)
+        info['state_info'], info['action_info'] = cur_state, available_cuts
 
         # validate the solver behavior
         if self.prev_action is not None and not self.demonstration_episode:
@@ -281,18 +283,22 @@ class CutDQNAgent(Sepa):
         if available_cuts['ncuts'] > 0:
 
             # select an action, and get the decoder context for a case we use transformer and q_values for PER
-            action, q_values, decoder_context = self._select_action(cur_state)
-            available_cuts['selected'] = action
+            # todo old: action, q_values, decoder_context = self._select_action(cur_state)
+            action_info = self._select_action(cur_state)
+            selected = action_info['selected']
+            available_cuts['selected'] = action_info['selected']
+            for k, v in action_info.items():
+                info[k] = v
 
             if not self.demonstration_episode:
                 # apply the action
-                if any(action):
+                if any(selected):
                     # force SCIP to take the selected cuts and discard the others
-                    self.model.forceCuts(action)
+                    self.model.forceCuts(selected)
                     # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
                     # in order to prevent it from adding more or less cuts
-                    self.model.setIntParam('separating/maxcuts', int(sum(action)))
-                    self.model.setIntParam('separating/maxcutsroot', int(sum(action)))
+                    self.model.setIntParam('separating/maxcuts', int(sum(selected)))
+                    self.model.setIntParam('separating/maxcutsroot', int(sum(selected)))
                     # continue to the next state
                     result = {"result": SCIP_RESULT.SEPARATED}
 
@@ -320,7 +326,8 @@ class CutDQNAgent(Sepa):
 
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
-            self.state_action_qvalues_context_list.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
+            self.episode_history.append(info)
+            # todo - old: self.episode_history.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
             self.prev_action = available_cuts
             self.prev_state = cur_state
 
@@ -344,12 +351,8 @@ class CutDQNAgent(Sepa):
 
     # done
     def _select_action(self, scip_state):
-        # todo - what should be the return types? action only, or maybe also q values and decoder context?
-        #  for simple tracking return all types, for compatibility with non-transformer models return only action.
+        # TODO - move all models to return dict with everything needed.
         # transform scip_state into GNN data type
-
-        # batch = Batch.from_data_list([Transition.create(scip_state, tqnet_version=self.tqnet_version)],
-        #                              follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
         batch = Transition.create(scip_state, tqnet_version=self.tqnet_version).as_batch().to(self.device)
 
         if self.training:
@@ -366,93 +369,107 @@ class CutDQNAgent(Sepa):
                 self.num_env_steps_done += 1
 
             if sample > eps_threshold:
-                # take greedy action
-                with torch.no_grad():
-                    # t.max(1) will return largest column value of each row.
-                    # second column on max result is the index of where max element was found.
-                    # we pick action with the larger expected reward.
-                    # todo - move all architectures to output dict format
-                    output = self.policy_net(
-                        x_c=batch.x_c,
-                        x_v=batch.x_v,
-                        x_a=batch.x_a,
-                        edge_index_c2v=batch.edge_index_c2v,
-                        edge_index_a2v=batch.edge_index_a2v,
-                        edge_attr_c2v=batch.edge_attr_c2v,
-                        edge_attr_a2v=batch.edge_attr_a2v,
-                        edge_index_a2a=batch.edge_index_a2a,
-                        edge_attr_a2a=batch.edge_attr_a2a
-                    )
-                    if self.use_transformer:
-                        # todo- verification v3
-                        # the action is not necessarily q_values.argmax(dim=1).
-                        # take the action constructed internally in the transformer, and the corresponding q_values
-                        greedy_q_values = output['q_values'].gather(1, output['action'].long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
-                        # greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
-                        greedy_action = output['action'].numpy()  # self.policy_net.decoder_greedy_action.numpy()
-                        # return also the decoder context to store for backprop
-                        greedy_action_decoder_context = output['decoder_context']
-                        # greedy_action_decoder_context = self.policy_net.decoder_context
-                    else:
-                        greedy_q_values, greedy_action = output['q_values'].max(1)  # todo - verification
-                        greedy_action = greedy_action.cpu().numpy().astype(np.bool)  # todo - verify detach()
-                        greedy_q_values = greedy_q_values.cpu()  # todo - detach() is not necessary due to torch.no_grad()
-                        greedy_action_decoder_context = None
-
-                    return greedy_action, greedy_q_values, greedy_action_decoder_context
-
+                random_action = None
             else:
                 # randomize action
-                random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
+                random_action = torch.randint_like(batch.a, low=0, high=2).cpu().bool()
                 if self.select_at_least_one_cut and random_action.sum() == 0:
                     # select a cut arbitrarily
-                    random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = 1
-
-                # for prioritized experience replay we need the q_values to compute the initial priorities
-                # whether we take a random action or not.
-                # For transformer, we compute the random action q_values based on the random decoder context,
-                # and we do it in parallel like we do in sgd_step()
-                # For non-transformer model, it doesn't affect anything
-                output = self.policy_net(
-                    x_c=batch.x_c,
-                    x_v=batch.x_v,
-                    x_a=batch.x_a,
-                    edge_index_c2v=batch.edge_index_c2v,
-                    edge_index_a2v=batch.edge_index_a2v,
-                    edge_attr_c2v=batch.edge_attr_c2v,
-                    edge_attr_a2v=batch.edge_attr_a2v,
-                    edge_index_a2a=batch.edge_index_a2a,
-                    edge_attr_a2a=batch.edge_attr_a2a,
-                    random_action=random_action  # for transformer to set context
-                )
-                random_action_decoder_context = output['decoder_context'] if self.use_transformer else None
-                random_action_q_values = output['q_values'].detach().cpu().gather(1, random_action.long().unsqueeze(1))  # todo - verification. take the relevant q_values only.
-                random_action = random_action.numpy().astype(np.bool)
-                return random_action, random_action_q_values, random_action_decoder_context
+                    random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = True
         else:
-            # in test time, take greedy action
-            with torch.no_grad():
-                output = self.policy_net(
-                    x_c=batch.x_c,
-                    x_v=batch.x_v,
-                    x_a=batch.x_a,
-                    edge_index_c2v=batch.edge_index_c2v,
-                    edge_index_a2v=batch.edge_index_a2v,
-                    edge_attr_c2v=batch.edge_attr_c2v,
-                    edge_attr_a2v=batch.edge_attr_a2v,
-                    edge_index_a2a=batch.edge_index_a2a,
-                    edge_attr_a2a=batch.edge_attr_a2a
-                )
-                # todo enforce select_at_least_one_cut.
-                #  in tqnet v2 it is enforced internally, so that the decoder_greedy_action is valid.
-                if self.use_transformer:
-                    greedy_action = output['action'].numpy()
-                else:
-                    greedy_action = output['q_values'].max(1)[1].cpu().numpy().astype(np.bool)
-                assert not self.select_at_least_one_cut or any(greedy_action)
-                # return None, None for q_values and decoder context,
-                # since they are used only while generating experience
-                return greedy_action, None, None
+            random_action = None
+
+        # take greedy action
+        with torch.no_grad():
+            # t.max(1) will return largest column value of each row.
+            # second column on max result is the index of where max element was found.
+            # we pick action with the larger expected reward.
+            # todo - move all architectures to output dict format
+            output = self.policy_net(
+                x_c=batch.x_c,
+                x_v=batch.x_v,
+                x_a=batch.x_a,
+                edge_index_c2v=batch.edge_index_c2v,
+                edge_index_a2v=batch.edge_index_a2v,
+                edge_attr_c2v=batch.edge_attr_c2v,
+                edge_attr_a2v=batch.edge_attr_a2v,
+                edge_index_a2a=batch.edge_index_a2a,
+                edge_attr_a2a=batch.edge_attr_a2a,
+                mode='inference',
+                query_action=random_action
+            )
+        assert not self.select_at_least_one_cut or output['action'].any()
+        return output
+            # todo old:
+                # if self.use_transformer:
+                #     # todo- verification v3
+                #     # the action is not necessarily q_values.argmax(dim=1).
+                #     # take the action constructed internally in the transformer, and the corresponding q_values
+                #     greedy_q_values = output['q_values'].gather(1, output['action'].long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
+                #     # greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
+                #     greedy_action = output['action'].numpy()  # self.policy_net.decoder_greedy_action.numpy()
+                #     # return also the decoder context to store for backprop
+                #     greedy_action_decoder_context = output['decoder_context']
+                #     # greedy_action_decoder_context = self.policy_net.decoder_context
+                # else:
+                #     greedy_q_values, greedy_action = output['q_values'].max(1)  # todo - verification
+                #     greedy_action = greedy_action.cpu().numpy().astype(np.bool)  # todo - verify detach()
+                #     greedy_q_values = greedy_q_values.cpu()  # todo - detach() is not necessary due to torch.no_grad()
+                #     greedy_action_decoder_context = None
+                #
+                # return greedy_action, greedy_q_values, greedy_action_decoder_context
+            # else:
+            #     # randomize action
+            #     random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
+            #     if self.select_at_least_one_cut and random_action.sum() == 0:
+            #         # select a cut arbitrarily
+            #         random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = 1
+            #
+            #     # for prioritized experience replay we need the q_values to compute the initial priorities
+            #     # whether we take a random action or not.
+            #     # For transformer, we compute the random action q_values based on the random decoder context,
+            #     # and we do it in parallel like we do in sgd_step()
+            #     # For non-transformer model, it doesn't affect anything
+            #     output = self.policy_net(
+            #         x_c=batch.x_c,
+            #         x_v=batch.x_v,
+            #         x_a=batch.x_a,
+            #         edge_index_c2v=batch.edge_index_c2v,
+            #         edge_index_a2v=batch.edge_index_a2v,
+            #         edge_attr_c2v=batch.edge_attr_c2v,
+            #         edge_attr_a2v=batch.edge_attr_a2v,
+            #         edge_index_a2a=batch.edge_index_a2a,
+            #         edge_attr_a2a=batch.edge_attr_a2a,
+            #         query_action=random_action  # for transformer to set context
+            #     )
+            #     random_action_decoder_context = output['decoder_context'] if self.use_transformer else None
+            #     random_action_q_values = output['q_values'].detach().cpu().gather(1, random_action.long().unsqueeze(1))  # todo - verification. take the relevant q_values only.
+            #     random_action = random_action.numpy().astype(np.bool)
+            #     return random_action, random_action_q_values, random_action_decoder_context
+        # else:
+        #     # in test time, take greedy action
+        #     with torch.no_grad():
+        #         output = self.policy_net(
+        #             x_c=batch.x_c,
+        #             x_v=batch.x_v,
+        #             x_a=batch.x_a,
+        #             edge_index_c2v=batch.edge_index_c2v,
+        #             edge_index_a2v=batch.edge_index_a2v,
+        #             edge_attr_c2v=batch.edge_attr_c2v,
+        #             edge_attr_a2v=batch.edge_attr_a2v,
+        #             edge_index_a2a=batch.edge_index_a2a,
+        #             edge_attr_a2a=batch.edge_attr_a2a
+        #         )
+        #         # todo enforce select_at_least_one_cut.
+        #         #  in tqnet v2 it is enforced internally, so that the decoder_greedy_action is valid.
+        #         if self.use_transformer:
+        #             greedy_action = output['action'].numpy()
+        #         else:
+        #             greedy_action = output['q_values'].max(1)[1].cpu().numpy().astype(np.bool)
+        #         assert not self.select_at_least_one_cut or any(greedy_action)
+        #         # return None, None for q_values and decoder context,
+        #         # since they are used only while generating experience
+        #         return greedy_action, None, None
 
     # done
     def finish_episode(self):
@@ -589,7 +606,7 @@ class CutDQNAgent(Sepa):
         # compute the area under the curve:
         if len(dualbound) <= 2:
             print(self.episode_stats)
-            print(self.state_action_qvalues_context_list)
+            print(self.episode_history)
 
         # todo - consider squaring the dualbound/gap before computing the AUC.
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
@@ -606,7 +623,7 @@ class CutDQNAgent(Sepa):
             # compute n-step returns for each state-action pair (s_t, a_t)
             # and store a transition (s_t, a_t, r_t, s_{t+n}
             # todo - in learning from demonstrations we used to compute both 1-step and n-step returns.
-            n_transitions = len(self.state_action_qvalues_context_list)
+            n_transitions = len(self.episode_history)
             n_steps = self.nstep_learning
             gammas = self.gamma**np.arange(n_steps).reshape(-1, 1)  # [1, gamma, gamma^2, ... gamma^{n-1}]
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
@@ -620,19 +637,19 @@ class CutDQNAgent(Sepa):
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.state_action_qvalues_context_list, R)):
+            for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.episode_history, R)):
                 if self.demonstration_episode:
                     # create a decoder context corresponding to SCIP cut selection order
                     # a. get initial_edge_index_a2a and initial_edge_attr_a2a
                     initial_edge_index_a2a, initial_edge_attr_a2a = Transition.get_initial_decoder_context(scip_state=state, tqnet_version=self.tqnet_version)
                     # b. create context
-                    transformer_decoder_context = self.policy_net.get_complete_context(
+                    transformer_decoder_context = self.policy_net.get_context(
                         torch.from_numpy(action['applied']), initial_edge_index_a2a, initial_edge_attr_a2a,
                         selection_order=action['selection_order'])
 
                 # get the next n-step state and q values. if the next state is terminal
                 # return 0 as q_values (by convention)
-                next_state, next_action, next_q_values, _ = self.state_action_qvalues_context_list[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
+                next_state, next_action, next_q_values, _ = self.episode_history[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
@@ -658,7 +675,8 @@ class CutDQNAgent(Sepa):
                                                transformer_decoder_context=transformer_decoder_context,
                                                reward=reward,
                                                scip_next_state=next_state,
-                                               tqnet_version=self.tqnet_version)
+                                               tqnet_version=self.tqnet_version
+                                               )
 
                 if self.use_per:
                     # todo - compute initial priority for PER based on the policy q_values.
@@ -694,7 +712,7 @@ class CutDQNAgent(Sepa):
         active_applied_ratio = []
         applied_available_ratio = []
         accuracy_list, f1_score_list = [], []
-        for _, action, _, _ in self.state_action_qvalues_context_list:
+        for _, action, _, _ in self.episode_history:
             normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
             approximately_zero = np.abs(normalized_slack) < 1e-6
@@ -1342,7 +1360,7 @@ class CutDQNAgent(Sepa):
         # plot imitation performance bars (in percents)
         if 'Imitation_Performance' in self.figures.keys():
             true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
-            for saqc in self.state_action_qvalues_context_list:
+            for saqc in self.episode_history:
                 scip_action = saqc[1]['applied']
                 agent_action = saqc[1]['selected']
                 true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
