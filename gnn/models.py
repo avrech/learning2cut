@@ -637,7 +637,7 @@ class TQnet(torch.nn.Module):
                 output = self.get_context(action=query_action,
                                           initial_edge_index_a2a=edge_index_a2a.cpu(),
                                           initial_edge_attr_a2a=edge_attr_a2a.cpu())
-                edge_index_a2a, edge_attr_a2a = output['context_edge_index'], output['context_edge_attr']
+                edge_index_a2a, edge_attr_a2a = output['decoder_context']
                 edge_index_a2a, edge_attr_a2a = edge_index_a2a.to(self.device), edge_attr_a2a.to(self.device)
                 decoder_inputs = (cut_encoding, edge_index_a2a, edge_attr_a2a)
                 cut_decoding, _, _ = self.decoder_conv(decoder_inputs)
@@ -647,7 +647,7 @@ class TQnet(torch.nn.Module):
                 q_values[query_action.logical_not(), 0] = avg_discard_q_value
                 # todo old: output['q_values'] = q_values
                 output['selected'] = query_action
-                output['selected_q_values'] = q_values.gather(1, query_action.long().unsqueeze(1)).detach().cpu()  # todo continue
+                output['selected_q_values'] = q_values.cpu().gather(1, query_action.long().unsqueeze(1)).detach().cpu()  # todo continue
 
         elif mode == 'batch':
             # we are in training.
@@ -724,6 +724,7 @@ class TQnet(torch.nn.Module):
             # force selecting at least one cut
             if self.select_at_least_one_cut and len(selected_cuts_idxes) == 0:
                 argmax_action = select_q_values.argmax()
+                action_q_values = select_q_values
                 cut_selected = 1
 
             else:
@@ -893,8 +894,8 @@ class TQnet(torch.nn.Module):
 
         # stack all tensors and generate context
         output = {
-            'context_edge_index': torch.cat(context_edge_index_list, dim=1),
-            'context_edge_attr': torch.cat(context_edge_attr_list, dim=0)
+            'decoder_context': TransformerDecoderContext(torch.cat(context_edge_index_list, dim=1),
+                                                         torch.cat(context_edge_attr_list, dim=0))
         }
 
         if generate_demonstration_context:

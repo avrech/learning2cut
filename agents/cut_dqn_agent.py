@@ -286,7 +286,7 @@ class CutDQNAgent(Sepa):
             # todo old: action, q_values, decoder_context = self._select_action(cur_state)
             action_info = self._select_action(cur_state)
             selected = action_info['selected']
-            available_cuts['selected'] = action_info['selected']
+            available_cuts['selected'] = action_info['selected'].numpy()
             for k, v in action_info.items():
                 info[k] = v
 
@@ -294,7 +294,7 @@ class CutDQNAgent(Sepa):
                 # apply the action
                 if any(selected):
                     # force SCIP to take the selected cuts and discard the others
-                    self.model.forceCuts(selected)
+                    self.model.forceCuts(selected.numpy())
                     # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
                     # in order to prevent it from adding more or less cuts
                     self.model.setIntParam('separating/maxcuts', int(sum(selected)))
@@ -398,7 +398,7 @@ class CutDQNAgent(Sepa):
                 mode='inference',
                 query_action=random_action
             )
-        assert not self.select_at_least_one_cut or output['action'].any()
+        assert not self.select_at_least_one_cut or output['selected'].any()
         return output
             # todo old:
                 # if self.use_transformer:
@@ -637,7 +637,8 @@ class CutDQNAgent(Sepa):
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             # assign rewards and store transitions (s,a,r,s')
-            for step, ((state, action, q_values, transformer_decoder_context), joint_reward) in enumerate(zip(self.episode_history, R)):
+            for step, (step_info, joint_reward) in enumerate(zip(self.episode_history, R)):
+                state, action, q_values, transformer_decoder_context = step_info['state_info'], step_info['action_info'], step_info['selected_q_values'], step_info['decoder_context']
                 if self.demonstration_episode:
                     # create a decoder context corresponding to SCIP cut selection order
                     # a. get initial_edge_index_a2a and initial_edge_attr_a2a
