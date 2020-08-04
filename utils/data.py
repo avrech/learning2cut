@@ -16,11 +16,13 @@ TransitionNumpyTuple = namedtuple(
         'edge_attr_a2v',
         'edge_index_a2a',
         'edge_attr_a2a',
-        # 'edge_index_dec',
-        # 'edge_attr_dec',
-        'stats',
+        'demonstration_context_edge_index',
+        'demonstration_context_edge_attr',
+        'demonstration_action',
+        'demonstration_batch',
         'a',
         'r',
+        'stats',
         'ns_x_c',
         'ns_x_v',
         'ns_x_a',
@@ -51,13 +53,13 @@ class Transition(Data):
                  edge_attr_a2v=None,
                  edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
                  edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
-                 # edge_index_dec=None, # transformer decoder context
-                 # edge_attr_dec=None, # transformer decoder context
-                 stats=None,
-                 # action
-                 a=None,  # cuts clique graph node labels  - the action whether to apply the cut or not.
-                 # reward
-                 r=None,
+                 demonstration_context_edge_index=None,
+                 demonstration_context_edge_attr=None,
+                 demonstration_action=None,
+                 demonstration_batch=None,
+                 a=None,  # action
+                 r=None,  # reward
+                 stats=None,  # general stats, unused
                  # next_state
                  ns_x_c=None,  # tripartite graph features       - LP state
                  ns_x_v=None,
@@ -81,11 +83,13 @@ class Transition(Data):
         self.edge_attr_a2v = edge_attr_a2v
         self.edge_index_a2a = edge_index_a2a
         self.edge_attr_a2a = edge_attr_a2a
-        # self.edge_index_dec = edge_index_dec
-        # self.edge_attr_dec = edge_attr_dec
-        self.stats = stats
+        self.demonstration_context_edge_index = demonstration_context_edge_index
+        self.demonstration_context_edge_attr = demonstration_context_edge_attr
+        self.demonstration_action = demonstration_action
+        self.demonstration_batch = demonstration_batch
         self.a = a
         self.r = r
+        self.stats = stats
         self.ns_x_c = ns_x_c
         self.ns_x_v = ns_x_v
         self.ns_x_a = ns_x_a
@@ -105,14 +109,25 @@ class Transition(Data):
             return torch.tensor([[self.x_a.size(0)], [self.x_v.size(0)]])
         if key == 'edge_index_a2a':
             return self.x_a.size(0)
-        # if key == 'edge_index_dec':
-        #     return self.x_a.size(0)
         if key == 'ns_edge_index_c2v':
             return torch.tensor([[self.ns_x_c.size(0)], [self.ns_x_v.size(0)]])
         if key == 'ns_edge_index_a2v':
             return torch.tensor([[self.ns_x_a.size(0)], [self.ns_x_v.size(0)]])
         if key == 'ns_edge_index_a2a':
             return self.ns_x_a.size(0)
+        if key == 'demonstration_context_edge_index':
+            # in order to avoid duplicating cut encoding for each cut-level demonstration,
+            # we view the cuts as a bipartite graph,
+            # where the source nodes are simply the cuts encoding,
+            # and the target nodes are the candidate cuts at each transformer iteration.
+            # this actually defines multiple graphs, which are separated by demonstration_batch.
+            return torch.tensor([[self.x_a.size(0)], [self.x_a.size(0)]])
+        if key == 'demonstration_batch':
+            # demonstration_batch distinguishes between different transformer iterations within a Transition.
+            # the number of transformer iterations is the number of sub graphs withing a transition.
+            # to properly batch multiple transitions, we track the number of transformer iterations
+            # withing each transition.
+            return self.demonstration_batch[-1] + 1
         else:
             return super(Transition, self).__inc__(key, value)
 
@@ -166,8 +181,22 @@ class Transition(Data):
 
         # build the clique graph of the candidate cuts:
         # if using transformer, take the decoder context and edge_index from the input, else generate empty one
+
+        # default demonstration context
+        demonstration_context_edge_index = torch.tensor([[0], [0]], dtype=torch.long)  # dummy self loop
+        demonstration_context_edge_attr = torch.zeros(size=(1, 3), dtype=torch.float32)  # dummy edge attr. assume tqnet v3
+        demonstration_action = torch.zeros(size=(1,), dtype=torch.bool)  # dummy action
+        demonstration_batch = torch.zeros(size=(1,), dtype=torch.long)  # dummy batch
+
         if transformer_decoder_context is not None:
-            edge_index_a2a, edge_attr_a2a = transformer_decoder_context
+            edge_index_a2a, edge_attr_a2a = transformer_decoder_context['decoder_context']
+            if 'demonstration_action' in transformer_decoder_context.keys():
+                # create the extended context for computing demonstration loss in parallel
+                demonstration_context_edge_index = transformer_decoder_context['demonstration_context_edge_index']
+                demonstration_context_edge_attr = transformer_decoder_context['demonstration_context_edge_attr']
+                demonstration_action = transformer_decoder_context['demonstration_action']
+                demonstration_batch = transformer_decoder_context['demonstration_batch']
+
         else:
             # create basic edge_attr_a2a
             if x_a.shape[0] > 1:
@@ -297,11 +326,13 @@ class Transition(Data):
             edge_attr_a2v=edge_attr_a2v,
             edge_index_a2a=edge_index_a2a,
             edge_attr_a2a=edge_attr_a2a,
-            # edge_index_dec=edge_index_dec,
-            # edge_attr_dec=edge_attr_dec,
-            stats=stats,
+            demonstration_context_edge_index=demonstration_context_edge_index,
+            demonstration_context_edge_attr=demonstration_context_edge_attr,
+            demonstration_action=demonstration_action,
+            demonstration_batch=demonstration_batch,
             a=a,
             r=r,
+            stats=stats,
             ns_x_c=ns_x_c,
             ns_x_v=ns_x_v,
             ns_x_a=ns_x_a,
@@ -317,11 +348,11 @@ class Transition(Data):
         return data
 
     def as_batch(self):
-        return Batch.from_data_list([self], follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        return Batch.from_data_list([self], follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a', 'demonstration_batch', 'demonstration_action'])
 
     @staticmethod
     def create_batch(transition_list):
-        return Batch.from_data_list(transition_list, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a'])
+        return Batch.from_data_list(transition_list, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a', 'demonstration_batch', 'demonstration_action'])
 
     @staticmethod
     def get_initial_decoder_context(scip_state, tqnet_version='v3'):
