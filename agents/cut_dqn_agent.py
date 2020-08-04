@@ -650,7 +650,10 @@ class CutDQNAgent(Sepa):
 
                 # get the next n-step state and q values. if the next state is terminal
                 # return 0 as q_values (by convention)
-                next_state, next_action, next_q_values, _ = self.episode_history[step + n_steps] if step + n_steps < n_transitions else (None, None, None, None)
+                next_step_info = self.episode_history[step + n_steps] if step + n_steps < n_transitions else {}
+                next_state = next_step_info.get('state_info', None)
+                next_action = next_step_info.get('action_info', None)
+                next_q_values = next_step_info.get('selected_q_values', None)
 
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
@@ -713,7 +716,8 @@ class CutDQNAgent(Sepa):
         active_applied_ratio = []
         applied_available_ratio = []
         accuracy_list, f1_score_list = [], []
-        for _, action, _, _ in self.episode_history:
+        for info in self.episode_history:
+            action = info['action_info']
             normalized_slack = action['normalized_slack']
             # because of numerical errors, we consider as zero |value| < 1e-6
             approximately_zero = np.abs(normalized_slack) < 1e-6
@@ -761,6 +765,10 @@ class CutDQNAgent(Sepa):
 
             transitions, weights, idxes, data_ids = self.memory.sample(self.batch_size)
             is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
+            # sort demonstration transitions first:
+            argsort_demonstrations_first = is_demonstration.argsort()[::-1]
+            transitions, weights, idxes, data_ids = transitions[argsort_demonstrations_first], weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
+
             new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights), is_demonstration=is_demonstration)
             # update priorities
             self.memory.update_priorities(idxes, new_priorities, data_ids)

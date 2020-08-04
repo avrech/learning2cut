@@ -206,6 +206,10 @@ class CutDQNLearner(CutDQNAgent):
         # pop one batch and perform one SGD step
         transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
         is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
+        # sort demonstration transitions first:
+        argsort_demonstrations_first = is_demonstration.argsort()[::-1]
+        transitions, weights, idxes, data_ids = transitions[argsort_demonstrations_first], weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
+
         new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration)  # todo- sgd demonstrations
         packet = (idxes, new_priorities, data_ids)
         self.new_priorities_queue.append(packet)  # thread safe append
