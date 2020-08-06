@@ -482,6 +482,23 @@ class RemainingCutsConv(torch.nn.Module):
         # return edge_index and edge_attr also, useful for stacking modules
         return f_out, edge_index, edge_attr
 
+    def conv_demonstration(self, x, edge_index, edge_attr, aggr_idx, encoding_broadcast):
+        # attend to all src nodes
+        src, dst = edge_index
+        g_input = torch.cat([x[dst], x[src], edge_attr], dim=1)
+        g_out = self.g(g_input)
+
+        # aggregate messages sent from src to dst nodes
+        aggr_g_out = self.aggr_func(g_out, aggr_idx, dim=0)  # todo - ensure that output shape is the number of remaining cuts
+        # TODO - broadcast x to its corresponding aggr_out positions.
+        #  either generate dedicated broadcast index in demonstration loss, or compute it somehow.
+        x_broadcasted = x[encoding_broadcast]
+        # compute output features
+        f_input = torch.cat([x_broadcasted, aggr_g_out], dim=1)
+        f_out = self.f(f_input)
+
+        return f_out
+
 
 # graph self attention convolution
 class SelfAttention(MessagePassing):
@@ -575,26 +592,29 @@ class TQnet(torch.nn.Module):
         # where o_ij is the orthogonality between i and j,
         # o_iS is the min orthogonality between i and the selected group S
         decoder_edge_attr_dim = 3
-        self.decoder_conv = {
-            'RemainingCutsConv': Seq(OrderedDict([(f'remaining_cuts_conv_{i}', RemainingCutsConv(channels=hparams.get('emb_dim', 32),
-                                                                                                 edge_attr_dim=decoder_edge_attr_dim,
-                                                                                                 aggr=hparams.get('decoder_conv_aggr', 'mean')))
-                                              for i in range(hparams.get('decoder_layers', 1))])),
-            'SelfAttention': Seq(OrderedDict([(f'self_attention_{i}', SelfAttention(channels=hparams.get('emb_dim', 32),
-                                                                                    edge_attr_dim=decoder_edge_attr_dim,
-                                                                                    aggr=hparams.get('decoder_conv_aggr', 'mean')))
-                                              for i in range(hparams.get('decoder_layers', 1))])),
-            'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
-                                                                  edge_attr_dim=decoder_edge_attr_dim,
-                                                                  aggr=hparams.get('decoder_conv_aggr', 'mean')))
-                                        for i in range(hparams.get('decoder_layers', 1))])),
-            'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
-                                                                  out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
-                                                                  edge_attr_dim=decoder_edge_attr_dim,
-                                                                  edge_attr_emb=8,
-                                                                  heads=hparams.get('attention_heads', 4)))
-                                        for i in range(hparams.get('decoder_layers', 1))])),
-        }.get(hparams.get('decoder_conv', 'SelfAttention'))
+        self.decoder_conv = RemainingCutsConv(channels=hparams.get('emb_dim', 32),
+                                              edge_attr_dim=decoder_edge_attr_dim,
+                                              aggr=hparams.get('decoder_conv_aggr', 'mean'))
+        # self.decoder_conv = {
+        #     'RemainingCutsConv': Seq(OrderedDict([(f'remaining_cuts_conv_{i}', RemainingCutsConv(channels=hparams.get('emb_dim', 32),
+        #                                                                                          edge_attr_dim=decoder_edge_attr_dim,
+        #                                                                                          aggr=hparams.get('decoder_conv_aggr', 'mean')))
+        #                                       for i in range(hparams.get('decoder_layers', 1))])),
+        #     'SelfAttention': Seq(OrderedDict([(f'self_attention_{i}', SelfAttention(channels=hparams.get('emb_dim', 32),
+        #                                                                             edge_attr_dim=decoder_edge_attr_dim,
+        #                                                                             aggr=hparams.get('decoder_conv_aggr', 'mean')))
+        #                                       for i in range(hparams.get('decoder_layers', 1))])),
+        #     'CutConv': Seq(OrderedDict([(f'cut_conv_{i}', CutConv(channels=hparams.get('emb_dim', 32),
+        #                                                           edge_attr_dim=decoder_edge_attr_dim,
+        #                                                           aggr=hparams.get('decoder_conv_aggr', 'mean')))
+        #                                 for i in range(hparams.get('decoder_layers', 1))])),
+        #     'CATConv': Seq(OrderedDict([(f'cat_conv_{i}', CATConv(in_channels=hparams.get('emb_dim', 32),
+        #                                                           out_channels=hparams.get('emb_dim', 32) // hparams.get('attention_heads', 4),
+        #                                                           edge_attr_dim=decoder_edge_attr_dim,
+        #                                                           edge_attr_emb=8,
+        #                                                           heads=hparams.get('attention_heads', 4)))
+        #                                 for i in range(hparams.get('decoder_layers', 1))])),
+        # }.get(hparams.get('decoder_conv', 'SelfAttention'))
 
         ##########
         # Q head #
@@ -816,9 +836,9 @@ class TQnet(torch.nn.Module):
     @staticmethod
     def get_context(action, initial_edge_index_a2a, initial_edge_attr_a2a, selection_order=None):
         """
-        Constructs compact context according to action for parallel computing of the corresponding q values.
-        If selection_order is not None, generate extended context for learning from demonstrations,
-        as well as the expert action and batch arrays needed for batch mode training.
+        Constructs compact context according to action for parallel computing of the DQN loss q values.
+        If selection_order is not None, generate demonstration context for learning from demonstrations,
+        as well as auxiliary index arrays needed for batch mode training.
         """
         generate_demonstration_context = selection_order is not None
         # find the randomly selected cuts.
@@ -828,10 +848,14 @@ class TQnet(torch.nn.Module):
             selected_idxes = selected_idxes[torch.randperm(len(selected_idxes))]
         else:
             selected_idxes = selection_order
-            demonstration_context_edge_index_list = []
-            demonstration_context_edge_attr_list = []
-            demonstration_batch_list = []
-            demonstration_action_list = []
+            demonstration_context_edge_index_list = []  # stack of edge_index for each decoder iteration
+            demonstration_context_edge_attr_list = []   # stack of edge_attr for each decoder iteration
+            demonstration_idx_list = []                 # decoder iteration idx for computing iteration-wise operations
+            demonstration_action_list = []              # demonstrator action at each decoder iteration
+            demonstration_conv_aggr_out_idx_list = []   # map each message defined by the edge_index stack to its destination in the "remaining_cuts" stack
+            demonstration_encoding_broadcast_list = []  # map each cut encoding to all its appearances in the "remaining_cuts" stack
+            demonstration_action_index_offset = 0       # additive offset for each iteration action index
+            demonstration_aggr_index_offset = 0         # additive offset for each iteration message aggregation
 
         # initialize context
         context_edge_index = initial_edge_index_a2a
@@ -845,7 +869,7 @@ class TQnet(torch.nn.Module):
 
         # process the selected cuts first.
         # if selection_order is not None, generate also extended context for learning from demonstrations
-        for batch_id, cut_index in enumerate(selected_idxes):
+        for demonstration_idx, cut_index in enumerate(selected_idxes):
             # append to the context list the edges pointing to the selected cut,
             # and their corresponding attributes
             incoming_edges = context_edge_index[1, :] == cut_index
@@ -854,13 +878,29 @@ class TQnet(torch.nn.Module):
             context_edge_attr_list.append(incoming_attr.detach().cpu())
             context_edge_index_list.append(incoming_edge_index.detach().cpu())
             if generate_demonstration_context:
-                # append the entire edge_index and edge_attr, and create corresponding action and batch
+                # append the entire edge_index and edge_attr, so the q values will be generated for all remaining cuts
                 demonstration_context_edge_index_list.append(context_edge_index)
                 demonstration_context_edge_attr_list.append(context_edge_attr)
-                a_E = torch.zeros((len(remaining_cuts_idxes)+1, ), dtype=torch.bool)
-                a_E[remaining_cuts_idxes.index(cut_index)] = True
-                demonstration_batch_list.append(torch.full_like(a_E, fill_value=batch_id, dtype=torch.long))
-                demonstration_action_list.append(a_E)
+                # map each target node in context_edge_index
+                # to its position in remaining_cuts_idxes, so that the decoder will generate minimal size
+                # output q_values [len(remaining_cuts_idxes) x 2]
+                aggr_map = torch.empty_like(action, dtype=torch.long)
+                aggr_map[remaining_cuts_idxes] = torch.arange(len(remaining_cuts_idxes)) + demonstration_aggr_index_offset
+                conv_aggr_out_idx = aggr_map[context_edge_index[1, :]]  # set the aggregation output index for each edge
+                demonstration_conv_aggr_out_idx_list.append(conv_aggr_out_idx)
+                # store the index of the expert action
+                demonstration_action_list.append(remaining_cuts_idxes.index(cut_index) + demonstration_action_index_offset)
+                # create demonstration identifier demonstration_idx for averaging the discard values
+                demonstration_idx_list.append(torch.full(size=(len(remaining_cuts_idxes), ), fill_value=demonstration_idx, dtype=torch.long))
+                # broadcast the cuts encoding to their position in the current iteration remaining cuts prediction,
+                # such that the messages aggregated by conv_aggr_out_idx
+                # can be concatenated with the corresponding cut encoding,
+                # and generate final cut decoding
+                demonstration_encoding_broadcast_list.append(torch.tensor(remaining_cuts_idxes, dtype=torch.long))
+                # add offset for n candidates + 1 discard entry, so the index in the next iteration will start
+                # after the "discard" option of the current iteration
+                demonstration_action_index_offset += len(remaining_cuts_idxes) + 1
+                demonstration_aggr_index_offset += len(remaining_cuts_idxes)
 
             # update the decoder context for the next iteration
             # a. remove the selected cut from the remaining_cuts and append to the selected_cuts
@@ -899,20 +939,24 @@ class TQnet(torch.nn.Module):
         }
 
         if generate_demonstration_context:
-            # append the context of the discard action
+            # create context for the "discard" action
             demonstration_context_edge_index_list.append(context_edge_index)
             demonstration_context_edge_attr_list.append(context_edge_attr)
-            a_E = torch.zeros((len(remaining_cuts_idxes) + 1,), dtype=torch.bool)
-            a_E[-1] = True  # set the "discard" entry to True
-            demonstration_action_list.append(a_E)
-            # append batch_id of size n_remaining_cuts and value n_selected_cuts
-            demonstration_batch_list.append(torch.full_like(a_E, fill_value=len(selected_cuts_idxes), dtype=torch.long))
+            aggr_map = torch.empty_like(action, dtype=torch.long)
+            aggr_map[remaining_cuts_idxes] = torch.arange(len(remaining_cuts_idxes)) + demonstration_aggr_index_offset
+            conv_aggr_out_idx = aggr_map[context_edge_index[1, :]]  # set the aggregation output index for each edge
+            demonstration_conv_aggr_out_idx_list.append(conv_aggr_out_idx)
+            demonstration_action_list.append(len(remaining_cuts_idxes) + demonstration_action_index_offset)  # mark the "discard" option
+            demonstration_idx_list.append(torch.full(size=(len(remaining_cuts_idxes), ), fill_value=len(selected_cuts_idxes), dtype=torch.long))
+            demonstration_encoding_broadcast_list.append(torch.tensor(remaining_cuts_idxes, dtype=torch.long))
+
             # concatenate all tensors to generate the demonstration context
             output['demonstration_context_edge_index'] = torch.cat(demonstration_context_edge_index_list, dim=1)
             output['demonstration_context_edge_attr'] = torch.cat(demonstration_context_edge_attr_list, dim=0)
-            output['demonstration_action'] = torch.cat(demonstration_action_list, dim=0)
-            output['demonstration_batch'] = torch.cat(demonstration_batch_list, dim=0)
-
+            output['demonstration_action'] = torch.tensor(demonstration_action_list, dtype=torch.long)
+            output['demonstration_idx'] = torch.cat(demonstration_idx_list, dim=0)
+            output['demonstration_conv_aggr_out_idx'] = torch.cat(demonstration_conv_aggr_out_idx_list, dim=0)
+            output['demonstration_encoding_broadcast'] = torch.cat(demonstration_encoding_broadcast_list, dim=0)
         return output
 
     @staticmethod

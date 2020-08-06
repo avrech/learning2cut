@@ -19,7 +19,9 @@ TransitionNumpyTuple = namedtuple(
         'demonstration_context_edge_index',
         'demonstration_context_edge_attr',
         'demonstration_action',
-        'demonstration_batch',
+        'demonstration_idx',
+        'demonstration_conv_aggr_out_idx',
+        'demonstration_encoding_broadcast',
         'a',
         'r',
         'stats',
@@ -56,7 +58,9 @@ class Transition(Data):
                  demonstration_context_edge_index=None,
                  demonstration_context_edge_attr=None,
                  demonstration_action=None,
-                 demonstration_batch=None,
+                 demonstration_idx=None,
+                 demonstration_conv_aggr_out_idx=None,
+                 demonstration_encoding_broadcast=None,
                  a=None,  # action
                  r=None,  # reward
                  stats=None,  # general stats, unused
@@ -86,7 +90,9 @@ class Transition(Data):
         self.demonstration_context_edge_index = demonstration_context_edge_index
         self.demonstration_context_edge_attr = demonstration_context_edge_attr
         self.demonstration_action = demonstration_action
-        self.demonstration_batch = demonstration_batch
+        self.demonstration_idx = demonstration_idx
+        self.demonstration_conv_aggr_out_idx = demonstration_conv_aggr_out_idx
+        self.demonstration_encoding_broadcast = demonstration_encoding_broadcast
         self.a = a
         self.r = r
         self.stats = stats
@@ -121,13 +127,24 @@ class Transition(Data):
             # where the source nodes are simply the cuts encoding,
             # and the target nodes are the candidate cuts at each transformer iteration.
             # this actually defines multiple graphs, which are separated by demonstration_batch.
-            return torch.tensor([[self.x_a.size(0)], [self.x_a.size(0)]])
-        if key == 'demonstration_batch':
-            # demonstration_batch distinguishes between different transformer iterations within a Transition.
+            # todo - verify that we don't need to return torch.tensor([[self.x_a.size(0)], [self.x_a.size(0)]])
+            return self.x_a.size(0)
+        if key == 'demonstration_idx':
+            # demonstration_idx distinguishes between different transformer iterations within a Transition.
             # the number of transformer iterations is the number of sub graphs withing a transition.
             # to properly batch multiple transitions, we track the number of transformer iterations
-            # withing each transition.
-            return self.demonstration_batch[-1] + 1
+            # within each transition.
+            return self.demonstration_idx[-1] + 1
+        if key == 'demonstration_action':
+            # increment by the last index in demonstration action,
+            # so the next demonstration sample will be indexed
+            # starting after the current demonstration last index
+            return self.demonstration_action[-1] + 1
+        if key == 'demonstration_conv_aggr_out_idx' or key == 'demonstration_encoding_broadcast':
+            # increment by the number of totally evaluated cuts in the current transition,
+            # such that the the cuts of the next transition will be indexed starting after the current transition
+            # cuts stack
+            return self.demonstration_encoding_broadcast.shape[0]
         else:
             return super(Transition, self).__inc__(key, value)
 
@@ -141,7 +158,7 @@ class Transition(Data):
     @staticmethod
     def create(scip_state,
                action=None,
-               transformer_decoder_context=None,
+               info=None,
                reward=None,
                scip_next_state=None,
                tqnet_version='v3'):
@@ -149,7 +166,7 @@ class Transition(Data):
         Creates a torch_geometric.data.Data object from SCIP state
         produced by scip.Model.getState(state_format='tensor')
         :param scip_state: scip.getState(state_format='tensor')
-        :param transformer_decoder_context: required only if using transformer
+        :param info: required only if using transformer
         :param action: np.ndarray
         :param reward: np.ndarray
         :param scip_next_state: scip.getState(state_format='tensor')
@@ -185,18 +202,20 @@ class Transition(Data):
         # default demonstration context
         demonstration_context_edge_index = torch.tensor([[0], [0]], dtype=torch.long)  # dummy self loop
         demonstration_context_edge_attr = torch.zeros(size=(1, 3), dtype=torch.float32)  # dummy edge attr. assume tqnet v3
-        demonstration_action = torch.zeros(size=(1,), dtype=torch.bool)  # dummy action
-        demonstration_batch = torch.zeros(size=(1,), dtype=torch.long)  # dummy batch
-
-        if transformer_decoder_context is not None:
-            edge_index_a2a, edge_attr_a2a = transformer_decoder_context['decoder_context']
-            if 'demonstration_action' in transformer_decoder_context.keys():
+        demonstration_action = torch.zeros(size=(1,), dtype=torch.long)  # dummy action
+        demonstration_idx = torch.zeros(size=(1,), dtype=torch.long)  # dummy idx
+        demonstration_conv_aggr_out_idx = torch.zeros(size=(1,), dtype=torch.long)  # dummy idx
+        demonstration_encoding_broadcast = torch.zeros(size=(1,), dtype=torch.long)  # dummy idx
+        if info is not None:
+            edge_index_a2a, edge_attr_a2a = info['decoder_context']
+            if 'demonstration_action' in info.keys():
                 # create the extended context for computing demonstration loss in parallel
-                demonstration_context_edge_index = transformer_decoder_context['demonstration_context_edge_index']
-                demonstration_context_edge_attr = transformer_decoder_context['demonstration_context_edge_attr']
-                demonstration_action = transformer_decoder_context['demonstration_action']
-                demonstration_batch = transformer_decoder_context['demonstration_batch']
-
+                demonstration_context_edge_index = info['demonstration_context_edge_index']
+                demonstration_context_edge_attr = info['demonstration_context_edge_attr']
+                demonstration_action = info['demonstration_action']
+                demonstration_idx = info['demonstration_idx']
+                demonstration_conv_aggr_out_idx = info['demonstration_conv_aggr_out_idx']
+                demonstration_encoding_broadcast = info['demonstration_encoding_broadcast']
         else:
             # create basic edge_attr_a2a
             if x_a.shape[0] > 1:
@@ -329,7 +348,9 @@ class Transition(Data):
             demonstration_context_edge_index=demonstration_context_edge_index,
             demonstration_context_edge_attr=demonstration_context_edge_attr,
             demonstration_action=demonstration_action,
-            demonstration_batch=demonstration_batch,
+            demonstration_idx=demonstration_idx,
+            demonstration_conv_aggr_out_idx=demonstration_conv_aggr_out_idx,
+            demonstration_encoding_broadcast=demonstration_encoding_broadcast,
             a=a,
             r=r,
             stats=stats,
@@ -348,11 +369,11 @@ class Transition(Data):
         return data
 
     def as_batch(self):
-        return Batch.from_data_list([self], follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a', 'demonstration_batch', 'demonstration_action'])
+        return Batch.from_data_list([self], follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a', 'demonstration_idx', 'demonstration_action'])
 
     @staticmethod
     def create_batch(transition_list):
-        return Batch.from_data_list(transition_list, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a', 'demonstration_batch', 'demonstration_action'])
+        return Batch.from_data_list(transition_list, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a', 'demonstration_idx', 'demonstration_action'])
 
     @staticmethod
     def get_initial_decoder_context(scip_state, tqnet_version='v3'):
