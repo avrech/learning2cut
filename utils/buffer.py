@@ -117,7 +117,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         transition, initial_priority, is_demonstration = data
         idx = self.next_idx
         if idx < self.n_demonstrations and not is_demonstration:
-            # ignore non-demonstration data if in demonstrations collection phase.
+            # ignore non-demonstration data if we are in demonstrations collection phase.
             return 0
         super().add(transition)
         # assign unique id to data

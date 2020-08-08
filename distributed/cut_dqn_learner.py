@@ -9,7 +9,7 @@ from utils.data import Transition
 import os
 from torch.utils.tensorboard import SummaryWriter
 import threading
-
+import numpy as np
 
 class CutDQNLearner(CutDQNAgent):
     """
@@ -205,7 +205,7 @@ class CutDQNLearner(CutDQNAgent):
 
         # pop one batch and perform one SGD step
         transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
-        is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
+        is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
         # sort demonstration transitions first:
         argsort_demonstrations_first = is_demonstration.argsort()[::-1]
         transitions, weights, idxes, data_ids = transitions[argsort_demonstrations_first], weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]

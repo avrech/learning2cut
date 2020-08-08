@@ -766,7 +766,8 @@ class CutDQNAgent(Sepa):
             # todo sample with beta
 
             transitions, weights, idxes, data_ids = self.memory.sample(self.batch_size)
-            is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
+            is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
+            # is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
             # sort demonstration transitions first:
             argsort_demonstrations_first = is_demonstration.argsort()[::-1]
             transitions = [transitions[idx] for idx in argsort_demonstrations_first]

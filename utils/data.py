@@ -16,6 +16,7 @@ TransitionNumpyTuple = namedtuple(
         'edge_attr_a2v',
         'edge_index_a2a',
         'edge_attr_a2a',
+        'is_demonstration',
         'demonstration_context_edge_index',
         'demonstration_context_edge_attr',
         'demonstration_action',
@@ -55,6 +56,7 @@ class Transition(Data):
                  edge_attr_a2v=None,
                  edge_index_a2a=None,  # cuts clique graph edge index   - fully connected
                  edge_attr_a2a=None,  # cuts clique graph edge weights - orthogonality between each two cuts
+                 is_demonstration=None,
                  demonstration_context_edge_index=None,
                  demonstration_context_edge_attr=None,
                  demonstration_action=None,
@@ -87,6 +89,7 @@ class Transition(Data):
         self.edge_attr_a2v = edge_attr_a2v
         self.edge_index_a2a = edge_index_a2a
         self.edge_attr_a2a = edge_attr_a2a
+        self.is_demonstration = is_demonstration
         self.demonstration_context_edge_index = demonstration_context_edge_index
         self.demonstration_context_edge_attr = demonstration_context_edge_attr
         self.demonstration_action = demonstration_action
@@ -200,6 +203,7 @@ class Transition(Data):
         # if using transformer, take the decoder context and edge_index from the input, else generate empty one
 
         # default demonstration context
+        is_demonstration = torch.zeros((1,), dtype=torch.bool)
         demonstration_context_edge_index = torch.tensor([[0], [0]], dtype=torch.long)  # dummy self loop
         demonstration_context_edge_attr = torch.zeros(size=(1, 3), dtype=torch.float32)  # dummy edge attr. assume tqnet v3
         demonstration_action = torch.zeros(size=(1,), dtype=torch.long)  # dummy action
@@ -210,6 +214,7 @@ class Transition(Data):
             edge_index_a2a, edge_attr_a2a = info['decoder_context']
             if 'demonstration_action' in info.keys():
                 # create the extended context for computing demonstration loss in parallel
+                is_demonstration = torch.ones((1,), dtype=torch.bool)
                 demonstration_context_edge_index = info['demonstration_context_edge_index']
                 demonstration_context_edge_attr = info['demonstration_context_edge_attr']
                 demonstration_action = info['demonstration_action']
@@ -345,6 +350,7 @@ class Transition(Data):
             edge_attr_a2v=edge_attr_a2v,
             edge_index_a2a=edge_index_a2a,
             edge_attr_a2a=edge_attr_a2a,
+            is_demonstration=is_demonstration,
             demonstration_context_edge_index=demonstration_context_edge_index,
             demonstration_context_edge_attr=demonstration_context_edge_attr,
             demonstration_action=demonstration_action,
