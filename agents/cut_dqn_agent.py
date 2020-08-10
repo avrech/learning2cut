@@ -400,76 +400,6 @@ class CutDQNAgent(Sepa):
             )
         assert not self.select_at_least_one_cut or output['selected'].any()
         return output
-            # todo old:
-                # if self.use_transformer:
-                #     # todo- verification v3
-                #     # the action is not necessarily q_values.argmax(dim=1).
-                #     # take the action constructed internally in the transformer, and the corresponding q_values
-                #     greedy_q_values = output['q_values'].gather(1, output['action'].long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
-                #     # greedy_q_values = q_values.gather(1, self.policy_net.decoder_greedy_action.long().unsqueeze(1)).detach().cpu()  # todo - verification return the relevant q values only
-                #     greedy_action = output['action'].numpy()  # self.policy_net.decoder_greedy_action.numpy()
-                #     # return also the decoder context to store for backprop
-                #     greedy_action_decoder_context = output['decoder_context']
-                #     # greedy_action_decoder_context = self.policy_net.decoder_context
-                # else:
-                #     greedy_q_values, greedy_action = output['q_values'].max(1)  # todo - verification
-                #     greedy_action = greedy_action.cpu().numpy().astype(np.bool)  # todo - verify detach()
-                #     greedy_q_values = greedy_q_values.cpu()  # todo - detach() is not necessary due to torch.no_grad()
-                #     greedy_action_decoder_context = None
-                #
-                # return greedy_action, greedy_q_values, greedy_action_decoder_context
-            # else:
-            #     # randomize action
-            #     random_action = torch.randint_like(batch.a, low=0, high=2, dtype=torch.float32).cpu()
-            #     if self.select_at_least_one_cut and random_action.sum() == 0:
-            #         # select a cut arbitrarily
-            #         random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = 1
-            #
-            #     # for prioritized experience replay we need the q_values to compute the initial priorities
-            #     # whether we take a random action or not.
-            #     # For transformer, we compute the random action q_values based on the random decoder context,
-            #     # and we do it in parallel like we do in sgd_step()
-            #     # For non-transformer model, it doesn't affect anything
-            #     output = self.policy_net(
-            #         x_c=batch.x_c,
-            #         x_v=batch.x_v,
-            #         x_a=batch.x_a,
-            #         edge_index_c2v=batch.edge_index_c2v,
-            #         edge_index_a2v=batch.edge_index_a2v,
-            #         edge_attr_c2v=batch.edge_attr_c2v,
-            #         edge_attr_a2v=batch.edge_attr_a2v,
-            #         edge_index_a2a=batch.edge_index_a2a,
-            #         edge_attr_a2a=batch.edge_attr_a2a,
-            #         query_action=random_action  # for transformer to set context
-            #     )
-            #     random_action_decoder_context = output['decoder_context'] if self.use_transformer else None
-            #     random_action_q_values = output['q_values'].detach().cpu().gather(1, random_action.long().unsqueeze(1))  # todo - verification. take the relevant q_values only.
-            #     random_action = random_action.numpy().astype(np.bool)
-            #     return random_action, random_action_q_values, random_action_decoder_context
-        # else:
-        #     # in test time, take greedy action
-        #     with torch.no_grad():
-        #         output = self.policy_net(
-        #             x_c=batch.x_c,
-        #             x_v=batch.x_v,
-        #             x_a=batch.x_a,
-        #             edge_index_c2v=batch.edge_index_c2v,
-        #             edge_index_a2v=batch.edge_index_a2v,
-        #             edge_attr_c2v=batch.edge_attr_c2v,
-        #             edge_attr_a2v=batch.edge_attr_a2v,
-        #             edge_index_a2a=batch.edge_index_a2a,
-        #             edge_attr_a2a=batch.edge_attr_a2a
-        #         )
-        #         # todo enforce select_at_least_one_cut.
-        #         #  in tqnet v2 it is enforced internally, so that the decoder_greedy_action is valid.
-        #         if self.use_transformer:
-        #             greedy_action = output['action'].numpy()
-        #         else:
-        #             greedy_action = output['q_values'].max(1)[1].cpu().numpy().astype(np.bool)
-        #         assert not self.select_at_least_one_cut or any(greedy_action)
-        #         # return None, None for q_values and decoder context,
-        #         # since they are used only while generating experience
-        #         return greedy_action, None, None
 
     # done
     def finish_episode(self):
@@ -1774,7 +1704,8 @@ class CutDQNAgent(Sepa):
 
             # evaluate periodically
             self.evaluate()
-
+            if self.hparams.get('replay_buffer_n_demonstrations', 0) > 0:
+                self.evaluate(eval_demonstration=True)
         return 0
 
     # done
