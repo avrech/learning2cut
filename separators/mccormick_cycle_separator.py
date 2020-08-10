@@ -486,8 +486,9 @@ class MccormickCycleSeparator(Sepa):
                 scip_result = SCIP_RESULT.CUTOFF
             else:
                 scip_result = SCIP_RESULT.SEPARATED
+            cut_added = True
+
         model.releaseRow(cut)
-        cut_added = True
         return {"result": scip_result}, cut_added
 
     def is_valid_inequality(self, x_coef, y_coef, cutrhs):

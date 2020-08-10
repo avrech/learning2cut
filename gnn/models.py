@@ -938,8 +938,8 @@ class TQnet(torch.nn.Module):
                                                          torch.cat(context_edge_attr_list, dim=0))
         }
 
-        if generate_demonstration_context:
-            # create context for the "discard" action
+        if generate_demonstration_context and len(remaining_cuts_idxes) > 0:
+            # create context for the "discard" action if any cut was discarded
             demonstration_context_edge_index_list.append(context_edge_index)
             demonstration_context_edge_attr_list.append(context_edge_attr)
             aggr_map = torch.empty_like(action, dtype=torch.long)
