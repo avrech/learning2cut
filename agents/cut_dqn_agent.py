@@ -452,6 +452,13 @@ class CutDQNAgent(Sepa):
             self.terminal_state = 'OPTIMAL'
         elif self.terminal_state and self.model.getGap() > 0:
             self.terminal_state = 'DIDNOTFIND'
+            # todo
+            #  the episode terminated unexpectedly, generating a bad reward,
+            #  so terminate and discard trajectory.
+            #  observed reason: the generated cuts were probably so weak, so they were considered as non-efficacious.
+            #  in this case they are discarded inside the cycle cuts generator, and SCIP, as it has no other choice,
+            #  decides to branch.
+            return []
 
         assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'DIDNOTFIND', 'EMPTY_ACTION']
         assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
