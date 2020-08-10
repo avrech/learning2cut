@@ -143,11 +143,13 @@ class Transition(Data):
             # so the next demonstration sample will be indexed
             # starting after the current demonstration last index
             return self.demonstration_action[-1] + 1
-        if key == 'demonstration_conv_aggr_out_idx' or key == 'demonstration_encoding_broadcast':
-            # increment by the number of totally evaluated cuts in the current transition,
-            # such that the the cuts of the next transition will be indexed starting after the current transition
-            # cuts stack
+        if key == 'demonstration_conv_aggr_out_idx':
+            # increment by the number of totally evaluated cuts in the current transition cuts
             return self.demonstration_encoding_broadcast.shape[0]
+        if key == 'demonstration_encoding_broadcast':
+            # increment by the number of cuts in the current transition,
+            # so that the cuts of the next transition will be indexed starting after the current transition cuts
+            return self.x_a.shape[0]
         else:
             return super(Transition, self).__inc__(key, value)
 
