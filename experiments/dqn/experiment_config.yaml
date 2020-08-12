@@ -24,6 +24,7 @@ dqn_objective: db_auc  # options: db_auc, gap_auc
 empty_action_penalty: 0
 select_at_least_one_cut: True
 update_rule: DQN
+discard_bad_experience: True  # discard training episodes which terminated before LP_ITERATIONS_LIMIT due to weak cuts
 
 # LEARNING FROM DEMONSTRATIONS
 n_step_loss_coef: 1.0

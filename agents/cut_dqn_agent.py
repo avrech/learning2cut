@@ -455,10 +455,14 @@ class CutDQNAgent(Sepa):
             # todo
             #  the episode terminated unexpectedly, generating a bad reward,
             #  so terminate and discard trajectory.
-            #  observed reason: the generated cuts were probably so weak, so they were considered as non-efficacious.
-            #  in this case they are discarded inside the cycle cuts generator, and SCIP, as it has no other choice,
-            #  decides to branch.
-            return []
+            #  observed reason: the generated cuts were very weak. They were considered as non-efficacious,
+            #  and were discarded inside the cycle cuts generator. SCIP, as it has no other choice,
+            #  decides to branch and terminates due to the root only constraint.
+            # while generating experience we discard the episode trajectory to avoid extremely bad rewards from
+            # biasing the agent too much.
+            # in evaluation episodes we process it as is.
+            if self.hparams.get('discard_bad_experience', True) and self.training:
+                return []
 
         assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'DIDNOTFIND', 'EMPTY_ACTION']
         assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
@@ -529,7 +533,7 @@ class CutDQNAgent(Sepa):
     def _compute_rewards_and_stats(self):
         """
         Compute action-wise reward and store (s,a,r,s') transitions in memory
-        By the way, compute so metrics for plotting, e.g.
+        By the way, compute some stats for logging, e.g.
         1. dualbound auc,
         2. gap auc,
         3. nactive/napplied,
