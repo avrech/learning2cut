@@ -450,6 +450,13 @@ class CutDQNAgent(Sepa):
             pass
         elif self.terminal_state and self.model.getGap() == 0:
             self.terminal_state = 'OPTIMAL'
+            # todo: correct gap stats
+            #  the model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
+            #  last transition stats. The dualbound is correct indeed, but probably SCIP update its internal gap function
+            #  only after terminating the optimization. So we need now to correct this record.
+            self.episode_stats['gap'][-1] = 0
+            assert self.episode_stats['dualbound'][-1] == self.model.getDualbound()
+            
         elif self.terminal_state and self.model.getGap() > 0:
             self.terminal_state = 'DIDNOTFIND'
             # todo
@@ -1190,16 +1197,18 @@ class CutDQNAgent(Sepa):
         A corner case is when choosing "EMPTY_ACTION" (shouldn't happen if we force selecting at least one cut)
         then the function is called immediately, and we need to add 1 to the number of lp_rounds.
         """
-        if self.finished_episode_stats or self.prev_action is None:
+        if self.finished_episode_stats:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
             return
-        self.episode_stats['ncuts'].append(self.prev_action['ncuts'])
+        # todo verify recording initial state stats before taking any action
+        self.episode_stats['ncuts'].append(0 if self.prev_action is None else self.prev_action['ncuts'] )
         self.episode_stats['ncuts_applied'].append(self.model.getNCutsApplied())
         self.episode_stats['solving_time'].append(self.model.getSolvingTime())
         self.episode_stats['processed_nodes'].append(self.model.getNNodes())
         self.episode_stats['gap'].append(self.model.getGap())
         self.episode_stats['lp_iterations'].append(self.model.getNLPIterations())
         self.episode_stats['dualbound'].append(self.model.getDualbound())
-
+        # todo - we always store the stats referring to the previous lp round action, so we need to subtract 1 from the
+        #  the current LP round counter
         if self.terminal_state and self.terminal_state == 'EMPTY_ACTION':
             self.episode_stats['lp_rounds'].append(self.model.getNLPs()+1)  # todo - check if needed to add 1 when EMPTY_ACTION
         else:
