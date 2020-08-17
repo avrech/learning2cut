@@ -29,7 +29,15 @@ mpl.rc('figure', max_open_warning=0)
 # mpl.use('agg')
 import matplotlib.pyplot as plt
 StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'action', 'q_values', 'transformer_context'))
-
+DemonstrationBatch = namedtuple('DemonstrationBatch', (
+    'context_edge_index',
+    'context_edge_attr',
+    'action',
+    'idx',
+    'conv_aggr_out_idx',
+    'encoding_broadcast',
+    'action_batch',
+))
 
 class CutDQNAgent(Sepa):
     def __init__(self, name='DQN', hparams={}, use_gpu=True, gpu_id=None, **kwargs):
@@ -454,7 +462,7 @@ class CutDQNAgent(Sepa):
             #  the model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
             #  last transition stats. The dualbound is correct indeed, but probably SCIP update its internal gap function
             #  only after terminating the optimization. So we need now to correct this record.
-            self.episode_stats['gap'][-1] = 0
+            self.episode_stats['gap'][-1] = 0.0
             assert self.episode_stats['dualbound'][-1] == self.model.getDualbound()
             
         elif self.terminal_state and self.model.getGap() > 0:
@@ -669,8 +677,8 @@ class CutDQNAgent(Sepa):
         for info in self.episode_history:
             action = info['action_info']
             normalized_slack = action['normalized_slack']
-            # because of numerical errors, we consider as zero |value| < 1e-6
-            approximately_zero = np.abs(normalized_slack) < 1e-6
+            # todo: verify with Aleks - consider slack < 1e-10 as zero
+            approximately_zero = np.abs(normalized_slack) < 1e-10
             normalized_slack[approximately_zero] = 0
 
             applied = action['applied']
@@ -714,31 +722,78 @@ class CutDQNAgent(Sepa):
             # todo sample with beta
 
             transitions, weights, idxes, data_ids = self.memory.sample(self.batch_size)
-            is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
-            # is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
-            # sort demonstration transitions first:
-            argsort_demonstrations_first = is_demonstration.argsort()[::-1]
-            transitions = [transitions[idx] for idx in argsort_demonstrations_first]
-            weights, idxes, data_ids = weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
-            is_demonstration = is_demonstration[argsort_demonstrations_first]
-            new_priorities = self.sgd_step(transitions=transitions, importance_sampling_correction_weights=torch.from_numpy(weights), is_demonstration=is_demonstration)
+            # is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
+            # # is_demonstration = idxes < self.hparams.get('replay_buffer_n_demonstrations', 0)
+            # # sort demonstration transitions first:
+            # argsort_demonstrations_first = is_demonstration.argsort()[::-1]
+            # transitions = [transitions[idx] for idx in argsort_demonstrations_first]
+            # weights, idxes, data_ids = weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
+            # is_demonstration = is_demonstration[argsort_demonstrations_first]
+            batch, weights, idxes, data_ids, is_demonstration, demonstration_batch = self.preprocess_batch(transitions, weights, idxes, data_ids)
+            new_priorities = self.sgd_step(batch=batch,
+                                           importance_sampling_correction_weights=weights,
+                                           is_demonstration=is_demonstration,
+                                           demonstration_batch=demonstration_batch)
             # update priorities
             self.memory.update_priorities(idxes, new_priorities, data_ids)
 
         else:
             # learning from demonstration is disabled with simple replay buffer.
+            # todo - update and batch before sgd_step
             transitions = self.memory.sample(self.batch_size)
-            self.sgd_step(transitions)
+            batch = Transition.create_batch(transitions)
+            self.sgd_step(batch)
+
         self.num_param_updates += 1
         if self.num_sgd_steps_done % self.hparams.get('target_update_interval', 1000) == 0:
             self.update_target()
 
-    def sgd_step(self, transitions, importance_sampling_correction_weights=None, is_demonstration=None):
+    def preprocess_batch(self, transitions, weights, idxes, data_ids):
+        # sort demonstration transitions first:
+        is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
+        argsort_demonstrations_first = is_demonstration.argsort()[::-1]
+        transitions = [transitions[idx] for idx in argsort_demonstrations_first]
+        weights, idxes, data_ids = weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
+        is_demonstration = is_demonstration[argsort_demonstrations_first]
+
+        # create pytorch-geometric batch
+        batch = Transition.create_batch(transitions)
+
+        # prepare demonstration data if any
+        if is_demonstration.any():
+            # filter non demonstration data
+            n_demonstrations = sum(is_demonstration)  # number of demonstration transitions in batch
+            # remove from edge_index (and corresponding edge_attr) edges which reference cuts of index greater than
+            max_demonstration_edge_index = sum(batch.x_a_batch < n_demonstrations) - 1
+            demonstration_edges = batch.demonstration_context_edge_index[0, :] < max_demonstration_edge_index
+
+            # demonstration_context_edge_index = batch.demonstration_context_edge_index[:, demonstration_edges]
+            # demonstration_context_edge_attr = batch.demonstration_context_edge_attr[demonstration_edges, :]
+            # demonstration_action = batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations]
+            # demonstration_idx = batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations]
+            # demonstration_conv_aggr_out_idx = batch.demonstration_conv_aggr_out_idx[demonstration_edges]
+            # demonstration_encoding_broadcast = batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations]
+            # demonstration_action_batch = batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations]
+
+            demonstration_batch = DemonstrationBatch(
+                batch.demonstration_context_edge_index[:, demonstration_edges],
+                batch.demonstration_context_edge_attr[demonstration_edges, :],
+                batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations],
+                batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations],
+                batch.demonstration_conv_aggr_out_idx[demonstration_edges],
+                batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations],
+                batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations])
+        else:
+            demonstration_batch = None
+        return batch, torch.from_numpy(weights), idxes, data_ids, is_demonstration, demonstration_batch
+
+    def sgd_step(self, batch, importance_sampling_correction_weights=None, is_demonstration=None, demonstration_batch=None):
         """ implement the basic DQN optimization step """
 
-        # old replay buffer returned transitions as separated Transition objects
-        batch = Transition.create_batch(transitions).to(self.device)  #, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
-
+        # # old replay buffer returned transitions as separated Transition objects
+        # # todo - batch before calling sgd_step to save GPU time on distributed learner
+        # batch = Transition.create_batch(transitions).to(self.device)  #, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
+        batch = batch.to(self.device)
         action_batch = batch.a
 
         # Compute Q(s, a):
@@ -777,7 +832,7 @@ class CutDQNAgent(Sepa):
         # demonstration loss:
         # TODO - currently implemented only for tqnet v3
         if is_demonstration.any():
-            demonstration_loss = self.compute_demonstration_loss(batch, policy_output['cut_encoding'], is_demonstration, importance_sampling_correction_weights)
+            demonstration_loss = self.compute_demonstration_loss(batch, policy_output['cut_encoding'], is_demonstration, demonstration_batch, importance_sampling_correction_weights)
         else:
             demonstration_loss = 0
 
@@ -916,34 +971,39 @@ class CutDQNAgent(Sepa):
         else:
             return None
 
-    def compute_demonstration_loss(self, batch, cut_encoding_batch, is_demonstration, importance_sampling_correction_weights):
+    def compute_demonstration_loss(self, batch, cut_encoding_batch, is_demonstration, demonstration_batch, importance_sampling_correction_weights):
         # todo - continue here. verify batching and everything.
         # filter non demonstration data
         n_demonstrations = sum(is_demonstration)  # number of demonstration transitions in batch
-        n_non_demonstrations = len(is_demonstration) - sum(is_demonstration)
         cut_encoding_batch = cut_encoding_batch[batch.x_a_batch < n_demonstrations]
         # remove from edge_index (and corresponding edge_attr) edges which reference cuts of index greater than
-        max_demonstration_edge_index = cut_encoding_batch.shape[0] - 1
-        demonstration_edges = batch.demonstration_context_edge_index[0, :] < max_demonstration_edge_index
-        demonstration_context_edge_index = batch.demonstration_context_edge_index[:, demonstration_edges]
-        demonstration_context_edge_attr = batch.demonstration_context_edge_attr[demonstration_edges, :]
-        demonstration_action = batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations]
-        demonstration_idx = batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations]
-        demonstration_conv_aggr_out_idx = batch.demonstration_conv_aggr_out_idx[demonstration_edges]
-        demonstration_encoding_broadcast = batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations]
-        demonstration_action_batch = batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations]
-        demonstration_idx_batch = batch.demonstration_idx_batch[batch.demonstration_idx_batch < n_demonstrations]
+        # max_demonstration_edge_index = cut_encoding_batch.shape[0] - 1
+        assert demonstration_batch.context_edge_index.max() == cut_encoding_batch.shape[0] - 1
+        # demonstration_edges = batch.demonstration_context_edge_index[0, :] < max_demonstration_edge_index
+        # demonstration_context_edge_index = batch.demonstration_context_edge_index[:, demonstration_edges]
+        # demonstration_context_edge_attr = batch.demonstration_context_edge_attr[demonstration_edges, :]
+        # demonstration_action = batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations]
+        # demonstration_idx = batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations]
+        # demonstration_conv_aggr_out_idx = batch.demonstration_conv_aggr_out_idx[demonstration_edges]
+        # demonstration_encoding_broadcast = batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations]
+        # demonstration_action_batch = batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations]
+        #
+        # demonstration_batch = DemonstrationBatch(
+        #     demonstration_context_edge_index,
+        #     demonstration_context_edge_attr,
+        #     demonstration_action,
+        #     demonstration_idx,
+        #     demonstration_conv_aggr_out_idx,
+        #     demonstration_encoding_broadcast,
+        #     demonstration_action_batch)
 
-        # todo incorrect filtering - remove
-        # if n_non_demonstrations > 0:
-        #     demonstration_context_edge_index = demonstration_context_edge_index[:, -n_non_demonstrations]
-        #     demonstration_context_edge_attr = demonstration_context_edge_attr[:-n_non_demonstrations, :]
-        #     demonstration_action = demonstration_action[:-n_non_demonstrations]
-        #     demonstration_batch = demonstration_batch[:-n_non_demonstrations]
-        #     demonstration_action_batch = demonstration_action_batch[:-n_non_demonstrations]
-        #     demonstration_batch_batch = demonstration_batch_batch[:-n_non_demonstrations]
-        #     importance_sampling_correction_weights = importance_sampling_correction_weights[:-n_non_demonstrations]
-
+        demonstration_context_edge_index = demonstration_batch[0].to(self.device)
+        demonstration_context_edge_attr = demonstration_batch[1].to(self.device)
+        demonstration_action = demonstration_batch[2].to(self.device)
+        demonstration_idx = demonstration_batch[3].to(self.device)
+        demonstration_conv_aggr_out_idx = demonstration_batch[4].to(self.device)
+        demonstration_encoding_broadcast = demonstration_batch[5].to(self.device)
+        demonstration_action_batch = demonstration_batch[6].to(self.device)
 
         # predict cut-level q values
         cut_decoding = self.policy_net.decoder_conv.conv_demonstration(
@@ -987,111 +1047,6 @@ class CutDQNAgent(Sepa):
 
         # log demonstration loss moving average
         self.demonstration_loss_moving_avg = 0.95 * self.demonstration_loss_moving_avg + 0.05 * loss.detach().cpu().numpy()
-        return loss
-
-    # todo - old - remove
-    def compute_demonstration_loss_old(self, cut_encoding_batch, cut_encoding_transition_id, transitions, is_demonstration, weights):
-        """
-        break batch cut encoding to graph level.
-        expand decoder context
-        mask irrelevant entries
-        create l(a,a_E)
-        J_E scatter_max q(s,a) + l(a,a_E) - q(s, a_E)
-
-        :param cut_encoding_transition_id:
-        :param transitions:
-        :param is_demonstration: indicate on deomnstration data
-        :param weights: importance sampling weights
-        :return: loss (scalar or array)?
-        """
-        # expand graph-level encoding
-        # todo - consider removing all edges whose target nodes will be masked anyway, and save computations.
-        encoding_list, edge_index_list, edge_attr_list, q_mask_list, large_margin_list, a_E_list, weights_list = [], [], [], [], [], [], []
-        for idx, (transition, demonstration_data, weight) in enumerate(zip(transitions, is_demonstration, weights)):
-            if not demonstration_data:
-                continue
-            encoding = cut_encoding_batch[cut_encoding_transition_id == idx]
-
-            # expand decoder input to full context
-            n = encoding.shape[0]
-            dense_attr = torch.sparse.FloatTensor(transition.edge_index_a2a, transition.edge_attr_a2a).to_dense()  # n x n x d
-            expanded_o_ij = dense_attr[:, :, :1].unsqueeze(0).expand(n, -1, -1, -1)
-            expanded_i_features = dense_attr[:, :, 1:].transpose(0, 1).unsqueeze(2).expand(-1, -1, n, -1)
-            expanded_context = torch.cat([expanded_o_ij, expanded_i_features], dim=-1)
-
-            # create Data object for each context slice, and the corresponding masks and margin
-
-            selected_cuts = transition.a.nonzero().view(-1).tolist() if transition.a.bool().any() else []
-            for i in selected_cuts:
-                context = expanded_context[i, :, :, :]
-                edge_index = (context[:, :, 0] + 1).nonzero().t()  # get matrix indices sorted
-                edge_attr = context[edge_index[0], edge_index[1], :]
-                q_mask = torch.zeros((n, 2), dtype=torch.bool)
-                q_mask[context[:, i, -1] == 1] = True  # mask the already selected cuts
-                a_E = torch.zeros((n, 2), dtype=torch.bool)
-                a_E[i, 1] = True
-                large_margin = torch.full_like(q_mask, fill_value=self.hparams.get('demonstration_large_margin', 0.1), dtype=torch.float32)
-                large_margin[a_E] = 0
-                edge_index_list.append(edge_index)
-                edge_attr_list.append(edge_attr)
-                encoding_list.append(encoding)
-                q_mask_list.append(q_mask)
-                large_margin_list.append(large_margin)
-                a_E_list.append(a_E)
-            # expand context for the first discarded cut only
-            # todo - consider penalizing for all discarded cuts, not only the first one.
-            #  it can be straightforwardly done by repeating the same computation for all discarded cuts.
-            if transition.a.logical_not().any():
-                i = transition.a.logical_not().nonzero().view(-1)[0]
-                context = expanded_context[i, :, :, :]
-                edge_index = (context[:, :, 0] + 1).nonzero().t()  # get matrix indices sorted
-                edge_attr = context[edge_index[0], edge_index[1], :]
-                q_mask = torch.zeros((n, 2), dtype=torch.bool)
-                q_mask[context[:, i, -1] == 1] = True  # mask the already selected cuts
-                q_mask[:, 0] = True   # mask the discard options
-                q_mask[i, 0] = False  # except of discard cut i
-                a_E = torch.zeros((n, 2), dtype=torch.bool)
-                a_E[i, 0] = True
-                large_margin = torch.full_like(q_mask, fill_value=self.hparams.get('demonstration_large_margin', 0.1), dtype=torch.float32)
-                large_margin[a_E] = 0
-                edge_index_list.append(edge_index)
-                edge_attr_list.append(edge_attr)
-                encoding_list.append(encoding)
-                q_mask_list.append(q_mask)
-                large_margin_list.append(large_margin)
-                a_E_list.append(a_E)
-            # broadcast the transition weight to all its related losses
-            # the number of losses is the number of selected cuts plus (1 if there are discarded cuts else 0)
-            weights_list.append(torch.full((len(selected_cuts)+transition.a.logical_not().any(), ), fill_value=weight, dtype=torch.float32))
-
-        # build helper graphs to compute the demonstration loss in parallel
-        expanded_data_list = [Data(x=x, edge_index=edge_index, edge_attr=edge_attr) for x, edge_index, edge_attr in zip(encoding_list, edge_index_list, edge_attr_list)]
-        expanded_batch = Batch.from_data_list(expanded_data_list).to(self.device)
-        batch_q_mask = torch.cat(q_mask_list, dim=0).to(self.device)
-        batch_large_margin = torch.cat(large_margin_list, dim=0).to(self.device)
-        batch_a_E = torch.cat(a_E_list, dim=0).to(self.device)
-        batch_weights = torch.cat(weights_list, dim=0).to(self.device)
-
-        # decode the full set of q values
-        x, _, _ = self.policy_net.decoder_conv((expanded_batch.x, expanded_batch.edge_index, expanded_batch.edge_attr))
-        q = self.policy_net.q(x)
-        q_a_E = q[batch_a_E]                    # expert action q values
-        q_plus_l = q + batch_large_margin       # add large margin and
-        q_plus_l[batch_q_mask] = -float('Inf')  # mask the non-relevant entries
-
-        # compute max graph-wise
-        max_q_plus_l, _ = scatter_max(q_plus_l, expanded_batch.batch, dim=0, dim_size=expanded_batch.num_graphs)
-        max_q_plus_l, _ = max_q_plus_l.max(dim=1)
-
-        # compute demonstration loss J_E = max [Q(s,a) + large margin] - Q(s, a_E)
-        losses = max_q_plus_l - q_a_E
-        loss = (losses * batch_weights).mean()
-
-        # log demonstration loss moving average
-        self.demonstration_loss_moving_avg = 0.95 * self.demonstration_loss_moving_avg + 0.05 * loss.detach().cpu().numpy()
-
-        # todo - compute accuracy
-
         return loss
 
     # done
@@ -1397,9 +1352,9 @@ class CutDQNAgent(Sepa):
         # plot imitation performance bars (in percents)
         if 'Imitation_Performance' in self.figures.keys():
             true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
-            for saqc in self.episode_history:
-                scip_action = saqc[1]['applied']
-                agent_action = saqc[1]['selected']
+            for info in self.episode_history:
+                scip_action = info['action_info'][1]['applied']
+                agent_action = info['action_info'][1]['selected']
                 true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
                 true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
                 false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])

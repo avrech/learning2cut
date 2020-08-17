@@ -125,18 +125,17 @@ class CutDQNLearner(CutDQNAgent):
             self.log_stats(info=info)
             self.save_checkpoint()
 
-    @staticmethod
-    def unpack_batch_packet(batch_packet):
-        """ inverse operation to PERServer.get_replay_data_packet() """
-        transition_numpy_tuples, weights_numpy, idxes, data_ids = pa.deserialize(batch_packet)
-        weights = torch.from_numpy(weights_numpy)
+    def unpack_batch_packet(self, batch_packet):
+        """ Prepares received data for sgd """
+        transition_numpy_tuples, weights, idxes, data_ids = pa.deserialize(batch_packet)
         transitions = [Transition.from_numpy_tuple(npt) for npt in transition_numpy_tuples]
-        return transitions, weights, idxes, data_ids
+        batch, weights, idxes, data_ids, is_demonstration = self.preprocess_batch(transitions, weights, idxes, data_ids)
+        return batch, weights, idxes, data_ids, is_demonstration
 
     def recv_batch(self, blocking=True):
         """
-        Receive a batch from replay server.
-        Return True if any batch received, otherwise False
+        Receives a batch from replay server.
+        Returns True if any batch received, otherwise False
         """
         received = False
         if blocking:
@@ -204,13 +203,9 @@ class CutDQNLearner(CutDQNAgent):
         self.idle_time_sec = idle_time_end - idle_time_start
 
         # pop one batch and perform one SGD step
-        transitions, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
-        is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
-        # sort demonstration transitions first:
-        argsort_demonstrations_first = is_demonstration.argsort()[::-1]
-        transitions, weights, idxes, data_ids = transitions[argsort_demonstrations_first], weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
+        batch, weights, idxes, data_ids, is_demonstration = self.replay_data_queue.popleft()  # thread-safe pop
 
-        new_priorities = self.sgd_step(transitions, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration)  # todo- sgd demonstrations
+        new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration)
         packet = (idxes, new_priorities, data_ids)
         self.new_priorities_queue.append(packet)  # thread safe append
         # todo verify
