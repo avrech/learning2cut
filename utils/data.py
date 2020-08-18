@@ -572,15 +572,19 @@ def get_gnn_data(scip_state, action=None, reward=None, scip_next_state=None):
     return data
 
 
-def get_data_memory(data, units='M'):
+def get_data_memory(data, units='M', exclude_demonstration_data=False):
     """
     Computes the memory consumption of torch_geometric.data.Data object in MBytes
     Counts for all torch.Tensor elements in data: x, y, edge_index, edge_attr, stats, etc.
-    :param data:
+    :param data: Transition object
+    :param units: memory units, 'M' = MBytes etc.
+    :param exclude_demonstration_data: if True, exclude data related to learning from demonstrations.
     :return:
     """
     membytes = 0
     for k in data.keys:
+        if exclude_demonstration_data and 'demonstration' in k:
+            continue
         v = data[k]
         if type(v) is torch.Tensor:
             membytes += v.element_size() * v.nelement()
