@@ -860,7 +860,7 @@ class CutDQNAgent(Sepa):
         )
         target_next_q_values = target_next_output['q_values']
         # compute the target using either DQN or DDQN formula
-        # todo: TQNet v2:
+        # todo: TQNet v3:
         #  compute the argmax across the "select" q values only.
         if self.use_transformer:
             assert self.tqnet_version == 'v3', 'v1 and v2 are no longer supported'
@@ -923,7 +923,7 @@ class CutDQNAgent(Sepa):
 
         # override with zeros the values of terminal states which are zero by convention
         max_target_next_q_values_aggr[batch.ns_terminal] = 0
-        # broadcast the next state q_values graph-wise to update all action-wise rewards
+        # broadcast the aggregated next state q_values to cut-level graph wise, to bootstrap the cut-level rewards
         target_next_q_values_broadcast = max_target_next_q_values_aggr[batch.x_a_batch]
 
         # now compute the cut-level target
@@ -933,9 +933,9 @@ class CutDQNAgent(Sepa):
         # Compute Huber loss
         # todo - support importance sampling correction - double check
         if self.use_per:
-            # broadcast each transition importance sampling weight to all its related losses
+            # broadcast each transition importance sampling weight to all its cut-level losses
             importance_sampling_correction_weights = importance_sampling_correction_weights.to(self.device)[batch.x_a_batch]
-            # multiply each action loss by its importance sampling correction weight and average
+            # multiply cut-level loss and importance sampling correction weight, and average
             n_step_loss = (importance_sampling_correction_weights * F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1), reduction='none')).mean()
         else:
             # generate equal weights for all losses
@@ -944,7 +944,7 @@ class CutDQNAgent(Sepa):
         # loss = F.smooth_l1_loss(q_values, target_q_values.unsqueeze(1)) - original pytorch example
         self.n_step_loss_moving_avg = 0.95 * self.n_step_loss_moving_avg + 0.05 * n_step_loss.detach().cpu().numpy()
 
-        # sum all losses
+        # combine all losses (DQN and demonstration loss)
         loss = self.hparams.get('n_step_loss_coef', 1.0) * n_step_loss + self.hparams.get('demonstration_loss_coef', 0.5) * demonstration_loss
 
         # Optimize the model
@@ -960,7 +960,7 @@ class CutDQNAgent(Sepa):
             # for transition, compute the norm of its TD-error
             td_error = torch.abs(q_values - target_q_values.unsqueeze(1)).detach()
             td_error = torch.clamp(td_error, min=1e-8)
-            # to compute p,q norm take power p and compute sqrt q.
+            # (to compute p,q norm take power p and compute sqrt q)
             td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch, # target index of each element in source
                                                       dim=0,                          # scattering dimension
                                                       dim_size=self.batch_size))      # output tensor size in dim after scattering
@@ -1014,13 +1014,13 @@ class CutDQNAgent(Sepa):
             encoding_broadcast=demonstration_encoding_broadcast
         )
         q_values = self.policy_net.q(cut_decoding)
-        # average discard q_values
+        # average "discard" q_values
         discard_q_values = scatter_mean(q_values[:, 0], demonstration_idx, dim=0)
         assert discard_q_values.shape[0] == demonstration_idx[-1] + 1
 
-        # interleave the select and discard q values
+        # interleave the "select" and "discard" q values
         pooled_q_values = torch.empty(size=(q_values.shape[0] + discard_q_values.shape[0],), dtype=torch.float32, device=self.device)
-        pooled_q_values[torch.arange(q_values.shape[0], device=self.device) + demonstration_idx] = q_values[:, 1]  # select q_values
+        pooled_q_values[torch.arange(q_values.shape[0], device=self.device) + demonstration_idx] = q_values[:, 1]  # "select" q_values
         discard_idxes = scatter_add(torch.ones_like(demonstration_idx, device=self.device), demonstration_idx, dim=0).cumsum(0) + torch.arange(discard_q_values.shape[0], device=self.device)
         pooled_q_values[discard_idxes] = discard_q_values
 
@@ -1033,7 +1033,7 @@ class CutDQNAgent(Sepa):
 
         # compute demonstration loss J_E = max [Q(s,a) + large margin] - Q(s, a_E)
         q_a_E = pooled_q_values[demonstration_action]
-        # todo - extend demonstration_idx with the discard entries, then average
+        # todo - extend demonstration_idx with the "discard" entries, then take max
         demonstration_idx_ext = torch.empty_like(q_plus_l, dtype=torch.long, device=self.device)
         demonstration_idx_ext[torch.arange(q_values.shape[0], device=self.device) + demonstration_idx] = demonstration_idx
         demonstration_idx_ext[discard_idxes] = torch.arange(demonstration_idx[-1] + 1, device=self.device)

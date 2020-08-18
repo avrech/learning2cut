@@ -489,7 +489,7 @@ class RemainingCutsConv(torch.nn.Module):
         g_out = self.g(g_input)
 
         # aggregate messages sent from src to dst nodes
-        aggr_g_out = self.aggr_func(g_out, aggr_idx, dim=0)  # todo - ensure that output shape is the number of remaining cuts
+        aggr_g_out = self.aggr_func(g_out, aggr_idx, dim=0)  # todo - verify that output shape is the number of remaining cuts
         # TODO - broadcast x to its corresponding aggr_out positions.
         #  either generate dedicated broadcast index in demonstration loss, or compute it somehow.
         x_broadcasted = x[encoding_broadcast]
