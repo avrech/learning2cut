@@ -129,8 +129,8 @@ class CutDQNLearner(CutDQNAgent):
         """ Prepares received data for sgd """
         transition_numpy_tuples, weights, idxes, data_ids = pa.deserialize(batch_packet)
         transitions = [Transition.from_numpy_tuple(npt) for npt in transition_numpy_tuples]
-        batch, weights, idxes, data_ids, is_demonstration = self.preprocess_batch(transitions, weights, idxes, data_ids)
-        return batch, weights, idxes, data_ids, is_demonstration
+        sgd_step_inputs = self.preprocess_batch(transitions, weights, idxes, data_ids)
+        return sgd_step_inputs
 
     def recv_batch(self, blocking=True):
         """
@@ -203,9 +203,9 @@ class CutDQNLearner(CutDQNAgent):
         self.idle_time_sec = idle_time_end - idle_time_start
 
         # pop one batch and perform one SGD step
-        batch, weights, idxes, data_ids, is_demonstration = self.replay_data_queue.popleft()  # thread-safe pop
+        batch, weights, idxes, data_ids, is_demonstration, demonstration_batch = self.replay_data_queue.popleft()  # thread-safe pop
 
-        new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration)
+        new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration, demonstration_batch=demonstration_batch)
         packet = (idxes, new_priorities, data_ids)
         self.new_priorities_queue.append(packet)  # thread safe append
         # todo verify
