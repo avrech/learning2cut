@@ -458,13 +458,22 @@ class CutDQNAgent(Sepa):
             pass
         elif self.terminal_state and self.model.getGap() == 0:
             self.terminal_state = 'OPTIMAL'
-            # todo: correct gap stats
-            #  the model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
-            #  last transition stats. The dualbound is correct indeed, but probably SCIP update its internal gap function
-            #  only after terminating the optimization. So we need now to correct this record.
-            self.episode_stats['gap'][-1] = 0.0
-            assert self.episode_stats['dualbound'][-1] == self.model.getDualbound()
-            
+            # todo: correct gap, dual bound and LP iterations records:
+            #  model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
+            #  last transition stats, so it is probably > 0 at this point.
+            #  The dualbound might also be incorrect. For example, if primal heuristics improved, and conflict analysis
+            #  or other heuristics improved the dualbound to its optimal value. As a consequence,
+            #  the dual bound recorded at the last separation round is not optimal.
+            #  In this case, the final LP iter might also be greater than the last value recorded,
+            #  If they haven't reached the limit, then we take them as is.
+            #  Otherwise, we truncate the curve as usual.
+            #  By convention, we override the last records with the final values,
+            #  and truncate the curves if necessary
+            self.episode_stats['gap'][-1] = self.model.getGap()
+            self.episode_stats['dualbound'][-1] = self.model.getDualbound()
+            self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()  # todo - subtract probing mode lp_iters if any
+            self.truncate_to_lp_iterations_limit()
+
         elif self.terminal_state and self.model.getGap() > 0:
             self.terminal_state = 'DIDNOTFIND'
             # todo
@@ -1168,9 +1177,10 @@ class CutDQNAgent(Sepa):
             self.episode_stats['lp_rounds'].append(self.model.getNLPs()+1)  # todo - check if needed to add 1 when EMPTY_ACTION
         else:
             self.episode_stats['lp_rounds'].append(self.model.getNLPs())
+        self.truncate_to_lp_iterations_limit()
 
-
-        # enforce the lp_iterations_limit
+    def truncate_to_lp_iterations_limit(self):
+        # enforce the lp_iterations_limit on the last two records
         lp_iterations_limit = self.lp_iterations_limit
         if lp_iterations_limit > 0 and self.episode_stats['lp_iterations'][-1] > lp_iterations_limit:
             # interpolate the dualbound and gap at the limit
@@ -1353,8 +1363,8 @@ class CutDQNAgent(Sepa):
         if 'Imitation_Performance' in self.figures.keys():
             true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
             for info in self.episode_history:
-                scip_action = info['action_info'][1]['applied']
-                agent_action = info['action_info'][1]['selected']
+                scip_action = info['action_info']['applied']
+                agent_action = info['action_info']['selected']
                 true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
                 true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
                 false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
@@ -1556,10 +1566,13 @@ class CutDQNAgent(Sepa):
 
     # done
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
-        # create SCIP model for G
+        # fix training scip_seed for debug purpose
+        if self.training and self.hparams.get('fix_training_scip_seed'):
+            scip_seed = self.hparams['fix_training_scip_seed']
+
+        # create a SCIP model for G, and disable default cuts
         hparams = self.hparams
-        model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts',
-                                                                            False))  # disable default cuts
+        model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))
 
         # include cycle inequalities separator with high priority
         cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
