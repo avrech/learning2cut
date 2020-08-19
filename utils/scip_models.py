@@ -87,7 +87,7 @@ def get_separator_cuts_applied(model, separator_name):
     # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
     cycle_cuts_added, cycle_cuts_applied = -2, -2
     try:
-        tmpfile = 'tmp_stats.txt'
+        tmpfile = '/tmp/tmp_stats.txt'
         model.writeStatistics(filename=tmpfile)
         with open(tmpfile, 'r') as f:
             for line in f.readlines():

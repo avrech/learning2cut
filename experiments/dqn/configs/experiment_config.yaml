@@ -28,7 +28,7 @@ discard_bad_experience: True  # discard training episodes which terminated befor
 
 # LEARNING FROM DEMONSTRATIONS
 n_step_loss_coef: 1.0
-demonstration_loss_coef: 0.5
+demonstration_loss_coef: 1.0
 demonstration_large_margin: 0.1
 
 # DQN ARCHITECTURE HPARAMS
@@ -57,14 +57,45 @@ debug: False
 debug_cuda: False
 overfit: validset25
 sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
+fix_training_scip_seed: False  # False -> use random seed, 0 < int -> fix the specified seed
 
 # SCIP STUFF
-reset_maxcuts_every_round: True  # avoid undesired unoughcuts in scip separationRoundLP
+reset_maxcuts_every_round: True  # avoid undesired "unoughcuts" in SCIPseparationRoundLP
 use_general_cuts: False
 
 # CYCLE INEQUALITIES
 chordless_only: False
 simple_cycle_only: True
+
+# DISTRIBUTED RL PARAMETERS
+
+# Learning parameters
+learner_device: cuda
+worker_device: cpu
+num_workers: 3
+num_learners: 1
+param_update_interval: 100  # number of learner.sgd_steps between workers policy update
+max_num_updates: 100000  # relevant to PER to increase beta across time
+
+# Buffer parameters
+replay_buffer_capacity: 100000
+replay_buffer_n_demonstrations: 10000
+replay_buffer_demonstration_priority_bonus: 0.0001  # todo - tune
+replay_buffer_minimum_size: 10000
+use_per: True
+priority_alpha: 0.6
+priority_beta: 0.4
+priority_beta_start: 0.4
+priority_beta_end: 1.0
+priority_beta_decay: 100000  # exponentially increase to priority_beta_end like decreasing eps_greedy
+worker_buffer_size: 1000
+local_buffer_size: 200  # todo tune this parameter on the real distributed program
+# Communication configs
+replay_server_2_workers_pubsub_port: 5554
+learner_2_workers_pubsub_port: 5555
+replay_server_2_learner_port: 5556
+learner_2_replay_server_port: 5557
+workers_2_replay_server_port: 5558
 
 # DATASETS
 # measured lp_iterations for SCIP solving at the root node only:
@@ -169,37 +200,3 @@ datasets:
     time_limit_sec: 3600
     baseline_solver: scip
     save_all_stats: True
-
-# DISTRIBUTED RL PARAMETERS
-# Environment parameters
-#env_name: PongNoFrameskip-v4 #   CartPole-v1 # LunarLander-v2 #
-#atari: True
-
-# Learning parameters
-model: Apex-DQN
-learner_device: cuda
-worker_device: cpu
-num_workers: 3
-num_learners: 1
-param_update_interval: 100  # number of learner.sgd_steps between workers policy update
-max_num_updates: 100000  # relevant to PER to increase beta across time
-
-# Buffer parameters
-replay_buffer_capacity: 100000
-replay_buffer_n_demonstrations: 10000
-replay_buffer_demonstration_priority_bonus: 0.00001  # todo - tune
-use_per: True
-priority_alpha: 0.6
-priority_beta: 0.4
-priority_beta_start: 0.4
-priority_beta_end: 1.0
-priority_beta_decay: 100000  # exponentially increase to priority_beta_end like decreasing eps_greedy
-worker_buffer_size: 1000
-local_buffer_size: 200  # todo tune this parameter on the real distributed program
-# Communication configs
-replay_server_2_workers_pubsub_port: 5554
-learner_2_workers_pubsub_port: 5555
-replay_server_2_learner_port: 5556
-learner_2_replay_server_port: 5557
-workers_2_replay_server_port: 5558
-replay_buffer_minimum_size: 10000
