@@ -64,9 +64,9 @@ reset_maxcuts_every_round: True  # avoid undesired "unoughcuts" in SCIPseparatio
 use_general_cuts: False
 
 # CYCLE INEQUALITIES
-chordless_only: False
+chordless_only: False  #
 simple_cycle_only: True
-#count_chordless_cycles: False  # set True to count how many chordless cycles applied. WARNING! time consuming!
+enable_chordality_check: False  # set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!
 
 # DISTRIBUTED RL PARAMETERS
 

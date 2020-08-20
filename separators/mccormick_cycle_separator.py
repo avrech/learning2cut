@@ -36,6 +36,7 @@ class MccormickCycleSeparator(Sepa):
         self.max_cuts_applied_root = hparams.get('max_cuts_applied_root', 100000000)
 
         # cycle separation routine
+        self.enable_chordality_check = hparams.get('enable_chordality_check', False)
         self.chordless_only = hparams.get('chordless_only', False)
         self.simple_cycle_only = hparams.get('simple_cycle_only', False)
         self._dijkstra_edge_list = None
@@ -187,12 +188,13 @@ class MccormickCycleSeparator(Sepa):
         self.stats['nsimple'].append(self.nsimple)
         self.stats['ncycles'].append(self.ncycles)
 
-        self.stats['nchordless'].append(self.nchordless)
-        if self.model.getStage() == SCIP_STAGE.SOLVING:
-            self.model.queryRows(self.current_round_cycles)
-            self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
-        else:
-            self.stats['nchordless_applied'].append(0)  # pessimistic estimate
+        if self.enable_chordality_check:
+            self.stats['nchordless'].append(self.nchordless)
+            if self.model.getStage() == SCIP_STAGE.SOLVING:
+                self.model.queryRows(self.current_round_cycles)
+                self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
+            else:
+                self.stats['nchordless_applied'].append(0)  # pessimistic estimate
 
     def separate(self):
         self.current_round_cycles = {}
@@ -294,10 +296,13 @@ class MccormickCycleSeparator(Sepa):
 
         for runs, i in enumerate(most_infeasible_nodes):
             cost, closed_walk = dijkstra_best_shortest_path(self._dijkstra_edge_list, (i, 1), (i, 2))
-            is_chordless = self.is_chordless(closed_walk)
+            if self.enable_chordality_check:
+                is_chordless = self.is_chordless(closed_walk)
+            else:
+                is_chordless = -1
             is_simple = self.is_simple_cycle(closed_walk)
             if cost < 1 \
-                    and (not self.chordless_only or is_chordless) \
+                    and (not (self.chordless_only and self.enable_chordality_check) or is_chordless) \
                     and (not self.simple_cycle_only or is_simple):
 
                 self.nchordless += is_chordless
