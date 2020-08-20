@@ -9,12 +9,9 @@ class ApeXDQN:
         self.cfg = cfg
         self.num_workers = self.cfg["num_workers"]
         self.use_gpu = use_gpu
-
-        # actors
-        # self.workers = None
-        # self.tester = None
-        # self.learner = None
-        # self.replay_server = None
+        self.learner_gpu = use_gpu and self.cfg.get('learner_gpu', True)
+        self.worker_gpu = use_gpu and self.cfg.get('worker_gpu', True)
+        self.tester_gpu = use_gpu and self.cfg.get('tester_gpu', True)
 
         # container of all ray actors
         self.actors = {f'worker_{n}': None for n in range(1, self.num_workers + 1)}
@@ -34,18 +31,19 @@ class ApeXDQN:
         the "Detached Actors" section.
         """
         # wrap base classes with ray.remote to make them remote "Actor"s
-        ray_worker = ray.remote(CutDQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
+        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(CutDQNWorker)
+        ray_tester = ray.remote(num_gpus=int(self.tester_gpu), num_cpus=1)(CutDQNWorker)
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu), num_cpus=2)(CutDQNLearner)
         ray_replay_server = ray.remote(PrioritizedReplayServer)
 
         # spawn all actors as detached actors with globally unique names.
         # those detached actors can be accessed from any driver connecting to the current ray server,
         # using the global unique names.
         for n in range(1, self.num_workers + 1):
-            self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg)
-        self.actors['tester'] = ray_worker.options(name='tester').remote('Test', hparams=self.cfg, is_tester=True)
+            self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
+        self.actors['tester'] = ray_tester.options(name='tester').remote('Test', hparams=self.cfg, use_gpu=self.tester_gpu, is_tester=True)
         # instantiate learner and run its io process in a background thread
-        self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
+        self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True)
         self.actors['replay_server'] = ray_replay_server.options(name='replay_server').remote(config=self.cfg)
 
     def train(self):
@@ -76,8 +74,9 @@ class ApeXDQN:
                 print(e)
                 running_actors[actor_name] = None
 
-        ray_worker = ray.remote(CutDQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.use_gpu), num_cpus=2)(CutDQNLearner)
+        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(CutDQNWorker)
+        ray_tester = ray.remote(num_gpus=int(self.tester_gpu), num_cpus=1)(CutDQNWorker)
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu), num_cpus=2)(CutDQNLearner)
         ray_replay_server = ray.remote(PrioritizedReplayServer)
         handles = []
         # restart all actors
@@ -94,10 +93,10 @@ class ApeXDQN:
 
             print(f'restarting {actor_name}...')
             if actor_name == 'learner':
-                learner = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
+                learner = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True)
                 handles.append(learner.run.remote())
             elif actor_name == 'tester':
-                tester = ray_worker.options(name='tester').remote('Test', hparams=self.cfg, is_tester=True)
+                tester = ray_tester.options(name='tester').remote('Test', hparams=self.cfg, is_tester=True, use_gpu=self.tester_gpu)
                 handles.append(tester.run.remote())
             elif actor_name == 'replay_server':
                 replay_server = ray_replay_server.options(name='replay_server').remote(config=self.cfg)
@@ -106,7 +105,7 @@ class ApeXDQN:
                 prefix, worker_id = actor_name.split('_')
                 worker_id = int(worker_id)
                 assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
-                worker = ray_worker.options(name=actor_name).remote(worker_id, hparams=self.cfg)
+                worker = ray_worker.options(name=actor_name).remote(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu)
                 handles.append(worker.run.remote())
         if len(handles) > 0:
             ready_ids, remaining_ids = ray.wait(handles)
@@ -128,10 +127,10 @@ class ApeXDQN:
 
         print(f'instantiating {actor_name} locally for debug...')
         if actor_name == 'learner':
-            learner = CutDQNLearner(hparams=self.cfg, use_gpu=self.use_gpu, run_io=True)
+            learner = CutDQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True)
             learner.run()
         elif actor_name == 'tester':
-            tester = CutDQNWorker('Test', hparams=self.cfg, is_tester=True)
+            tester = CutDQNWorker('Test', hparams=self.cfg, is_tester=True, use_gpu=self.tester_gpu)
             tester.run()
         elif actor_name == 'replay_server':
             replay_server = PrioritizedReplayServer(config=self.cfg)
@@ -140,5 +139,5 @@ class ApeXDQN:
             prefix, worker_id = actor_name.split('_')
             worker_id = int(worker_id)
             assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
-            worker = CutDQNWorker(worker_id, hparams=self.cfg)
+            worker = CutDQNWorker(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu)
             worker.run()

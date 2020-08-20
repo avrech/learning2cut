@@ -184,10 +184,10 @@ class MccormickCycleSeparator(Sepa):
             # finally truncate the lp_iterations to the limit
             self.stats['lp_iterations'][-1] = lp_iterations_limit
 
-        self.stats['nchordless'].append(self.nchordless)
         self.stats['nsimple'].append(self.nsimple)
         self.stats['ncycles'].append(self.ncycles)
 
+        self.stats['nchordless'].append(self.nchordless)
         if self.model.getStage() == SCIP_STAGE.SOLVING:
             self.model.queryRows(self.current_round_cycles)
             self.stats['nchordless_applied'].append(sum([cycle['applied'] for cycle in self.current_round_cycles.values() if cycle['is_chordless']]))
@@ -294,15 +294,14 @@ class MccormickCycleSeparator(Sepa):
 
         for runs, i in enumerate(most_infeasible_nodes):
             cost, closed_walk = dijkstra_best_shortest_path(self._dijkstra_edge_list, (i, 1), (i, 2))
-
+            is_chordless = self.is_chordless(closed_walk)
+            is_simple = self.is_simple_cycle(closed_walk)
             if cost < 1 \
-                    and (not self.chordless_only or self.is_chordless(closed_walk)) \
-                    and (not self.simple_cycle_only or self.is_simple_cycle(closed_walk)):
+                    and (not self.chordless_only or is_chordless) \
+                    and (not self.simple_cycle_only or is_simple):
 
-                is_chordless = self.is_chordless(closed_walk)
-                is_simple = self.is_simple_cycle(closed_walk)
-                self.nchordless += self.is_chordless(closed_walk)
-                self.nsimple += self.is_simple_cycle(closed_walk)
+                self.nchordless += is_chordless
+                self.nsimple += is_simple
                 self.ncycles += 1
 
                 cycle_edges, F, C_minus_F = [], [], []
