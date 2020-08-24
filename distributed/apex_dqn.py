@@ -127,10 +127,10 @@ class ApeXDQN:
 
         print(f'instantiating {actor_name} locally for debug...')
         if actor_name == 'learner':
-            learner = CutDQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True)
+            learner = CutDQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu, gpu_id=self.cfg.get('gpu_id', None), run_io=True)
             learner.run()
         elif actor_name == 'tester':
-            tester = CutDQNWorker('Test', hparams=self.cfg, is_tester=True, use_gpu=self.tester_gpu)
+            tester = CutDQNWorker('Test', hparams=self.cfg, is_tester=True, use_gpu=self.tester_gpu, gpu_id=self.cfg.get('gpu_id', None))
             tester.run()
         elif actor_name == 'replay_server':
             replay_server = PrioritizedReplayServer(config=self.cfg)
@@ -139,5 +139,5 @@ class ApeXDQN:
             prefix, worker_id = actor_name.split('_')
             worker_id = int(worker_id)
             assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
-            worker = CutDQNWorker(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu)
+            worker = CutDQNWorker(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu, gpu_id=self.cfg.get('gpu_id', None))
             worker.run()
