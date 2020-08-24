@@ -66,12 +66,15 @@ use_general_cuts: False
 # CYCLE INEQUALITIES
 chordless_only: False
 simple_cycle_only: True
+enable_chordality_check: True  # set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!
+record_cycles: True  # set True to record the generated cycles along test episodes.
 
 # DISTRIBUTED RL PARAMETERS
 
 # Learning parameters
-learner_device: cuda
-worker_device: cpu
+learner_gpu: True
+worker_gpu: False
+tester_gpu: True
 num_workers: 3
 num_learners: 1
 param_update_interval: 100  # number of learner.sgd_steps between workers policy update
@@ -121,6 +124,7 @@ datasets:
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
     ngraphs: 10
+    test_n_instances: 10
     barabasi_albert_m: 10
     weights: normal  # uniform01 | normal | ones
     graph_type: barabasi-albert
@@ -130,25 +134,12 @@ datasets:
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
-  testset25:
-    lp_iterations_limit: 3000
-    eval_interval: 1  # single-thread: 100, distributed: 1
-    scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
-    graph_type: barabasi-albert
-    dataset_generation_seed: 223
-    graph_size: 25
-    dataset_name: testset25
-    time_limit_sec: 600
-    baseline_solver: scip
-    save_all_stats: True
   validset50:
     lp_iterations_limit: 50000
     eval_interval: 10  # single-thread: 500, distributed: 10
-    scip_seed: [52, 176, 223]
+    scip_seed: [52, 176] #, 223]
     ngraphs: 10
+    test_n_instances: 2
     barabasi_albert_m: 10
     weights: normal  # uniform01 | normal | ones
     graph_type: barabasi-albert
@@ -158,25 +149,12 @@ datasets:
     time_limit_sec: 3600
     baseline_solver: scip
     save_all_stats: True
-  testset50:
-    lp_iterations_limit: 50000
-    eval_interval: 10  # single-thread: 500, distributed: 10
-    scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
-    graph_type: barabasi-albert
-    dataset_generation_seed: 223
-    graph_size: 50
-    dataset_name: testset50
-    time_limit_sec: 3600
-    baseline_solver: scip
-    save_all_stats: True
   validset100:
     lp_iterations_limit: 100000
     eval_interval: 50  # single-thread: 1000, distributed: 50
-    scip_seed: [52, 176, 223]
+    scip_seed: [52] #, 176, 223]
     ngraphs: 10
+    test_n_instances: 2
     barabasi_albert_m: 10
     weights: normal  # uniform01 | normal | ones
     graph_type: barabasi-albert
@@ -186,17 +164,48 @@ datasets:
     time_limit_sec: 3600
     baseline_solver: scip
     save_all_stats: True
-  testset100:
-    lp_iterations_limit: 100000
-    eval_interval: 50  # single-thread: 1000, distributed: 50
-    scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
-    graph_type: barabasi-albert
-    dataset_generation_seed: 223
-    graph_size: 100
-    dataset_name: testset100
-    time_limit_sec: 3600
-    baseline_solver: scip
-    save_all_stats: True
+#  testset25:
+#    lp_iterations_limit: 3000
+#    eval_interval: 1  # single-thread: 100, distributed: 1
+#    scip_seed: [52, 176, 223]
+#    ngraphs: 10
+#    test_n_instances: 0   # todo set back when fixing testset duplication
+#    barabasi_albert_m: 10
+#    weights: normal  # uniform01 | normal | ones
+#    graph_type: barabasi-albert
+#    dataset_generation_seed: 223
+#    graph_size: 25
+#    dataset_name: testset25
+#    time_limit_sec: 600
+#    baseline_solver: scip
+#    save_all_stats: True
+#  testset50:
+#    lp_iterations_limit: 50000
+#    eval_interval: 10  # single-thread: 500, distributed: 10
+#    scip_seed: [52, 176] #, 223]
+#    ngraphs: 10
+#    test_n_instances: 0   # todo set back when fixing testset duplication
+#    barabasi_albert_m: 10
+#    weights: normal  # uniform01 | normal | ones
+#    graph_type: barabasi-albert
+#    dataset_generation_seed: 223
+#    graph_size: 50
+#    dataset_name: testset50
+#    time_limit_sec: 3600
+#    baseline_solver: scip
+#    save_all_stats: True
+#  testset100:
+#    lp_iterations_limit: 100000
+#    eval_interval: 50  # single-thread: 1000, distributed: 50
+#    scip_seed: [223] # [52, 176, 223]
+#    ngraphs: 10
+#    test_n_instances: 0   # todo set back when fixing testset duplication
+#    barabasi_albert_m: 10
+#    weights: normal  # uniform01 | normal | ones
+#    graph_type: barabasi-albert
+#    dataset_generation_seed: 223
+#    graph_size: 100
+#    dataset_name: testset100
+#    time_limit_sec: 3600
+#    baseline_solver: scip
+#    save_all_stats: True

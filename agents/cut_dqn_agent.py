@@ -141,6 +141,9 @@ class CutDQNAgent(Sepa):
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
 
+        # tmp buffer for holding cycle-statistics
+        self.cycle_stats = None
+
         # learning from demonstrations stats
         for k in list(self.tmp_stats_buffer.keys()):
             self.tmp_stats_buffer['Demonstrations/' + k] = []
@@ -356,6 +359,18 @@ class CutDQNAgent(Sepa):
             result = {"result": SCIP_RESULT.DIDNOTFIND}
 
         return result
+
+    def prob_scip_cut_selection(self):
+        available_cuts = self.model.getCuts()
+        lp_iter = self.model.getNLPIterations()
+        self.model.startProbing()
+        for cut in available_cuts:
+            self.model.addCut()
+        self.model.probingApplyCuts()
+        cut_names = self.model.getSelectedCutsNames()
+        self.model.endProbing()
+        assert self.model.getNLPIterations() == lp_iter
+        return cut_names
 
     # done
     def _select_action(self, scip_state):
@@ -1623,6 +1638,14 @@ class CutDQNAgent(Sepa):
             # wait until the model starts learning
             return
         global_step = self.num_param_updates
+
+        # initialize cycle_stats first time
+        if self.hparams.get('record_cycles', False) and self.cycle_stats is None:
+            self.cycle_stats = {dataset_name: {inst_idx: {seed_idx: {}
+                                                          for seed_idx in dataset['scip_seed']}
+                                               for inst_idx in range(dataset['test_n_instances'])}
+                                for dataset_name, dataset in datasets.items() if 'trainset' not in dataset_name}
+
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
             if 'trainset' in dataset_name:
@@ -1630,12 +1653,13 @@ class CutDQNAgent(Sepa):
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
                 fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations'] if not eval_demonstration else ['Imitation_Performance']
                 self.init_figures(fignames,
-                                  nrows=dataset['num_instances'],
+                                  nrows=dataset['test_n_instances'],
                                   ncols=len(dataset['scip_seed']),
                                   col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
                                   row_labels=[f'inst {inst_idx}' for inst_idx in
-                                              range(dataset['num_instances'])])
-                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+                                              range(dataset['test_n_instances'])])
+
+                for inst_idx, (G, baseline) in enumerate(dataset['instances'][:dataset['test_n_instances']]):
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
                         if self.hparams.get('verbose', 0) == 2:
                             print('##################################################################################')
@@ -1645,7 +1669,23 @@ class CutDQNAgent(Sepa):
                                              scip_seed=scip_seed, demonstration_episode=eval_demonstration)
                         self.add_episode_subplot(inst_idx, seed_idx)
 
+                        # record cycles statistics
+                        if self.hparams.get('record_cycles', False):
+                            cycle_stats = {}
+                            cycle_stats['recorded_cycles'] = self.cut_generator.recorded_cycles
+                            cycle_stats['episode_stats'] = self.episode_stats
+                            cycle_stats['dualbound_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['dualbound'], t_support=self.lp_iterations_limit, reference=self.baseline['optimal_value'])
+                            cycle_stats['gap_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['gap'], t_support=self.lp_iterations_limit, reference=0)  # optimal gap is always 0
+                            self.cycle_stats[dataset_name][inst_idx][scip_seed][global_step] = cycle_stats
+                            self.cycle_stats[dataset_name][inst_idx]['G'] = G
+                            self.cycle_stats[dataset_name][inst_idx]['baseline'] = baseline
+
                 self.log_stats(save_best=('validset' in dataset_name and not eval_demonstration), plot_figures=True)
+
+        if len(self.cycle_stats['validset25'][0].values()[0]) >= 10:
+            with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
+                pickle.dump(self.cycle_stats, f)
+            self.cycle_stats = None
 
         self.set_training_mode()
 

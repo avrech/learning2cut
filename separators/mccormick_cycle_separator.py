@@ -65,6 +65,8 @@ class MccormickCycleSeparator(Sepa):
         self._cuts_applied_probing = 0
         self._lp_iterations_probing = 0
         self._lp_rounds_probing = 0
+
+        # general statistics
         self.time_spent = 0
         self.record = hparams.get('record', False)
         self.stats = {
@@ -94,6 +96,8 @@ class MccormickCycleSeparator(Sepa):
         self.nchordless = 0
         self.nsimple = 0
         self.ncycles = 0
+        self.recorded_cycles = []
+        self.record_cycles = hparams.get('record_cycles', False)
 
         # debug cutoff events
         self.debug_cutoff = hparams.get('debug_cutoff', False)
@@ -326,9 +330,16 @@ class MccormickCycleSeparator(Sepa):
                     costs.append(cost)
                     already_added.add((tuple(F), tuple(C_minus_F)))
 
+        # record cycles
+        if self.record_cycles:
+            cycles = [{'edges': cycle[0],
+                       'C_minus_F': cycle[1],
+                       'F': cycle[2],
+                       'is_chordless': cycle[3],
+                       'is_simple': cycle[4]} for cycle in violated_cycles]
+            self.recorded_cycles.append(cycles)
+
         # define how many cycles to add
-
-
         if self.criterion == 'most_violated_cycle':
             # sort the violated cycles, most violated first (lower cost):
             most_violated_cycles = np.argsort(costs)
