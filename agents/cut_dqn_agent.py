@@ -1682,7 +1682,7 @@ class CutDQNAgent(Sepa):
 
                 self.log_stats(save_best=('validset' in dataset_name and not eval_demonstration), plot_figures=True)
 
-        if len(self.cycle_stats['validset25'][0].values()[0]) >= 10:
+        if len(list(self.cycle_stats['validset25'][0].values())[0]) >= 2:
             with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
                 pickle.dump(self.cycle_stats, f)
             self.cycle_stats = None
