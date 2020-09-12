@@ -285,10 +285,11 @@ class CutDQNAgent(Sepa):
         info['state_info'], info['action_info'] = cur_state, available_cuts
 
         # validate the solver behavior
-        if self.prev_action is not None and not self.demonstration_episode:
+        if self.prev_action is not None:
             # assert that all the selected cuts were actually applied
             # otherwise, there is a bug (or maybe safety/feasibility issue?)
-            assert (self.prev_action['selected'] == self.prev_action['applied']).all()
+            selected_cuts = self.prev_action['selected_by_scip'] if self.demonstration_episode else self.prev_action['selected_by_agent']
+            assert (selected_cuts == self.prev_action['applied']).all()
 
         # if there are available cuts, select action and continue to the next state
         if available_cuts['ncuts'] > 0:
@@ -296,12 +297,20 @@ class CutDQNAgent(Sepa):
             # select an action, and get the decoder context for a case we use transformer and q_values for PER
             # todo old: action, q_values, decoder_context = self._select_action(cur_state)
             action_info = self._select_action(cur_state)
-            selected = action_info['selected']
-            available_cuts['selected'] = action_info['selected'].numpy()
+            selected = action_info['selected_by_agent']
+            available_cuts['selected_by_agent'] = action_info['selected_by_agent'].numpy()
             for k, v in action_info.items():
                 info[k] = v
 
-            if not self.demonstration_episode:
+            # prob what scip cut selection algorithm was doing had it been used
+            # todo - check overhead, and if too large then enable only in evaluate()
+            cut_names_selected_by_scip = self.prob_scip_cut_selection()
+            available_cuts['selected_by_scip'] = np.array([cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
+            if self.demonstration_episode:
+                # use SCIP's cut selection (don't do anything)
+                result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+            else:
                 # apply the action
                 if any(selected):
                     # force SCIP to take the selected cuts and discard the others
@@ -316,9 +325,10 @@ class CutDQNAgent(Sepa):
                 else:
                     # todo - This action leads to the terminal state.
                     #        SCIP may apply now heuristics which will further improve the dualbound/gap.
-                    #        However, those improvements are not related to the currently taken action.
+                    #        However, this improvement is not related to the currently taken action.
                     #        So we snapshot here the dualbound and gap and other related stats,
                     #        and set the terminal_state flag accordingly.
+                    #        NOTE - with self.select_at_least_one_cut=True this shouldn't happen
                     # force SCIP to "discard" all the available cuts by flushing the separation storage
                     self.model.clearCuts()
                     if self.hparams.get('verbose', 0) == 2:
@@ -331,9 +341,6 @@ class CutDQNAgent(Sepa):
                 # SCIP will execute the action,
                 # and return here in the next LP round -
                 # unless the instance is solved and the episode is done.
-            else:
-                # when learning from demonstrations, we use SCIP's cut selection, so don't do anything.
-                result = {"result": SCIP_RESULT.DIDNOTRUN}
 
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
@@ -365,8 +372,8 @@ class CutDQNAgent(Sepa):
         lp_iter = self.model.getNLPIterations()
         self.model.startProbing()
         for cut in available_cuts:
-            self.model.addCut()
-        self.model.probingApplyCuts()
+            self.model.addCut(cut)
+        self.model.applyCutsProbing()
         cut_names = self.model.getSelectedCutsNames()
         self.model.endProbing()
         assert self.model.getNLPIterations() == lp_iter
@@ -421,7 +428,7 @@ class CutDQNAgent(Sepa):
                 mode='inference',
                 query_action=random_action
             )
-        assert not self.select_at_least_one_cut or output['selected'].any()
+        assert not self.select_at_least_one_cut or output['selected_by_agent'].any()
         return output
 
     # done
@@ -466,8 +473,8 @@ class CutDQNAgent(Sepa):
             # we extend the dualbound curve with constant and the LP iterations to the LP_ITERATIONS_LIMIT.
             # the discarded cuts slack is not relevant anyway, since we penalize this action with constant.
             # we set it to zero.
-            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
-            self.prev_action['applied'] = np.zeros_like(self.prev_action['selected'], dtype=np.bool)
+            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected_by_agent'], dtype=np.float32)
+            self.prev_action['applied'] = np.zeros_like(self.prev_action['selected_by_agent'], dtype=np.bool)
 
         elif self.terminal_state == 'LP_ITERATIONS_LIMIT_REACHED':
             pass
@@ -527,9 +534,10 @@ class CutDQNAgent(Sepa):
                 selection_order[i] = cut['selection_order']
             self.prev_action['applied'] = applied
             self.prev_action['selection_order'] = np.argsort(selection_order)[len(selected_cuts_names)]
-            if not self.demonstration_episode:
-                # assert that the action taken by agent was actually applied
-                assert all(self.prev_action['selected'] == self.prev_action['applied'])
+
+            # assert that the action taken by agent was actually applied
+            selected_cuts = self.prev_action['selected_by_scip'] if self.demonstration_episode else self.prev_action['selected_by_agent']
+            assert all(selected_cuts == self.prev_action['applied'])
 
             assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED']
             nvars = self.model.getNVars()
@@ -553,8 +561,8 @@ class CutDQNAgent(Sepa):
             rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
             normalized_slack = rhs_slack / cuts_norm
             # assign tightness penalty only to the selected cuts.
-            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected'], dtype=np.float32)
-            self.prev_action['normalized_slack'][self.prev_action['selected']] = normalized_slack[self.prev_action['selected']]
+            self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected_by_agent'], dtype=np.float32)
+            self.prev_action['normalized_slack'][self.prev_action['selected_by_agent']] = normalized_slack[self.prev_action['selected_by_agent']]
 
             # update the rest of statistics needed to compute rewards
             self._update_episode_stats()
@@ -652,7 +660,7 @@ class CutDQNAgent(Sepa):
                     reward = joint_reward * np.ones_like(normalized_slack)
 
                 # penalize "empty" action
-                is_empty_action = np.logical_not(action['selected']).all()
+                is_empty_action = np.logical_not(action['selected_by_agent']).all()
                 if self.empty_action_penalty is not None and is_empty_action:
                     reward = np.full_like(normalized_slack, fill_value=self.empty_action_penalty)
 
@@ -668,7 +676,7 @@ class CutDQNAgent(Sepa):
                     # todo - compute initial priority for PER based on the policy q_values.
                     #        compute the TD error for each action in the current state as we do in sgd_step,
                     #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
-                    selected_action = torch.from_numpy(action['selected']).unsqueeze(1).long()  # cut-wise action
+                    selected_action = torch.from_numpy(action['selected_by_agent']).unsqueeze(1).long()  # cut-wise action
                     # q_values = q_values.gather(1, selected_action)  # gathering is done now in _select_action
                     if next_q_values is None:
                         # next state is terminal, and its q_values are 0 by convention
@@ -709,9 +717,9 @@ class CutDQNAgent(Sepa):
             is_active = normalized_slack[applied] == 0
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
-            if self.demonstration_episode:
-                accuracy_list.append(np.mean(action['applied'] == action['selected']))
-                f1_score_list.append(f1_score(action['applied'], action['selected']))
+            # if self.demonstration_episode: todo verification
+            accuracy_list.append(np.mean(action['selected_by_scip'] == action['selected_by_agent']))
+            f1_score_list.append(f1_score(action['selected_by_scip'], action['selected_by_agent']))
 
         # store episode results in tmp_stats_buffer
         db_auc = sum(dualbound_area)
@@ -725,9 +733,9 @@ class CutDQNAgent(Sepa):
             # this is evaluation round.
             self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
             self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
-        if self.demonstration_episode:
-            self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list # .append(np.mean(action['applied'] == action['selected']))
-            self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list # .append(f1_score(action['applied'], action['selected']))
+        # if self.demonstration_episode:  todo verification
+        self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list
+        self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list
 
         return trajectory
 
@@ -1154,7 +1162,7 @@ class CutDQNAgent(Sepa):
         cur_n_weak_cuts = 0
         added_cuts = set()
 
-        for cut_name, selected in zip(cut_names, self.prev_action['selected']):
+        for cut_name, selected in zip(cut_names, self.prev_action['selected_by_agent']):
             if selected:
                 if cut_name[-4:] == 'weak':
                     cur_n_weak_cuts += 1
@@ -1375,18 +1383,18 @@ class CutDQNAgent(Sepa):
             ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
 
         # plot imitation performance bars (in percents)
-        if 'Imitation_Performance' in self.figures.keys():
+        if 'Similarity_to_SCIP' in self.figures.keys():
             true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
             for info in self.episode_history:
-                scip_action = info['action_info']['applied']
-                agent_action = info['action_info']['selected']
+                scip_action = info['action_info']['selected_by_scip']
+                agent_action = info['action_info']['selected_by_agent']
                 true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
                 true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
                 false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
                 false_neg += sum(scip_action[agent_action == 0] != agent_action[agent_action == 0])
             total_ncuts = true_pos + true_neg + false_pos + false_neg
             rects = []
-            ax = self.figures['Imitation_Performance']['axes'][row, col]
+            ax = self.figures['Similarity_to_SCIP']['axes'][row, col]
             rects += ax.bar(-0.3, true_pos / total_ncuts, width=0.2, label='true pos')
             rects += ax.bar(-0.1, true_neg / total_ncuts, width=0.2, label='true neg')
             rects += ax.bar(+0.1, false_pos / total_ncuts, width=0.2, label='false pos')
@@ -1630,7 +1638,7 @@ class CutDQNAgent(Sepa):
         return trajectory
 
     # done
-    def evaluate(self, datasets=None, ignore_eval_interval=False, eval_demonstration=False):
+    def evaluate(self, datasets=None, ignore_eval_interval=False):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
@@ -1651,7 +1659,7 @@ class CutDQNAgent(Sepa):
             if 'trainset' in dataset_name:
                 continue
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
-                fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations'] if not eval_demonstration else ['Imitation_Performance']
+                fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
                 self.init_figures(fignames,
                                   nrows=dataset['test_n_instances'],
                                   ncols=len(dataset['scip_seed']),
@@ -1666,7 +1674,7 @@ class CutDQNAgent(Sepa):
                             print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
                             print('##################################################################################')
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
-                                             scip_seed=scip_seed, demonstration_episode=eval_demonstration)
+                                             scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
 
                         # record cycles statistics
@@ -1680,7 +1688,7 @@ class CutDQNAgent(Sepa):
                             self.cycle_stats[dataset_name][inst_idx]['G'] = G
                             self.cycle_stats[dataset_name][inst_idx]['baseline'] = baseline
 
-                self.log_stats(save_best=('validset' in dataset_name and not eval_demonstration), plot_figures=True)
+                self.log_stats(save_best='validset' in dataset_name, plot_figures=True)
 
         if len(list(self.cycle_stats['validset25'][0].values())[0]) >= 2:
             with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
@@ -1732,8 +1740,7 @@ class CutDQNAgent(Sepa):
 
             # evaluate periodically
             self.evaluate()
-            if self.hparams.get('replay_buffer_n_demonstrations', 0) > 0:
-                self.evaluate(eval_demonstration=True)
+
         return 0
 
     # done

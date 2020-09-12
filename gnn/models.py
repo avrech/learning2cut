@@ -666,7 +666,7 @@ class TQnet(torch.nn.Module):
                 avg_discard_q_value = q_values[query_action.logical_not(), 0].mean()
                 q_values[query_action.logical_not(), 0] = avg_discard_q_value
                 # todo old: output['q_values'] = q_values
-                output['selected'] = query_action
+                output['selected_by_agent'] = query_action
                 output['selected_q_values'] = q_values.cpu().gather(1, query_action.long().unsqueeze(1)).detach().cpu()  # todo continue
 
         elif mode == 'batch':
@@ -827,7 +827,7 @@ class TQnet(torch.nn.Module):
         decoder_context = TransformerDecoderContext(context_edge_index, context_edge_attr)
 
         output = {
-            'selected': selected,
+            'selected_by_agent': selected,
             'decoder_context': decoder_context,
             'selected_q_values': selected_q_values
         }
