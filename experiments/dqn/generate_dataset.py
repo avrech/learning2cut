@@ -56,7 +56,7 @@ def generate_graphs(configs):
         if not os.path.isdir(dataset_dir):
             os.makedirs(dataset_dir)
 
-        for graph_idx in tqdm(range(worker_ngraphs), desc=f'Worker {workerid}'):
+        for graph_idx in tqdm(range(worker_ngraphs), desc=f'Worker {workerid}: generating graphs...'):
             filepath = os.path.join(dataset_dir, f"graph_{workerid}_{graph_idx}.pkl")
             if os.path.exists(filepath):
                 with open(filepath, 'rb') as f:
@@ -118,12 +118,12 @@ def solve_graphs(config):
     m = config["barabasi_albert_m"]
     weights = config["weights"]
     seed = config["seed"]
-
+    np.random.seed(seed)
     dataset_dir = os.path.join(config['datadir'],
                                config['dataset_name'],
                                f"barabasi-albert-nmin{nmin}-nmax{nmax}-m{m}-weights-{weights}-seed{seed}")
 
-    for graph_idx in tqdm(range(worker_ngraphs), desc=f'Worker {workerid}'):
+    for graph_idx in tqdm(range(worker_ngraphs), desc=f'Worker {workerid}: solving graphs...'):
         filepath = os.path.join(dataset_dir, f"graph_{workerid}_{graph_idx}.pkl")
         with open(filepath, 'rb') as f:
             G, baseline = pickle.load(f)
@@ -303,7 +303,7 @@ if __name__ == '__main__':
                             )
     else:
         # process sequentially without threading
-        for cgf in configs:
+        for cfg in configs:
             solve_graphs(cfg)
     print('finished')
 
