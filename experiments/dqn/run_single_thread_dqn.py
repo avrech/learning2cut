@@ -15,7 +15,9 @@ if __name__ == '__main__':
                         help='path to save results')
     parser.add_argument('--datadir', type=str, default='data/maxcut',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml',
+    parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
+                        help='general experiment settings')
+    parser.add_argument('--experiment_config', type=str, default='configs/experiment_config.yaml',
                         help='general experiment settings')
     parser.add_argument('--resume-training', action='store_true',
                         help='set to load the last training status from checkpoint file')
@@ -34,8 +36,14 @@ if __name__ == '__main__':
         ptvsd.enable_attach(address=('127.0.0.1', port))
         ptvsd.wait_for_attach()
 
-    with open(args.configfile) as f:
-        hparams = yaml.load(f, Loader=yaml.FullLoader)
+    with open(args.data_config) as f:
+        data_config = yaml.load(f, Loader=yaml.FullLoader)
+
+    with open(args.experiment_config) as f:
+        experiment_config = yaml.load(f, Loader=yaml.FullLoader)
+
+    hparams = {**experiment_config, **data_config}
+
     for k, v in vars(args).items():
         hparams[k] = v
     if hparams.get('debug_cuda', False):
