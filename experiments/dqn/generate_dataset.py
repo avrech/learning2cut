@@ -119,7 +119,7 @@ def solve_graphs(worker_config):
                 worker_ngraphs = 1
             else:
                 # there is no work left to do.
-                return
+                continue
 
         nmin, nmax = dataset_config["graph_size"]['min'], dataset_config["graph_size"]['max']
         m = dataset_config["barabasi_albert_m"]
