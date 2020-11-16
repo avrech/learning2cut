@@ -29,6 +29,7 @@ def generate_graphs(configs):
     for worker_config in configs:
         nworkers = worker_config['nworkers']
         workerid = worker_config['workerid']
+        workerid = worker_config['workerid']
         datadir = worker_config['datadir']
         for dataset_config in worker_config['datasets'].values():
             ngraphs = dataset_config['ngraphs']

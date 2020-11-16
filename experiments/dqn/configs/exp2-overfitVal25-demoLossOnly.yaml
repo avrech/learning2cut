@@ -57,10 +57,10 @@ debug: False
 debug_cuda: False
 overfit: validset25
 sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
-fix_training_scip_seed: False  # False -> use random seed, 0 < int -> fix the specified seed
+fix_training_scip_seed: 0  # 0 -> use random seed, 0 < int -> fix the specified seed
 
 # SCIP STUFF
-reset_maxcuts_every_round: True  # avoid undesired "unoughcuts" in SCIPseparationRoundLP
+reset_maxcuts_every_round: True  # avoids undesired "unoughcuts" in SCIPseparationRoundLP
 use_general_cuts: False
 
 # CYCLE INEQUALITIES
