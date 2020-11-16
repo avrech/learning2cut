@@ -288,7 +288,7 @@ if __name__ == '__main__':
         cfg['workerid'] = workerid
         configs.append(cfg)
 
-    # firstly generate all graphs in the main thread and ensure no isomorphism
+    # first generate all graphs in the main thread and ensure no isomorphism
     generate_graphs(configs)
 
     if args.mp == 'mp':
