@@ -2,6 +2,7 @@
 # description: default args for dqn & maxcut experiments
 
 import argparse
+import yaml
 
 
 def str2bool(v):
@@ -88,3 +89,29 @@ parser.add_argument("--learner_2_workers_pubsub_port", type=int, default=5555, h
 parser.add_argument("--replay_server_2_learner_port", type=int, default=5556, help="port number to send batches from buffer to learner")
 parser.add_argument("--learner_2_replay_server_port", type=int, default=5557, help="port number to send back priorities from learner to buffer")
 parser.add_argument("--workers_2_replay_server_port", type=int, default=5558, help="port number to send trajectories from workers to buffer")
+
+
+def update_hparams(hparams, args):
+    # override default hparams with specified system args
+    # prioritization: 0 (highest) - specified system args, 1 - yaml, 2 - parser defaults.
+    for k, v in vars(args).items():
+        if k not in hparams.keys() or parser.get_default(k) != v:
+            hparams[k] = v
+    return hparams
+
+
+def get_hparams(args):
+    # read data specifications
+    with open(args.data_config) as f:
+        data_config = yaml.load(f, Loader=yaml.FullLoader)
+
+    # read default experiment config from yaml
+    with open(args.configfile) as f:
+        experiment_config = yaml.load(f, Loader=yaml.FullLoader)
+
+    # general hparam dict for all modules
+    hparams = {**experiment_config, **data_config}
+
+    # update hparams with system args
+    hparams = update_hparams(hparams, args)
+    return hparams

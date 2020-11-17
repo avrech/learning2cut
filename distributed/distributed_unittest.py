@@ -22,13 +22,15 @@ if __name__ == '__main__':
         a. publish new params to workers. 
         b. each worker receives new params and update policy.
     """
-    parser = argparse.ArgumentParser()
+    from experiments.dqn.default_parser import parser, get_hparams
     parser.add_argument('--logdir', type=str, default='unittest_results',
                         help='path to save results')
     parser.add_argument('--datadir', type=str, default='../experiments/dqn/data/maxcut',
                         help='path to generate/read data')
     parser.add_argument('--configfile', type=str, default='../experiments/dqn/test_config.yaml',
                         help='general experiment settings')
+    parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
+                        help='datasets config file')
     parser.add_argument('--resume-training', action='store_true',
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
@@ -39,10 +41,8 @@ if __name__ == '__main__':
                         help='gpu id to use if available')
 
     args = parser.parse_args()
-    with open(args.configfile) as f:
-        hparams = yaml.load(f, Loader=yaml.FullLoader)
-    for k, v in vars(args).items():
-        hparams[k] = v
+    hparams = get_hparams(args)
+
     if hparams.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
