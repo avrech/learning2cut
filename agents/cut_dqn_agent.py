@@ -1654,7 +1654,7 @@ class CutDQNAgent(Sepa):
         if self.hparams.get('record_cycles', False) and self.cycle_stats is None:
             self.cycle_stats = {dataset_name: {inst_idx: {seed_idx: {}
                                                           for seed_idx in dataset['scip_seed']}
-                                               for inst_idx in range(dataset['test_n_instances'])}
+                                               for inst_idx in range(dataset['num_instances'])}
                                 for dataset_name, dataset in datasets.items() if 'trainset' not in dataset_name}
 
         self.set_eval_mode()
@@ -1664,13 +1664,13 @@ class CutDQNAgent(Sepa):
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
                 fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
                 self.init_figures(fignames,
-                                  nrows=dataset['test_n_instances'],
+                                  nrows=dataset['num_instances'],
                                   ncols=len(dataset['scip_seed']),
                                   col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
                                   row_labels=[f'inst {inst_idx}' for inst_idx in
-                                              range(dataset['test_n_instances'])])
+                                              range(dataset['num_instances'])])
 
-                for inst_idx, (G, baseline) in enumerate(dataset['instances'][:dataset['test_n_instances']]):
+                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
                         if self.hparams.get('verbose', 0) == 2:
                             print('##################################################################################')
@@ -1721,10 +1721,9 @@ class CutDQNAgent(Sepa):
                 print(f'instance no. {graph_idx}, filename: {filename}')
 
             # execute episode and collect experience
+            # todo scip_seed=562696653 - probing scip action increments lp iterations by 1, from 564 to 565 after probing ends. investigate
             trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'],
-                                              demonstration_episode=(self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0)),
-                                              # scip_seed=562696653 # todo remove after debugging
-                                              )
+                                              demonstration_episode=(self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0)))
 
             # increment the counter of demonstrations done
             if self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0):
