@@ -9,7 +9,7 @@ from agents.cut_dqn_agent import CutDQNAgent
 if __name__ == '__main__':
     import argparse
     import yaml
-    from experiments.dqn.default_parser import parser
+    from experiments.dqn.default_parser import parser, get_hparams
     # parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results',
                         help='path to save results')
@@ -17,7 +17,7 @@ if __name__ == '__main__':
                         help='path to generate/read data')
     parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
                         help='general experiment settings')
-    parser.add_argument('--experiment_config', type=str, default='configs/experiment_config.yaml',
+    parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml',
                         help='general experiment settings')
     parser.add_argument('--resume-training', action='store_true',
                         help='set to load the last training status from checkpoint file')
@@ -38,22 +38,8 @@ if __name__ == '__main__':
         ptvsd.enable_attach(address=('127.0.0.1', port))
         ptvsd.wait_for_attach()
 
-    # read data specifications
-    with open(args.data_config) as f:
-        data_config = yaml.load(f, Loader=yaml.FullLoader)
-
-    # read default experiment config from yaml
-    with open(args.experiment_config) as f:
-        experiment_config = yaml.load(f, Loader=yaml.FullLoader)
-
-    # general hparam dict for all modules
-    hparams = {**experiment_config, **data_config}
-
-    # override default hparams with specified system args
-    # prioritization: 0 (highest) - specified system args, 1 - yaml, 2 - parser defaults.
-    for k, v in vars(args).items():
-        if k not in hparams.keys() or parser.get_default(k) != v:
-            hparams[k] = v
+    # get hparams for all modules
+    hparams = get_hparams(args)
 
     # set cuda debug mode
     if hparams.get('debug_cuda', False):
