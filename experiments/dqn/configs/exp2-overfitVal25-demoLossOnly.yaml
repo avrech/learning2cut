@@ -46,7 +46,7 @@ cut_conv_aggr: mean
 
 # GENERAL
 seed: 259385
-hide_scip_output: True
+hide_scip_output: False #True
 num_episodes: 2000000
 log_interval: 20
 checkpoint_interval: 20
@@ -55,7 +55,7 @@ verbose: 1
 # DEBUG FLAGS
 debug: False
 debug_cuda: False
-overfit: validset25
+overfit: validset_20_30
 sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
 fix_training_scip_seed: 0  # 0 -> use random seed, 0 < int -> fix the specified seed
 

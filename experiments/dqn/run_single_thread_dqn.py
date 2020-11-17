@@ -9,8 +9,8 @@ from agents.cut_dqn_agent import CutDQNAgent
 if __name__ == '__main__':
     import argparse
     import yaml
-
-    parser = argparse.ArgumentParser()
+    from experiments.dqn.default_parser import parser
+    # parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results',
                         help='path to save results')
     parser.add_argument('--datadir', type=str, default='data/maxcut',
@@ -29,6 +29,8 @@ if __name__ == '__main__':
                         help='use gpu if available')
 
     args = parser.parse_args()
+
+    # enable python+C debugging with vscode
     if args.mixed_debug:
         import ptvsd
         port = 3000
@@ -36,16 +38,24 @@ if __name__ == '__main__':
         ptvsd.enable_attach(address=('127.0.0.1', port))
         ptvsd.wait_for_attach()
 
+    # read data specifications
     with open(args.data_config) as f:
         data_config = yaml.load(f, Loader=yaml.FullLoader)
 
+    # read default experiment config from yaml
     with open(args.experiment_config) as f:
         experiment_config = yaml.load(f, Loader=yaml.FullLoader)
 
+    # general hparam dict for all modules
     hparams = {**experiment_config, **data_config}
 
+    # override default hparams with specified system args
+    # prioritization: 0 (highest) - specified system args, 1 - yaml, 2 - parser defaults.
     for k, v in vars(args).items():
-        hparams[k] = v
+        if k not in hparams.keys() or parser.get_default(k) != v:
+            hparams[k] = v
+
+    # set cuda debug mode
     if hparams.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 

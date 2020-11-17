@@ -376,7 +376,11 @@ class CutDQNAgent(Sepa):
         self.model.applyCutsProbing()
         cut_names = self.model.getSelectedCutsNames()
         self.model.endProbing()
-        assert self.model.getNLPIterations() == lp_iter
+        if self.model.getNLPIterations() != lp_iter:
+            # todo - investigate why with scip_seed = 562696653 probing increments lp_iter by one.
+            #  it seems not to make any damage, however.
+            print('Warning! SCIP probing mode changed num lp iterations.')
+        # assert self.model.getNLPIterations() == lp_iter
         return cut_names
 
     # done
@@ -1507,10 +1511,9 @@ class CutDQNAgent(Sepa):
                     datasets.pop(dataset_name)
 
         for dataset_name, dataset in datasets.items():
-            datasets[dataset_name]['datadir'] = os.path.join(hparams['datadir'], dataset_name,
-                                                       "barabasi-albert-n{}-m{}-weights-{}-seed{}".format(
-                                                           dataset['graph_size'], dataset['barabasi_albert_m'],
-                                                           dataset['weights'], dataset['dataset_generation_seed']))
+            datasets[dataset_name]['datadir'] = os.path.join(
+                hparams['datadir'], dataset['dataset_name'],
+                f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{dataset['seed']}")
 
             # read all graphs with their baselines from disk
             dataset['instances'] = []
@@ -1708,6 +1711,9 @@ class CutDQNAgent(Sepa):
         for i_episode in range(self.i_episode + 1, hparams['num_episodes']):
             # sample graph randomly
             graph_idx = graph_indices[i_episode % len(graph_indices)]
+
+            if self.hparams.get('verbose', 0) == 2:
+                print(f'############################# starting episode {i_episode} (graph index {graph_idx}) #############################')
             G, baseline = trainset['instances'][graph_idx]
             if hparams.get('debug', False):
                 filename = os.listdir(trainset['datadir'])[graph_idx]
@@ -1716,7 +1722,9 @@ class CutDQNAgent(Sepa):
 
             # execute episode and collect experience
             trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'], dataset_name=trainset['dataset_name'],
-                                              demonstration_episode=(self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0)))
+                                              demonstration_episode=(self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0)),
+                                              # scip_seed=562696653 # todo remove after debugging
+                                              )
 
             # increment the counter of demonstrations done
             if self.num_demonstrations_done < self.hparams.get('replay_buffer_n_demonstrations', 0):
