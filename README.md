@@ -46,7 +46,7 @@ The script will pickle a dictionary of the following structure:
 ```
 {dataset: [{seed: stats for seed in range(10)} for graph in dataset] for dataset in [`validset_20_30`, `validset_50_60`]}  
 ```  
-The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_iterations` etc. A cycle is stored as dictionary with items:
+The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_iterations` etc. A cycle is stored as a dictionary with items:
 - 'edges': a list of the edges in cycle  
 - 'F': a list of odd number of cut edges  
 - 'C_minus_F': a list of the rest of the edges  
