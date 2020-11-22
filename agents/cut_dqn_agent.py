@@ -1571,7 +1571,7 @@ class CutDQNAgent(Sepa):
             self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
             self.trainset['instances'][0][1].pop('rootonly_stats')
         else:
-            self.trainset = self.datasets['trainset25']
+            self.trainset = self.datasets['trainset_20_30']
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 
@@ -1693,7 +1693,7 @@ class CutDQNAgent(Sepa):
 
                 self.log_stats(save_best='validset' in dataset_name, plot_figures=True)
 
-        if len(list(self.cycle_stats['validset25'][0].values())[0]) >= 2:
+        if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
             with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
                 pickle.dump(self.cycle_stats, f)
             self.cycle_stats = None

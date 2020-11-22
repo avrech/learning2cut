@@ -49,7 +49,7 @@ parser.add_argument("--attention_heads", type=int, default=4, help="GATConv head
 parser.add_argument("--lp_conv_aggr", type=str, default="mean", help="lp conv aggregation")
 parser.add_argument("--cut_conv_aggr", type=str, default="mean", help="betwwen-cuts gnn aggregation")
 parser.add_argument("--seed", type=int, default=259385, help="not in use")
-parser.add_argument("--hide_scip_output", type=str2bool, nargs='?', const=True, default=False, help="avoids printing scip messages to the console")
+parser.add_argument("--hide_scip_output", type=str2bool, nargs='?', const=True, default=True, help="avoids printing scip messages to the console")
 parser.add_argument("--num_episodes", type=int, default=2000000, help="number of episodes to play")
 parser.add_argument("--log_interval", type=int, default=20, help="number of model parameters updates between logs")
 parser.add_argument("--checkpoint_interval", type=int, default=20, help="number of model param updates between consequent checkpoints")

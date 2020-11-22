@@ -85,6 +85,7 @@ class MccormickCycleSeparator(Sepa):
             'nchordless_applied': [],
         }
         self.current_round_cycles = {}
+        self.current_round_cycles_done = False
         self.nseparounds = 0
         self._sepa_cnt = 0
         self._separation_efficiency = 0
@@ -200,8 +201,17 @@ class MccormickCycleSeparator(Sepa):
             else:
                 self.stats['nchordless_applied'].append(0)  # pessimistic estimate
 
+        # record cycles
+        if self.record_cycles and len(self.current_round_cycles) > 0 and not self.current_round_cycles_done:
+            cut_names = self.model.getSelectedCutsNames()
+            for cut_name in cut_names:
+                self.current_round_cycles[cut_name]['applied'] = True
+            self.recorded_cycles.append(self.current_round_cycles)
+            self.current_round_cycles_done = True
+
     def separate(self):
         self.current_round_cycles = {}
+        self.current_round_cycles_done = False
         self.added_cuts = set()
 
         # if exceeded limit of cuts per node ,then exit and branch or whatever else.
@@ -248,6 +258,23 @@ class MccormickCycleSeparator(Sepa):
                     self.ncuts += 1
                     self.ncuts_at_cur_node += 1
                     cut_found = True
+
+        # # record cycles
+        # if self.record_cycles:
+        #     # cycles = [{'edges': cycle[0],
+        #     #            'C_minus_F': cycle[1],
+        #     #            'F': cycle[2],
+        #     #            'is_chordless': cycle[3],
+        #     #            'is_simple': cycle[4]} for cycle in violated_cycles]
+        #     # self.recorded_cycles.append(cycles)
+        #     # prob SCIP which cycles will be selected:
+        #     self.model.startProbing()
+        #     self.model.applyCutsProbing()
+        #     cut_names = self.model.getSelectedCutsNames()
+        #     self.model.endProbing()
+        #     for cut_name in cut_names:
+        #         self.current_round_cycles[cut_name]['applied'] = True
+        #     self.recorded_cycles.append(self.current_round_cycles)
 
         if cut_found:
             self._sepa_cnt += 1
@@ -330,14 +357,14 @@ class MccormickCycleSeparator(Sepa):
                     costs.append(cost)
                     already_added.add((tuple(F), tuple(C_minus_F)))
 
-        # record cycles
-        if self.record_cycles:
-            cycles = [{'edges': cycle[0],
-                       'C_minus_F': cycle[1],
-                       'F': cycle[2],
-                       'is_chordless': cycle[3],
-                       'is_simple': cycle[4]} for cycle in violated_cycles]
-            self.recorded_cycles.append(cycles)
+        # # record cycles
+        # if self.record_cycles:
+        #     cycles = [{'edges': cycle[0],
+        #                'C_minus_F': cycle[1],
+        #                'F': cycle[2],
+        #                'is_chordless': cycle[3],
+        #                'is_simple': cycle[4]} for cycle in violated_cycles]
+        #     self.recorded_cycles.append(cycles)
 
         # define how many cycles to add
         if self.criterion == 'most_violated_cycle':
@@ -393,6 +420,10 @@ class MccormickCycleSeparator(Sepa):
             # sort the violated cycles, most effective first (lower dualbound):
             strongest = np.argsort(new_dualbound)
             return np.array(violated_cycles)[strongest[:num_cycles_to_add]]
+        elif self.criterion == 'none':
+            return np.array(violated_cycles)
+        else:
+            raise ValueError
 
     def add_cut(self, violated_cycle, probing=False):
         scip_result = SCIP_RESULT.DIDNOTRUN
@@ -466,7 +497,13 @@ class MccormickCycleSeparator(Sepa):
                                        local=self.local,
                                        removable=self.removable)
         model.cacheRowExtensions(cut)
-        self.current_round_cycles[name] = {'is_chordless': is_chordless, 'is_simple': is_simple, 'applied': False}
+        self.current_round_cycles[name] = {'edges': cycle_edges,
+                                           'C_minus_F': C_minus_F,
+                                           'F': F,
+                                           'is_chordless': is_chordless,
+                                           'is_simple': is_simple,
+                                           'applied': False,
+                                           }
 
         for i, c in x_coef.items():
             if c != 0:
