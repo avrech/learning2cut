@@ -23,6 +23,14 @@ Reinforcement Learning for Cut Selection
 > git checkout ml-cutting-planes  
 > pip install --debug_option='--debug' .  
 
+4. Follow the instructions [here](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html) to install `torch_geometric`.  
+
+5. Install the rest of requirements  
+> cd learning2cut  
+> pip install -r requirements.txt  
+
+6. Sign up to [Weights & Biases](https://www.wandb.com/), and follow the [instructions](https://docs.wandb.com/quickstart) to connect your device to your `wandb` account. 
+
 ## Reproducing Datasets  
 ### Maxcut  
 Inside `learning2cut/experiments/dqn` run:  
