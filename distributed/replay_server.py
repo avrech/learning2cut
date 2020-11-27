@@ -162,7 +162,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.data_request_pub_socket.send(message)
 
     def run(self):
-        if self.config.get('resume_training', False):
+        if self.config.get('resume', False):
             self.load_checkpoint()
 
         # assert behaviour when recovering from failures / restarting replay server

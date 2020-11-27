@@ -28,6 +28,9 @@ mpl.rc('figure', max_open_warning=0)
 # mpl.rcParams['text.antialiased'] = False
 # mpl.use('agg')
 import matplotlib.pyplot as plt
+import wandb
+
+
 StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'action', 'q_values', 'transformer_context'))
 DemonstrationBatch = namedtuple('DemonstrationBatch', (
     'context_edge_index',
@@ -38,6 +41,7 @@ DemonstrationBatch = namedtuple('DemonstrationBatch', (
     'encoding_broadcast',
     'action_batch',
 ))
+
 
 class CutDQNAgent(Sepa):
     def __init__(self, name='DQN', hparams={}, use_gpu=True, gpu_id=None, **kwargs):
@@ -1247,7 +1251,7 @@ class CutDQNAgent(Sepa):
         where self.num_policy_updates is updated in
             single threaded DQN - every time optimize_model() is executed
             distributed DQN - every time the workers' policy is updated
-        Tracking the global_step is essential for "resume-training".
+        Tracking the global_step is essential for "resume".
         TODO adapt function to run on learner and workers separately.
             learner - plot loss
             worker - plot auc etc.
@@ -1255,6 +1259,9 @@ class CutDQNAgent(Sepa):
             in single thread - these are all true.
             need to separate workers' logdir in the distributed main script
         """
+        # dictionary of all metrics to log
+        log_dict = {}
+        actor_name = self.print_prefix.replace('[', '').replace(']', '').replace(' ', '') + '_'
         if global_step is None:
             global_step = self.num_param_updates
 
@@ -1263,10 +1270,10 @@ class CutDQNAgent(Sepa):
 
         if self.is_tester:
             if plot_figures:
-                self.decorate_figures()
+                self.decorate_figures()  # todo replace with wandb plot line
 
             if save_best:
-                perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])  # todo bug with (-) ?
+                perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])
                 if perf > self.best_perf[self.dataset_name]:
                     self.best_perf[self.dataset_name] = perf
                     self.save_checkpoint(filepath=os.path.join(self.logdir, f'best_{self.dataset_name}_checkpoint.pt'))
@@ -1274,9 +1281,12 @@ class CutDQNAgent(Sepa):
 
             # add episode figures (for validation and test sets only)
             if plot_figures:
-                for figname in self.figures['fignames']:
+                for figname in self.figures['fignames']: # todo replace with wandb plot line. in the meanwhile use wandb Image
                     self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
                                            global_step=global_step, walltime=cur_time_sec)
+                    # todo wandb
+                    log_dict[actor_name + self.dataset_name] = self.figures[figname]['fig']
+
 
             # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
             for k, vals in self.test_stats_buffer.items():
@@ -1287,6 +1297,9 @@ class CutDQNAgent(Sepa):
                     self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
                     self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                     self.test_stats_buffer[k] = []
+                    # todo wandb
+                    log_dict[actor_name + k + '_' + self.dataset_name] = avg
+                    log_dict[actor_name + k + '_std' + '_' + self.dataset_name] = std
 
             # sanity check
             if self.hparams.get('sanity_check', False):
@@ -1300,8 +1313,7 @@ class CutDQNAgent(Sepa):
                     std = np.std(vals)
                     print('{}: {:.4f} | '.format(k, avg), end='')
                     self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
-                    self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step,
-                                           walltime=cur_time_sec)
+                    self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                 self.sanity_check_stats['n_original_cuts'] = []
                 self.sanity_check_stats['n_duplicated_cuts'] = []
                 self.sanity_check_stats['n_weak_cuts'] = []
@@ -1316,6 +1328,10 @@ class CutDQNAgent(Sepa):
                 print('{}: {:.4f} | '.format(k, avg), end='')
                 self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
                 self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
+                # todo wandb
+                log_dict[actor_name + k + '_' + self.dataset_name] = avg
+                log_dict[actor_name + k + '_std' + '_' + self.dataset_name] = std
+
                 self.tmp_stats_buffer[k] = []
 
         if self.is_learner:
@@ -1323,8 +1339,14 @@ class CutDQNAgent(Sepa):
             print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
             print('Demonstration Loss: {:.4f} | '.format(self.demonstration_loss_moving_avg), end='')
             self.writer.add_scalar('Nstep_Loss', self.n_step_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
-            self.writer.add_scalar('Demonstration_Loss', self.n_step_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
+            self.writer.add_scalar('Demonstration_Loss', self.demonstration_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
             print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
+            # todo wandb
+            log_dict[actor_name + 'Nstep_Loss'] = self.n_step_loss_moving_avg
+            log_dict[actor_name + 'Demonstration_Loss'] = self.demonstration_loss_moving_avg
+
+        # todo log to wandb
+        wandb.log(log_dict, step=global_step)
 
         # print the additional info
         for k, v in info.items():
@@ -1584,7 +1606,7 @@ class CutDQNAgent(Sepa):
 
         # initialize agent
         self.set_training_mode()
-        if self.hparams.get('resume_training', False):
+        if self.hparams.get('resume', False):
             self.load_checkpoint()
             # initialize prioritized replay buffer internal counters, to continue beta from the point it was
             if self.use_per:
@@ -1693,10 +1715,10 @@ class CutDQNAgent(Sepa):
 
                 self.log_stats(save_best='validset' in dataset_name, plot_figures=True)
 
-        if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
-            with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
-                pickle.dump(self.cycle_stats, f)
-            self.cycle_stats = None
+        # if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
+        #     with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
+        #         pickle.dump(self.cycle_stats, f)
+        #     self.cycle_stats = None
 
         self.set_training_mode()
 

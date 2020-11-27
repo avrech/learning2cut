@@ -6,6 +6,7 @@ import ray
 import cProfile
 import pstats
 import io
+import wandb
 
 
 if __name__ == '__main__':
@@ -22,7 +23,7 @@ if __name__ == '__main__':
                         help='general experiment settings')
     parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
                         help='datasets config file')
-    parser.add_argument('--resume-training', action='store_true',
+    parser.add_argument('--resume', action='store_true',
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--gpu-id', type=int, default=None,
                         help='gpu id to use if available')
@@ -61,10 +62,18 @@ if __name__ == '__main__':
     if args.restart:
         # connect to the existing ray server
         ray.init(ignore_reinit_error=True, address='auto')
+        assert args.resume and args.run_id is not None, 'provide wandb run_id for resuming'
     else:
         # create a new ray server.
         ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
 
+    # todo wandb
+    run_id = args.run_id if args.resume else wandb.util.generate_id()
+    wandb.init(resume=args.resume,
+               id=run_id,
+               project=args.project,
+               )
+    config['run_id'] = run_id
     # instantiate apex launcher
     apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
 

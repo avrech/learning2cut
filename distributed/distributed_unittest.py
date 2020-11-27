@@ -31,7 +31,7 @@ if __name__ == '__main__':
                         help='general experiment settings')
     parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
                         help='datasets config file')
-    parser.add_argument('--resume-training', action='store_true',
+    parser.add_argument('--resume', action='store_true',
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')

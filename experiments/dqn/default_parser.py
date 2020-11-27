@@ -89,7 +89,8 @@ parser.add_argument("--learner_2_workers_pubsub_port", type=int, default=5555, h
 parser.add_argument("--replay_server_2_learner_port", type=int, default=5556, help="port number to send batches from buffer to learner")
 parser.add_argument("--learner_2_replay_server_port", type=int, default=5557, help="port number to send back priorities from learner to buffer")
 parser.add_argument("--workers_2_replay_server_port", type=int, default=5558, help="port number to send trajectories from workers to buffer")
-
+parser.add_argument("--run_id", type=str, default=None, help='wandb run id for training resume')
+parser.add_argument("--project", type=str, default='learning2cut', help='wandb project name')
 
 def update_hparams(hparams, args):
     # override default hparams with specified system args

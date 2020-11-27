@@ -5,6 +5,8 @@ The model optimizes for the dualbound integral.
 """
 import os
 from agents.cut_dqn_agent import CutDQNAgent
+import wandb
+
 
 if __name__ == '__main__':
     import argparse
@@ -19,7 +21,7 @@ if __name__ == '__main__':
                         help='general experiment settings')
     parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml',
                         help='general experiment settings')
-    parser.add_argument('--resume-training', action='store_true',
+    parser.add_argument('--resume', action='store_true',
                         help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
@@ -48,8 +50,16 @@ if __name__ == '__main__':
     # # set logdir according to hparams
     # relative_logdir = f"lr_{hparams['lr']}-nstep_{hparams['nstep_learning']}-credit_{hparams['credit_assignment']}-gamma_{hparams['gamma']}-obj_{hparams['dqn_objective']}"
     # hparams['logdir'] = os.path.join(hparams['logdir'], relative_logdir)
+    # todo wandb
+    run_id = args.run_id if args.resume else wandb.util.generate_id()
+    wandb.init(resume=args.resume,
+               id=run_id,
+               project=args.project,
+               )
+
     if not os.path.exists(args.logdir):
         os.makedirs(args.logdir)
+
 
     dqn_single_thread = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
     dqn_single_thread.train()

@@ -10,6 +10,8 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 import threading
 import numpy as np
+import wandb
+
 
 class CutDQNLearner(CutDQNAgent):
     """
@@ -35,6 +37,14 @@ class CutDQNLearner(CutDQNAgent):
         # set learner specific logdir
         learner_logdir = os.path.join(self.logdir, 'tensorboard', 'learner')
         self.writer = SummaryWriter(log_dir=learner_logdir)
+        # todo wandb
+        # we must call wandb.init in each process wandb.log is called.
+        # in distributed_unittest we shouldn't do it however.
+        wandb.init(resume=hparams['resume'],
+                   id=hparams['run_id'],
+                   project=hparams['project'],
+                   )
+
         # set checkpoint file path for learner and workers
         self.checkpoint_filepath = os.path.join(self.logdir, 'learner_checkpoint.pt')
 

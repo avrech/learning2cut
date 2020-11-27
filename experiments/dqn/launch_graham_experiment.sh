@@ -12,4 +12,4 @@
 #SBATCH --mail-type=FAIL
 #SBATCH --mail-type=REQUEUE
 #SBATCH --mail-type=ALL
-python experiment.py --configfile experiment_config.yaml --logdir $SCRATCH/dqn/results/lr0.001-gamma0.99-nstep1 --datadir $SCRATCH/dqn/data --resume-training
+python experiment.py --configfile experiment_config.yaml --logdir $SCRATCH/dqn/results/lr0.001-gamma0.99-nstep1 --datadir $SCRATCH/dqn/data --resume

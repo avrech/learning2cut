@@ -5,6 +5,7 @@ import zmq
 from agents.cut_dqn_agent import CutDQNAgent
 import os
 from torch.utils.tensorboard import SummaryWriter
+import wandb
 
 
 class CutDQNWorker(CutDQNAgent):
@@ -27,6 +28,14 @@ class CutDQNWorker(CutDQNAgent):
         # set worker specific tensorboard logdir
         worker_logdir = os.path.join(self.logdir, 'tensorboard', f'worker-{worker_id}')
         self.writer = SummaryWriter(log_dir=worker_logdir)
+        # todo wandb - set group workers
+        # we must call wandb.init in each process wandb.log is called.
+        # in distributed_unittest we shouldn't do it however.
+        wandb.init(resume=hparams['resume'],
+                   id=hparams['run_id'],
+                   project=hparams['project'],
+                   )
+
         # set special checkpoint file for tester (workers use the learner checkpoints)
         if is_tester:
             self.checkpoint_filepath = os.path.join(self.logdir, 'tester_checkpoint.pt')
