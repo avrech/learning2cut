@@ -13,22 +13,8 @@ if __name__ == '__main__':
     import yaml
     from experiments.dqn.default_parser import parser, get_hparams
     # parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', type=str, default='results',
-                        help='path to save results')
-    parser.add_argument('--datadir', type=str, default='data/maxcut',
-                        help='path to generate/read data')
-    parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
-                        help='general experiment settings')
-    parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml',
-                        help='general experiment settings')
-    parser.add_argument('--resume', action='store_true',
-                        help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
-    parser.add_argument('--gpu-id', type=int, default=None,
-                        help='gpu id to use')
-    parser.add_argument('--use-gpu', action='store_true',
-                        help='use gpu if available')
 
     args = parser.parse_args()
 
@@ -51,15 +37,17 @@ if __name__ == '__main__':
     # relative_logdir = f"lr_{hparams['lr']}-nstep_{hparams['nstep_learning']}-credit_{hparams['credit_assignment']}-gamma_{hparams['gamma']}-obj_{hparams['dqn_objective']}"
     # hparams['logdir'] = os.path.join(hparams['logdir'], relative_logdir)
     # todo wandb
-    run_id = args.run_id if args.resume else wandb.util.generate_id()
+    experiment_id = args.experiment_id if args.resume else wandb.util.generate_id()
+    hparams['experiment_id'] = experiment_id
+    hparams['experiment_dir'] = os.path.join(args.rootdir, experiment_id)
     wandb.init(resume=args.resume,
-               id=run_id,
+               id=experiment_id,
                project=args.project,
+               config=hparams
                )
 
-    if not os.path.exists(args.logdir):
-        os.makedirs(args.logdir)
-
+    if not os.path.exists(hparams['experiment_dir']):
+        os.makedirs(hparams['experiment_dir'])
 
     dqn_single_thread = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
     dqn_single_thread.train()

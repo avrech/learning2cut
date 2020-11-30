@@ -7,7 +7,7 @@ import torch
 import zmq
 from utils.data import Transition
 import os
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 import threading
 import numpy as np
 import wandb
@@ -16,8 +16,8 @@ import wandb
 class CutDQNLearner(CutDQNAgent):
     """
     This actor executes in parallel two tasks:
-        a. receive batch, send priorities and publish params.
-        b. optimize model.
+        a. receiving batches, sending priorities and publishing params.
+        b. optimizing the model.
     According to
     https://stackoverflow.com/questions/54937456/how-to-make-an-actor-do-two-things-simultaneously
     Ray's Actor.remote() cannot execute to tasks in parallel. We adopted the suggested solution in the
@@ -34,19 +34,12 @@ class CutDQNLearner(CutDQNAgent):
         # idle time monitor
         self.idle_time_sec = 0
 
-        # set learner specific logdir
-        learner_logdir = os.path.join(self.logdir, 'tensorboard', 'learner')
-        self.writer = SummaryWriter(log_dir=learner_logdir)
-        # todo wandb
-        # we must call wandb.init in each process wandb.log is called.
-        # in distributed_unittest we shouldn't do it however.
-        wandb.init(resume=hparams['resume'],
-                   id=hparams['run_id'],
-                   project=hparams['project'],
-                   )
+        # # set learner specific logdir
+        # learner_logdir = os.path.join(self.experiment_dir, 'tensorboard', 'learner')  # todo remove after wandb works
+        # self.writer = SummaryWriter(log_dir=learner_logdir)
 
         # set checkpoint file path for learner and workers
-        self.checkpoint_filepath = os.path.join(self.logdir, 'learner_checkpoint.pt')
+        self.checkpoint_filepath = os.path.join(self.experiment_dir, 'learner_checkpoint.pt')
 
         self.replay_data_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_priorities_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
@@ -75,6 +68,21 @@ class CutDQNLearner(CutDQNAgent):
         self.params_pub_socket = context.socket(zmq.PUB)
         self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
         self.initialize_training()
+
+        # todo wandb
+        # we must call wandb.init in each process wandb.log is called.
+        # in distributed_unittest we shouldn't do it however.
+        # create a config dict for comparing hparams, grouping and other operations on wandb dashboard
+        wandb_config = hparams.copy()
+        wandb_config.pop('datasets')
+        wandb_config['actor_type'] = 'learner'
+        wandb.init(resume='allow',  # hparams['resume'],
+                   id=hparams['run_ids']['learner'],
+                   project=hparams['project'],
+                   config=wandb_config,
+                   reinit=True  # for distributed_unittest.py
+                   )
+
         if run_io:
             self.background_io = threading.Thread(target=self.run_io, args=())
             self.background_io.start()

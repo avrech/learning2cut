@@ -4,6 +4,9 @@ from distributed.replay_server import PrioritizedReplayServer
 import argparse
 import yaml
 import os
+import pickle
+import wandb
+
 
 if __name__ == '__main__':
     """
@@ -23,22 +26,8 @@ if __name__ == '__main__':
         b. each worker receives new params and update policy.
     """
     from experiments.dqn.default_parser import parser, get_hparams
-    parser.add_argument('--logdir', type=str, default='unittest_results',
-                        help='path to save results')
-    parser.add_argument('--datadir', type=str, default='../experiments/dqn/data/maxcut',
-                        help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='../experiments/dqn/test_config.yaml',
-                        help='general experiment settings')
-    parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
-                        help='datasets config file')
-    parser.add_argument('--resume', action='store_true',
-                        help='set to load the last training status from checkpoint file')
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
-    parser.add_argument('--use-gpu', action='store_true',
-                        help='use gpu for learner if available')
-    parser.add_argument('--gpu-id', type=int, default=None,
-                        help='gpu id to use if available')
 
     args = parser.parse_args()
     hparams = get_hparams(args)
@@ -46,8 +35,35 @@ if __name__ == '__main__':
     if hparams.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-    if not os.path.exists(args.logdir):
-        os.makedirs(args.logdir)
+    # assign wandb run ids to the relevant actors
+    if hparams['resume']:
+        # load run ids from experiment_dir
+        experiment_dir = os.path.join(hparams['rootdir'], hparams['experiment_id'])
+        assert os.path.exists(experiment_dir), "experiment checkpoint doesn't exist. run without --resume"
+        with open(os.path.join(experiment_dir, 'run_ids.pkl'), 'rb') as f:
+            run_ids = pickle.load(f)
+        hparams['run_ids'] = run_ids
+        hparams['experiment_dir'] = experiment_dir
+        print(f'loaded wandb run_ids from {experiment_dir}')
+    else:
+        # generate run_ids
+        run_ids = {}
+        run_ids['tester'] = experiment_id = wandb.util.generate_id()  # this will be the tester run_id
+        run_ids['learner'] = wandb.util.generate_id()
+        for idx in range(1, hparams['num_workers'] + 1):
+            run_ids[f'worker_{idx}'] = wandb.util.generate_id()
+        experiment_dir = os.path.join(hparams["rootdir"], experiment_id)
+        if not os.path.exists(experiment_dir):
+            os.makedirs(experiment_dir)
+        with open(os.path.join(experiment_dir, 'run_ids.pkl'), 'wb') as f:
+            pickle.dump(run_ids, f)
+        hparams['run_ids'] = run_ids
+        hparams['experiment_dir'] = experiment_dir
+        hparams['experiment_id'] = experiment_id
+        print(f'saved wandb run_ids to {experiment_dir}')
+        print('#################################################')
+        print(f'####### starting experiment {experiment_id} #######')
+        print('#################################################')
 
     # modify hparams to fit workers and learner
     workers = [CutDQNWorker(worker_id=worker_id, hparams=hparams, use_gpu=False) for worker_id in range(1, hparams['num_workers']+1)]
@@ -112,6 +128,13 @@ if __name__ == '__main__':
         # while pulling processing the batches in another asynchronous thread.
         # here we alternate receiving a batch, processing and sending back priorities,
         # until no more waiting batches exist.
+
+        # connect to the learner's run_id
+        wandb.init(resume='allow',
+                   id=hparams['run_ids']['learner'],
+                   project=hparams['project'],
+                   reinit=True
+                   )
         while learner.recv_batch(blocking=False):
             # receive batch from replay server and push into learner.replay_data_queue
             # pull batch from queue, process and push new priorities to learner.new_priorities_queue
@@ -134,12 +157,24 @@ if __name__ == '__main__':
         for worker in workers:
             received_new_params = worker.recv_messages()
             if received_new_params:
+                # connect to the worker's run id
+                wandb.init(resume='allow',
+                           id=hparams['run_ids'][f'worker_{worker.worker_id}'],
+                           project=hparams['project'],
+                           reinit=True
+                           )
                 worker.log_stats(global_step=worker.num_param_updates - 1)
 
         # TEST WORKER
         # if new params have been published, evaluate the new policy
         received_new_params = test_worker.recv_messages()
         if received_new_params:
+            # connect to the tester's run id
+            wandb.init(resume='allow',
+                       id=hparams['run_ids']['tester'],
+                       project=hparams['project'],
+                       reinit=True
+                       )
             test_worker.evaluate()
             test_worker.save_checkpoint()
 

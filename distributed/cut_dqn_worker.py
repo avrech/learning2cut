@@ -4,7 +4,7 @@ import torch
 import zmq
 from agents.cut_dqn_agent import CutDQNAgent
 import os
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 import wandb
 
 
@@ -25,22 +25,26 @@ class CutDQNWorker(CutDQNAgent):
         self.is_tester = is_tester
         self.generate_demonstration_data = False
 
-        # set worker specific tensorboard logdir
-        worker_logdir = os.path.join(self.logdir, 'tensorboard', f'worker-{worker_id}')
-        self.writer = SummaryWriter(log_dir=worker_logdir)
-        # todo wandb - set group workers
-        # we must call wandb.init in each process wandb.log is called.
-        # in distributed_unittest we shouldn't do it however.
-        wandb.init(resume=hparams['resume'],
-                   id=hparams['run_id'],
+        # # set worker specific tensorboard logdir
+        # worker_logdir = os.path.join(self.experiment_dir, 'tensorboard', f'worker-{worker_id}')  # todo remove after wandb is verified
+        # self.writer = SummaryWriter(log_dir=worker_logdir)  # todo remove after wandb is verified
+        wandb_config = hparams.copy()
+        wandb_config.pop('datasets')
+        wandb_config['actor_type'] = 'tester' if is_tester else 'worker'
+        wandb_config['worker_id'] = worker_id
+        wandb.init(resume='allow', # hparams['resume'],
+                   id=hparams['run_ids']['tester' if is_tester else f'worker_{worker_id}'],
                    project=hparams['project'],
+                   config=wandb_config,
+                   reinit=True  # for distributed_unittest.py
                    )
+
 
         # set special checkpoint file for tester (workers use the learner checkpoints)
         if is_tester:
-            self.checkpoint_filepath = os.path.join(self.logdir, 'tester_checkpoint.pt')
+            self.checkpoint_filepath = os.path.join(self.experiment_dir, 'tester_checkpoint.pt')
         else:
-            self.checkpoint_filepath = os.path.join(self.logdir, 'learner_checkpoint.pt')
+            self.checkpoint_filepath = os.path.join(self.experiment_dir, 'learner_checkpoint.pt')
 
         self.print_prefix = f'[Worker {self.worker_id}] '
         # initialize zmq sockets

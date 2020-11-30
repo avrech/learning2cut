@@ -114,8 +114,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     hparams = get_hparams(args)
-    if not os.path.exists(args.logdir):
-        os.makedirs(args.logdir)
+    if not os.path.exists(args.experiment_dir):
+        os.makedirs(args.experiment_dir)
 
     collect_data(hparams)
     print('finished cycles_variability')

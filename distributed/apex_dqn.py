@@ -2,6 +2,9 @@ import ray
 from distributed.replay_server import PrioritizedReplayServer
 from distributed.cut_dqn_worker import CutDQNWorker
 from distributed.cut_dqn_learner import CutDQNLearner
+import os
+import pickle
+import wandb
 
 
 class ApeXDQN:
@@ -18,6 +21,31 @@ class ApeXDQN:
         self.actors['tester'] = None
         self.actors['learner'] = None
         self.actors['replay_server'] = None
+
+        # assign wandb run ids to the relevant actors
+        if cfg['resume']:
+            # load run ids from experiment_dir
+            experiment_dir = os.path.join(cfg['rootdir'], cfg['experiment_id'])
+            assert os.path.exists(experiment_dir), "experiment checkpoint doesn't exist. run without --resume"
+            with open(os.path.join(experiment_dir, 'run_ids.pkl'), 'rb') as f:
+                run_ids = pickle.load(f)
+            cfg['run_ids'] = run_ids
+            cfg['experiment_dir'] = experiment_dir
+            print(f'loaded wandb run_ids from {experiment_dir}')
+        else:
+            # generate run_ids
+            run_ids = {}
+            run_ids['tester'] = experiment_id = wandb.util.generate_id() # this will be the tester run_id
+            run_ids['learner'] = wandb.util.generate_id()
+            for idx in range(1, self.num_workers+1):
+                run_ids[f'worker_{idx}'] = wandb.util.generate_id()
+            experiment_dir = os.path.join(cfg["rootdir"], experiment_id)
+            with open(os.path.join(experiment_dir, 'run_ids.pkl'), 'wb') as f:
+                pickle.dump(run_ids, f)
+            cfg['run_ids'] = run_ids
+            cfg['experiment_dir'] = experiment_dir
+            cfg['experiment_id'] = experiment_id
+            print(f'saved wandb run_ids to {experiment_dir}')
 
     def spawn(self):
         """

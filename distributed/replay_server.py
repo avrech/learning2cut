@@ -42,8 +42,8 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         # self.data_request_pub_socket.connect(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
 
         # failure tolerance
-        self.logdir = config.get('logdir', 'results')
-        self.checkpoint_filepath = os.path.join(self.logdir, 'replay_server_checkpoint.pt')
+        self.experiment_dir = config['experiment_dir']
+        self.checkpoint_filepath = os.path.join(self.experiment_dir, 'replay_server_checkpoint.pt')
         # checkpoint every time params are published (like the other components do)
         self.checkpoint_interval = config.get("param_sync_interval", 50)
 

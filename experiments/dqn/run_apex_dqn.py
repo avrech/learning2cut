@@ -15,20 +15,6 @@ if __name__ == '__main__':
     """
     from experiments.dqn.default_parser import parser, get_hparams
     # parser = argparse.ArgumentParser()
-    parser.add_argument('--logdir', type=str, default='results/apex',
-                        help='path to save results')
-    parser.add_argument('--datadir', type=str, default='data/maxcut',
-                        help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml',
-                        help='general experiment settings')
-    parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
-                        help='datasets config file')
-    parser.add_argument('--resume', action='store_true',
-                        help='set to load the last training status from checkpoint file')
-    parser.add_argument('--gpu-id', type=int, default=None,
-                        help='gpu id to use if available')
-    parser.add_argument('--use-gpu', action='store_true',
-                        help='use gpu for learner')
     parser.add_argument('--profile', action='store_true',
                         help='run with cProfile')
     parser.add_argument('--time-limit', type=float, default=3600*24,
@@ -56,24 +42,17 @@ if __name__ == '__main__':
     if config.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-    if not os.path.exists(args.logdir):
-        os.makedirs(args.logdir)
+    if not os.path.exists(args.rootdir):
+        os.makedirs(args.rootdir)
 
     if args.restart:
         # connect to the existing ray server
         ray.init(ignore_reinit_error=True, address='auto')
-        assert args.resume and args.run_id is not None, 'provide wandb run_id for resuming'
+        assert args.resume and args.experiment_id is not None, 'provide wandb run_id for resuming'
     else:
         # create a new ray server.
         ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
 
-    # todo wandb
-    run_id = args.run_id if args.resume else wandb.util.generate_id()
-    wandb.init(resume=args.resume,
-               id=run_id,
-               project=args.project,
-               )
-    config['run_id'] = run_id
     # instantiate apex launcher
     apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
 
@@ -105,9 +84,9 @@ if __name__ == '__main__':
         s = io.StringIO()
         ps = pstats.Stats(pr, stream=s).sort_stats('tottime')
         ps.print_stats()
-        with open(os.path.join(args.logdir, 'profile_pstats.txt'), 'w+') as f:
+        with open(os.path.join(args.rootdir, 'profile_pstats.txt'), 'w+') as f:
             f.write(s.getvalue())
-        print('Saved pstats to ', os.path.join(args.logdir, 'profile_pstats.txt'))
+        print('Saved pstats to ', os.path.join(args.rootdir, 'profile_pstats.txt'))
 
     else:
         main()
