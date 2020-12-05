@@ -5,6 +5,7 @@ from distributed.cut_dqn_learner import CutDQNLearner
 import os
 import pickle
 import wandb
+import zmq
 
 
 class ApeXDQN:
@@ -22,30 +23,49 @@ class ApeXDQN:
         self.actors['learner'] = None
         self.actors['replay_server'] = None
 
-        # assign wandb run ids to the relevant actors
-        if cfg['resume']:
-            # load run ids from experiment_dir
-            experiment_dir = os.path.join(cfg['rootdir'], cfg['experiment_id'])
-            assert os.path.exists(experiment_dir), "experiment checkpoint doesn't exist. run without --resume"
-            with open(os.path.join(experiment_dir, 'run_ids.pkl'), 'rb') as f:
-                run_ids = pickle.load(f)
-            cfg['run_ids'] = run_ids
-            cfg['experiment_dir'] = experiment_dir
-            print(f'loaded wandb run_ids from {experiment_dir}')
+        # communication settings
+        # we reuse the existing ports iff some actors are still running.
+        # otherwise, we randomize new ports.
+        # todo when reusing, there is a chance that a zombie process occupies some port.
+        #  in that case zmq will crash on binding to that port.
+        #  the user should then clean those zombie processes (run again with --clean_zombie)
+        if self.cfg['resume'] and len(self.get_running_actors()) > 0:
+
+            # reuse ports if any actor is still running
+            with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'rb') as f:
+                com_cfg = pickle.load(f)
+            print('loaded ports from ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
         else:
-            # generate run_ids
-            run_ids = {}
-            run_ids['tester'] = experiment_id = wandb.util.generate_id() # this will be the tester run_id
-            run_ids['learner'] = wandb.util.generate_id()
-            for idx in range(1, self.num_workers+1):
-                run_ids[f'worker_{idx}'] = wandb.util.generate_id()
-            experiment_dir = os.path.join(cfg["rootdir"], experiment_id)
-            with open(os.path.join(experiment_dir, 'run_ids.pkl'), 'wb') as f:
-                pickle.dump(run_ids, f)
-            cfg['run_ids'] = run_ids
-            cfg['experiment_dir'] = experiment_dir
-            cfg['experiment_id'] = experiment_id
-            print(f'saved wandb run_ids to {experiment_dir}')
+            com_cfg = self.find_free_ports()
+            # pickle ports to experiment dir
+            with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
+                pickle.dump(com_cfg, f)
+            print('saved ports to ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
+
+        self.cfg['com'] = com_cfg
+
+    def find_free_ports(self):
+        """ finds free ports for all actors and returns a dictionary of all ports """
+        ports = {}
+        # replay server
+        context = zmq.Context()
+        learner_2_replay_server_socket = context.socket(zmq.PULL)
+        workers_2_replay_server_socket = context.socket(zmq.PULL)
+        data_request_pub_socket = context.socket(zmq.PUB)
+        replay_server_2_learner_socket = context.socket(zmq.PULL)
+        params_pub_socket = context.socket(zmq.PUB)
+        ports["learner_2_replay_server_port"] = learner_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+        ports["workers_2_replay_server_port"] = workers_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+        ports["replay_server_2_workers_pubsub_port"] = data_request_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+        ports["replay_server_2_learner_port"] = replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+        ports["learner_2_workers_pubsub_port"] = params_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+        learner_2_replay_server_socket.close()
+        workers_2_replay_server_socket.close()
+        data_request_pub_socket.close()
+        replay_server_2_learner_socket.close()
+        params_pub_socket.close()
+
+        return ports
 
     def spawn(self):
         """
@@ -87,11 +107,8 @@ class ApeXDQN:
         ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
         print('finished')
 
-    def restart(self, actors=[], force_restart=False):
-        """ Re-launch learner as detached actor """
-        # todo - look for running learner, kill, instantiate a new one (with potentially updated code), and restart.
-        actors = list(self.actors.keys()) if len(actors) == 0 else actors
-        # get running actors if any.
+    def get_running_actors(self, actors=None):
+        actors = actors if actors is not None else list(self.actors.keys())
         running_actors = {}
         for actor_name in actors:
             try:
@@ -101,6 +118,13 @@ class ApeXDQN:
                 # if actor_name doesn't exist, ray will raise a ValueError exception saying this
                 print(e)
                 running_actors[actor_name] = None
+        return running_actors
+
+    def restart(self, actors=[], force_restart=False):
+        """ Re-launch learner as detached actor """
+        # todo - look for running learner, kill, instantiate a new one (with potentially updated code), and restart.
+        actors = list(self.actors.keys()) if len(actors) == 0 else actors
+        running_actors = self.get_running_actors(actors)
 
         ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(CutDQNWorker)
         ray_tester = ray.remote(num_gpus=int(self.tester_gpu), num_cpus=1)(CutDQNWorker)
@@ -169,3 +193,30 @@ class ApeXDQN:
             assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
             worker = CutDQNWorker(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu, gpu_id=self.cfg.get('gpu_id', None))
             worker.run()
+
+    def kill(self, actors=[]):
+        """ kills the actors running in the current ray server
+        :param actors: list of actors to kill. if not specified kills all actors."""
+        actors = list(self.actors.keys()) if len(actors) == 0 else actors
+        for actor_name in actors:
+            try:
+                actor = ray.get_actor(actor_name)
+                ray.kill(actor)
+                print(f'{actor_name} killed')
+            except ValueError as e:
+                # if actor_name doesn't exist, ray will raise a ValueError exception saying this
+                print(e)
+
+    def clean_zombie_actors(self):
+        """ kills processes that use the current experiment ports """
+        ports_file = os.path.join(self.cfg["rootdir"], self.cfg['run_id'], 'com_cfg.pkl')
+        if os.path.exists(ports_file):
+            with open(ports_file, 'rb') as f:
+                ports = pickle.load(f)
+            print('loaded ports from ', self.cfg['run_dir'])
+            print('killing all processes running on ', ports)
+            for port in ports.values():
+                print(f'(port {port}) killing pid:')
+                os.system('echo $(lsof -t -i:8080)')
+                os.system('kill -9 $(lsof -t -i:8080)')
+

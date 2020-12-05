@@ -26,25 +26,19 @@ class CutDQNWorker(CutDQNAgent):
         self.generate_demonstration_data = False
 
         # # set worker specific tensorboard logdir
-        # worker_logdir = os.path.join(self.experiment_dir, 'tensorboard', f'worker-{worker_id}')  # todo remove after wandb is verified
+        # worker_logdir = os.path.join(self.run_dir, 'tensorboard', f'worker-{worker_id}')  # todo remove after wandb is verified
         # self.writer = SummaryWriter(log_dir=worker_logdir)  # todo remove after wandb is verified
-        wandb_config = hparams.copy()
-        wandb_config.pop('datasets')
-        wandb_config['actor_type'] = 'tester' if is_tester else 'worker'
-        wandb_config['worker_id'] = worker_id
         wandb.init(resume='allow', # hparams['resume'],
-                   id=hparams['run_ids']['tester' if is_tester else f'worker_{worker_id}'],
+                   id=hparams['run_id'],
                    project=hparams['project'],
-                   config=wandb_config,
-                   reinit=True  # for distributed_unittest.py
+                   reinit=True  # todo for distributed_unittest.py
                    )
-
 
         # set special checkpoint file for tester (workers use the learner checkpoints)
         if is_tester:
-            self.checkpoint_filepath = os.path.join(self.experiment_dir, 'tester_checkpoint.pt')
+            self.checkpoint_filepath = os.path.join(self.run_dir, 'tester_checkpoint.pt')
         else:
-            self.checkpoint_filepath = os.path.join(self.experiment_dir, 'learner_checkpoint.pt')
+            self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
 
         self.print_prefix = f'[Worker {self.worker_id}] '
         # initialize zmq sockets
@@ -53,8 +47,8 @@ class CutDQNWorker(CutDQNAgent):
         print(self.print_prefix, "initializing sockets..")
         # for receiving params from learner and requests from replay server
         context = zmq.Context()
-        self.params_pubsub_port = hparams["learner_2_workers_pubsub_port"]
-        self.data_requests_pubsub_port = hparams["replay_server_2_workers_pubsub_port"]
+        self.params_pubsub_port = hparams['com']["learner_2_workers_pubsub_port"]
+        self.data_requests_pubsub_port = hparams['com']["replay_server_2_workers_pubsub_port"]
         self.sub_socket = context.socket(zmq.SUB)
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
         self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
@@ -66,7 +60,7 @@ class CutDQNWorker(CutDQNAgent):
         # for sending replay data to buffer
         if self.is_worker:
             context = zmq.Context()
-            self.workers_2_replay_server_port = hparams["workers_2_replay_server_port"]
+            self.workers_2_replay_server_port = hparams['com']["workers_2_replay_server_port"]
             self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
             self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
 

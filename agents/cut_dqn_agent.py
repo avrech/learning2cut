@@ -136,9 +136,9 @@ class CutDQNAgent(Sepa):
         self.is_learner = True
         # file system paths
         # todo - set worker-specific logdir for distributed DQN
-        self.experiment_dir = hparams['experiment_dir']
-        self.checkpoint_filepath = os.path.join(self.experiment_dir, 'checkpoint.pt')
-        # self.writer = SummaryWriter(log_dir=os.path.join(self.experiment_dir, 'tensorboard'))  # todo remove after wandb works
+        self.run_dir = hparams['run_dir']
+        self.checkpoint_filepath = os.path.join(self.run_dir, 'checkpoint.pt')
+        # self.writer = SummaryWriter(log_dir=os.path.join(self.run_dir, 'tensorboard'))  # todo remove after wandb works
         self.print_prefix = ''
 
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
@@ -1261,6 +1261,7 @@ class CutDQNAgent(Sepa):
         """
         # dictionary of all metrics to log
         log_dict = {}
+        actor_name = '_' + self.print_prefix.replace('[', '').replace(']', '').replace(' ', '_') if len(self.print_prefix) > 0 else ''
         # actor_name = self.print_prefix.replace('[', '').replace(']', '').replace(' ', '') + '_'
         if global_step is None:
             global_step = self.num_param_updates
@@ -1276,7 +1277,7 @@ class CutDQNAgent(Sepa):
                 perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])
                 if perf > self.best_perf[self.dataset_name]:
                     self.best_perf[self.dataset_name] = perf
-                    self.save_checkpoint(filepath=os.path.join(self.experiment_dir, f'best_{self.dataset_name}_checkpoint.pt'))
+                    self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
                     self.save_figures(filename_prefix='best')
 
             # add episode figures (for validation and test sets only)
@@ -1298,8 +1299,8 @@ class CutDQNAgent(Sepa):
                     # self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                     self.test_stats_buffer[k] = []
                     # todo wandb
-                    log_dict[self.dataset_name + '/' + k] = avg
-                    log_dict[self.dataset_name + '/' + k + '_std'] = std
+                    log_dict[self.dataset_name + '/' + k + actor_name] = avg
+                    log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
 
             # sanity check
             if self.hparams.get('sanity_check', False):
@@ -1314,8 +1315,8 @@ class CutDQNAgent(Sepa):
                     print('{}: {:.4f} | '.format(k, avg), end='')
                     # self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
                     # self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
-                    log_dict[self.dataset_name + '/' + k] = avg
-                    log_dict[self.dataset_name + '/' + k + '_std'] = std
+                    log_dict[self.dataset_name + '/' + k + actor_name] = avg
+                    log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
 
                 self.sanity_check_stats['n_original_cuts'] = []
                 self.sanity_check_stats['n_duplicated_cuts'] = []
@@ -1332,8 +1333,8 @@ class CutDQNAgent(Sepa):
                 # self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
                 # self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                 # todo wandb
-                log_dict[self.dataset_name + '/' + k] = avg
-                log_dict[self.dataset_name + '/' + k + '_std'] = std
+                log_dict[self.dataset_name + '/' + k + actor_name] = avg
+                log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
 
                 self.tmp_stats_buffer[k] = []
 
@@ -1467,7 +1468,7 @@ class CutDQNAgent(Sepa):
             fname = f'{self.dataset_name}_{figname}.png'
             if filename_prefix is not None:
                 fname = filename_prefix + '_' + fname
-            fpath = os.path.join(self.experiment_dir, fname)
+            fpath = os.path.join(self.run_dir, fname)
             self.figures[figname]['fig'].savefig(fpath)
 
     # done
@@ -1495,7 +1496,7 @@ class CutDQNAgent(Sepa):
         perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
         if perf > self.best_perf[self.dataset_name]:
             self.best_perf[self.dataset_name] = perf
-            self.save_checkpoint(filepath=os.path.join(self.experiment_dir, f'best_{self.dataset_name}_checkpoint.pt'))
+            self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
 
     # done
     def load_checkpoint(self):

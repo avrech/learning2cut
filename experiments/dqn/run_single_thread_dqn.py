@@ -36,18 +36,20 @@ if __name__ == '__main__':
     # # set logdir according to hparams
     # relative_logdir = f"lr_{hparams['lr']}-nstep_{hparams['nstep_learning']}-credit_{hparams['credit_assignment']}-gamma_{hparams['gamma']}-obj_{hparams['dqn_objective']}"
     # hparams['logdir'] = os.path.join(hparams['logdir'], relative_logdir)
-    # todo wandb
-    experiment_id = args.experiment_id if args.resume else wandb.util.generate_id()
-    hparams['experiment_id'] = experiment_id
-    hparams['experiment_dir'] = os.path.join(args.rootdir, experiment_id)
-    wandb.init(resume=args.resume,
-               id=experiment_id,
-               project=args.project,
-               config=hparams
-               )
+    run_id = args.run_id if args.resume else wandb.util.generate_id()
+    hparams['run_id'] = run_id
+    hparams['run_dir'] = os.path.join(args.rootdir, run_id)
+    if not os.path.exists(hparams['run_dir']):
+        os.makedirs(hparams['run_dir'])
 
-    if not os.path.exists(hparams['experiment_dir']):
-        os.makedirs(hparams['experiment_dir'])
+    # todo wandb
+    wandb_config = hparams.copy()
+    wandb_config.pop('datasets')
+    wandb.init(resume=args.resume,
+               id=run_id,
+               project=args.project,
+               config=wandb_config
+               )
 
     dqn_single_thread = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)
     dqn_single_thread.train()

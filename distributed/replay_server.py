@@ -21,29 +21,29 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         print(self.print_prefix, "initializing sockets...")
         # for sending a batch to learner
         context = zmq.Context()
-        self.replay_server_2_learner_port = config["replay_server_2_learner_port"]
+        self.replay_server_2_learner_port = config['com']["replay_server_2_learner_port"]
         self.replay_server_2_learner_socket = context.socket(zmq.PUSH)
         self.replay_server_2_learner_socket.connect(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
         # for receiving new priorities from learner
         context = zmq.Context()
-        self.learner_2_replay_server_port = config["learner_2_replay_server_port"]
+        self.learner_2_replay_server_port = config['com']["learner_2_replay_server_port"]
         self.learner_2_replay_server_socket = context.socket(zmq.PULL)
         self.learner_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
         # for receiving replay data from workers
         context = zmq.Context()
-        self.workers_2_replay_server_port = config["workers_2_replay_server_port"]
+        self.workers_2_replay_server_port = config['com']["workers_2_replay_server_port"]
         self.workers_2_replay_server_socket = context.socket(zmq.PULL)
         self.workers_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
         # for publishing data requests to workers
         context = zmq.Context()
-        self.data_request_pubsub_port = config["replay_server_2_workers_pubsub_port"]
+        self.data_request_pubsub_port = config['com']["replay_server_2_workers_pubsub_port"]
         self.data_request_pub_socket = context.socket(zmq.PUB)
         self.data_request_pub_socket.bind(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
         # self.data_request_pub_socket.connect(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
 
         # failure tolerance
-        self.experiment_dir = config['experiment_dir']
-        self.checkpoint_filepath = os.path.join(self.experiment_dir, 'replay_server_checkpoint.pt')
+        self.run_dir = config['run_dir']
+        self.checkpoint_filepath = os.path.join(self.run_dir, 'replay_server_checkpoint.pt')
         # checkpoint every time params are published (like the other components do)
         self.checkpoint_interval = config.get("param_sync_interval", 50)
 

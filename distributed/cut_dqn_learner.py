@@ -35,11 +35,11 @@ class CutDQNLearner(CutDQNAgent):
         self.idle_time_sec = 0
 
         # # set learner specific logdir
-        # learner_logdir = os.path.join(self.experiment_dir, 'tensorboard', 'learner')  # todo remove after wandb works
+        # learner_logdir = os.path.join(self.run_dir, 'tensorboard', 'learner')  # todo remove after wandb works
         # self.writer = SummaryWriter(log_dir=learner_logdir)
 
         # set checkpoint file path for learner and workers
-        self.checkpoint_filepath = os.path.join(self.experiment_dir, 'learner_checkpoint.pt')
+        self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
 
         self.replay_data_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_priorities_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
@@ -54,17 +54,17 @@ class CutDQNLearner(CutDQNAgent):
         print(self.print_prefix, "initializing sockets..")
         # for receiving batch from replay server
         context = zmq.Context()
-        self.replay_server_2_learner_port = hparams["replay_server_2_learner_port"]
+        self.replay_server_2_learner_port = hparams['com']["replay_server_2_learner_port"]
         self.replay_server_2_learner_socket = context.socket(zmq.PULL)
         self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
         # for sending back new priorities to replay server
         context = zmq.Context()
-        self.learner_2_replay_server_port = hparams["learner_2_replay_server_port"]
+        self.learner_2_replay_server_port = hparams['com']["learner_2_replay_server_port"]
         self.learner_2_replay_server_socket = context.socket(zmq.PUSH)
         self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
         # for publishing new params to workers
         context = zmq.Context()
-        self.params_pubsub_port = hparams["learner_2_workers_pubsub_port"]
+        self.params_pubsub_port = hparams['com']["learner_2_workers_pubsub_port"]
         self.params_pub_socket = context.socket(zmq.PUB)
         self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
         self.initialize_training()
@@ -75,9 +75,9 @@ class CutDQNLearner(CutDQNAgent):
         # create a config dict for comparing hparams, grouping and other operations on wandb dashboard
         wandb_config = hparams.copy()
         wandb_config.pop('datasets')
-        wandb_config['actor_type'] = 'learner'
+        wandb_config.pop('com')
         wandb.init(resume='allow',  # hparams['resume'],
-                   id=hparams['run_ids']['learner'],
+                   id=hparams['run_id'],
                    project=hparams['project'],
                    config=wandb_config,
                    reinit=True  # for distributed_unittest.py
