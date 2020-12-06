@@ -45,9 +45,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     config = get_hparams(args)
     assert (not args.restart) or (args.resume and args.run_id is not None), 'provide wandb run_id for resuming'
-    run_id = args.run_id if args.resume else wandb.util.generate_id()
-    config['run_id'] = run_id
-    config['run_dir'] = run_dir = os.path.join(args.rootdir, run_id)
 
     if config.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
@@ -55,21 +52,25 @@ if __name__ == '__main__':
     if not os.path.exists(args.rootdir):
         os.makedirs(args.rootdir)
 
-    if (args.restart or args.kill):
-        # load ray server info from run_dir
-        with open(os.path.join(run_dir, 'ray_info.pkl'), 'rb') as f:
-            ray_info = pickle.load(f)
-        # connect to the existing ray server
-        ray_info = ray.init(ignore_reinit_error=True, address=ray_info['redis_address'])
-    else:
-        # create a new ray server.
-        ray_info = ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
-
-    if not os.path.exists(config['run_dir']):
-        os.makedirs(config['run_dir'])
-    # save ray server info for reconnecting
-    with open(os.path.join(run_dir, 'ray_info.pkl'), 'wb') as f:
-        pickle.dump(ray_info, f)
+    # run_id = args.run_id if args.resume else wandb.util.generate_id()
+    # config['run_id'] = run_id
+    # config['run_dir'] = run_dir = os.path.join(args.rootdir, run_id)
+    #
+    # if (args.restart or args.kill):
+    #     # load ray server info from run_dir
+    #     with open(os.path.join(run_dir, 'ray_info.pkl'), 'rb') as f:
+    #         ray_info = pickle.load(f)
+    #     # connect to the existing ray server
+    #     ray_info = ray.init(ignore_reinit_error=True, address=ray_info['redis_address'])
+    # else:
+    #     # create a new ray server.
+    #     ray_info = ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
+    #
+    # if not os.path.exists(config['run_dir']):
+    #     os.makedirs(config['run_dir'])
+    # # save ray server info for reconnecting
+    # with open(os.path.join(run_dir, 'ray_info.pkl'), 'wb') as f:
+    #     pickle.dump(ray_info, f)
 
     # instantiate apex launcher
     apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
@@ -77,9 +78,6 @@ if __name__ == '__main__':
     def main():
         apex.spawn()
         apex.train()
-
-    if args.kill:
-        apex.kill(args.kill_actors)
 
     if args.debug_actor is not None:
         # spawn all the other actors as usual
