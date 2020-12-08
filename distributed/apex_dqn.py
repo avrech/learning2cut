@@ -6,6 +6,7 @@ import os
 import pickle
 import wandb
 import zmq
+import pyarrow as pa
 
 
 class ApeXDQN:
@@ -57,26 +58,41 @@ class ApeXDQN:
         # initialize ray server
         self.init_ray()
 
-        # communication settings
-        # we reuse the existing port numbers iff some actors are still running.
-        # otherwise, we randomize new ports.
-        # todo when reusing, there is a chance that a zombie process occupies some port.
-        #  in that case zmq will crash on binding to that port.
-        #  the user should then clean those zombie processes (run again with --clean_zombie)
-        if self.cfg['resume'] and len(self.get_running_actors()) > 0:
-
-            # reuse ports if any actor is still running
+        # reuse communication setting
+        if cfg['restart']:
+            assert len(self.get_running_actors()) > 0, 'no running actors exist. run without --restart'
             with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'rb') as f:
-                com_cfg = pickle.load(f)
-            print('loaded ports from ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
-        else:
-            com_cfg = self.find_free_ports()
-            # pickle ports to experiment dir
-            with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
-                pickle.dump(com_cfg, f)
-            print('saved ports to ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
+                self.cfg['com'] = pickle.load(f)
+            print('loaded communication config from ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
 
-        self.cfg['com'] = com_cfg
+        # else:
+        #     com_cfg = self.find_free_ports()
+        #     # pickle ports to experiment dir
+        #     with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
+        #         pickle.dump(com_cfg, f)
+        #     print('saved ports to ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
+        # self.cfg['com'] = com_cfg
+
+    def init_ray(self):
+        run_id = self.cfg['run_id'] if self.cfg['resume'] else wandb.util.generate_id()
+        self.cfg['run_id'] = run_id
+        self.cfg['run_dir'] = run_dir = os.path.join(self.cfg['rootdir'], run_id)
+        if not os.path.exists(run_dir):
+            os.makedirs(run_dir)
+
+        if self.cfg['restart']:
+            # load ray server address from run_dir
+            with open(os.path.join(run_dir, 'ray_info.pkl'), 'rb') as f:
+                ray_info = pickle.load(f)
+            # connect to the existing ray server
+            ray_info = ray.init(ignore_reinit_error=True, address=ray_info['redis_address'])
+        else:
+            # create a new ray server.
+            ray_info = ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
+
+        # save ray info for reconnecting
+        with open(os.path.join(run_dir, 'ray_info.pkl'), 'wb') as f:
+            pickle.dump(ray_info, f)
 
     def find_free_ports(self):
         """ finds free ports for all actors and returns a dictionary of all ports """
@@ -104,13 +120,13 @@ class ApeXDQN:
     def spawn(self):
         """
         Instantiate all components as Ray detached Actors.
-        Detached actors have global unique names, they run independently of the current script
-        python driver, and thus they can be shut down and restarted offline,
-        possibly with updated code.
-        Use case: when debugging/upgrading the learner/tester code, we don't need to shut down
-        the replay server.
+        Detached actors have global unique names, they run independently of the current python driver.
+        Detached actors can be killed and restarted, with potentially updated code.
+        Use case: when debugging/upgrading the learner/tester code, while the replay server keeps running.
         For reference see: https://docs.ray.io/en/master/advanced.html#dynamic-remote-parameters
         the "Detached Actors" section.
+        In the setup process actors incrementally bind to random free ports,
+        to allow multiple instances running on the same node.
         """
         # wrap base classes with ray.remote to make them remote "Actor"s
         ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(CutDQNWorker)
@@ -119,8 +135,8 @@ class ApeXDQN:
         ray_replay_server = ray.remote(PrioritizedReplayServer)
 
         # spawn all actors as detached actors with globally unique names.
-        # those detached actors can be accessed from any driver connecting to the current ray server,
-        # using the global unique names.
+        # those detached actors can be accessed from any driver connecting to the current ray server
+        # using their global unique names.
         for n in range(1, self.num_workers + 1):
             self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
         self.actors['tester'] = ray_tester.options(name='tester').remote('Test', hparams=self.cfg, use_gpu=self.tester_gpu, is_tester=True)
@@ -128,16 +144,66 @@ class ApeXDQN:
         self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True)
         self.actors['replay_server'] = ray_replay_server.options(name='replay_server').remote(config=self.cfg)
 
+    def setup(self):
+        """
+        Instantiate all components as Ray detached Actors.
+        Detached actors have global unique names, they run independently of the current python driver.
+        Detached actors can be killed and restarted, with potentially updated code.
+        Use case: when debugging/upgrading the learner/tester code, while the replay server keeps running.
+        For reference see: https://docs.ray.io/en/master/advanced.html#dynamic-remote-parameters
+        the "Detached Actors" section.
+        In the setup process actors incrementally bind to random free ports,
+        to allow multiple instances running on the same node.
+        """
+        assert 'com' not in self.cfg.keys()
+        # open main logger socket for receiving logs from all actors
+        context = zmq.Context()
+        self.apex_logger_socket = context.socket(zmq.PULL)
+        apex_port = self.apex_recv_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+        self.cfg['com'] = {'apex_port': apex_port}
+        print(f"[Apex] binding to {apex_port} for receiving logs")
+
+        # spawn learner
+        print('[Apex] spawning learner process')
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu), num_cpus=2)(CutDQNLearner)
+        # instantiate learner and run its io process in a background thread
+        self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True, run_setup=True)
+        # wait for learner's com config
+        learner_msg = self.apex_logger_socket.recv()
+        topic, body = pa.deserialize(learner_msg)
+        assert topic == 'learner_com_cfg'
+        for k, v in body:
+            self.cfg['com'][k] = v
+
+        # spawn replay server
+        print('[Apex] spawning replay server process')
+        ray_replay_server = ray.remote(PrioritizedReplayServer)
+        self.actors['replay_server'] = ray_replay_server.options(name='replay_server').remote(config=self.cfg, run_setup=True)
+        # todo go to replay_server, connect to apex port. bind to others, send com config, and start run
+        # wait for replay_server's com config
+        replay_server_msg = self.apex_logger_socket.recv()
+        topic, body = pa.deserialize(replay_server_msg)
+        assert topic == 'replay_server_com_cfg'
+        for k, v in body:
+            self.cfg['com'][k] = v
+
+        # spawn workers and tester
+        print('[Apex] spawning workers and tester processes')
+        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(CutDQNWorker)
+        ray_tester = ray.remote(num_gpus=int(self.tester_gpu), num_cpus=1)(CutDQNWorker)
+        for n in range(1, self.num_workers + 1):
+            self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
+        self.actors['tester'] = ray_tester.options(name='tester').remote('Test', hparams=self.cfg, use_gpu=self.tester_gpu, is_tester=True)
+
+        # pickle com config to experiment dir
+        with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
+            pickle.dump(self.cfg['com'], f)
+        print('[Apex] saving communication config to ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
+
     def train(self):
         print("Running main training loop...")
         ready_ids, remaining_ids = ray.wait([actor.run.remote() for actor in self.actors.values()])
-        # ready_ids, remaining_ids = ray.wait(
-        #     [worker.run.remote() for worker in self.workers] +
-        #     [self.learner.run.remote()] +
-        #     [self.replay_server.run.remote()] +
-        #     [self.tester.run.remote()]
-        # )
-        # todo - find a good way to block the main program here, so ray will continue tracking all actors, restart etc.
+        # todo - loop here wandb logs - send logs from all actors, recv here and wandb.log
         ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
         print('finished')
 
@@ -155,8 +221,7 @@ class ApeXDQN:
         return running_actors
 
     def restart(self, actors=[], force_restart=False):
-        """ Re-launch learner as detached actor """
-        # todo - look for running learner, kill, instantiate a new one (with potentially updated code), and restart.
+        """ restart actors as remote entities """
         actors = list(self.actors.keys()) if len(actors) == 0 else actors
         running_actors = self.get_running_actors(actors)
 
@@ -193,13 +258,21 @@ class ApeXDQN:
                 assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
                 worker = ray_worker.options(name=actor_name).remote(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu)
                 handles.append(worker.run.remote())
+        # todo - skip this when debugging an actor
         if len(handles) > 0:
             ready_ids, remaining_ids = ray.wait(handles)
             # todo - find a good way to block the main program here, so ray will continue tracking all actors, restart etc.
             ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600 * 48))
         print('finished')
 
-    def debug_actor(self, actor_name):
+    def run_debug(self, actor_name):
+        # spawn all the other actors as usual
+        all_actor_names = self.actors.copy()
+        actor_name = all_actor_names.pop(actor_name)
+        rest_of_actors = list(all_actor_names.keys())
+        self.restart(actors=rest_of_actors)
+
+        # debug actor locally
         # kill the existing one if any
         try:
             actor = ray.get_actor(actor_name)
@@ -228,6 +301,10 @@ class ApeXDQN:
             worker = CutDQNWorker(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu, gpu_id=self.cfg.get('gpu_id', None))
             worker.run()
 
+    def run(self):
+        self.setup()
+        self.train()
+
     def kill(self, actors=[]):
         """ kills the actors running in the current ray server
         :param actors: list of actors to kill. if not specified kills all actors."""
@@ -254,23 +331,3 @@ class ApeXDQN:
                 os.system('echo $(lsof -t -i:8080)')
                 os.system('kill -9 $(lsof -t -i:8080)')
 
-    def init_ray(self):
-        run_id = self.cfg['run_id'] if self.cfg['resume'] else wandb.util.generate_id()
-        self.cfg['run_id'] = run_id
-        self.cfg['run_dir'] = run_dir = os.path.join(self.cfg['rootdir'], run_id)
-        if not os.path.exists(run_dir):
-            os.makedirs(run_dir)
-
-        if self.cfg['restart']:
-            # load ray server address from run_dir
-            with open(os.path.join(run_dir, 'ray_info.pkl'), 'rb') as f:
-                ray_info = pickle.load(f)
-            # connect to the existing ray server
-            ray_info = ray.init(ignore_reinit_error=True, address=ray_info['redis_address'])
-        else:
-            # create a new ray server.
-            ray_info = ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
-
-        # save ray info for reconnecting
-        with open(os.path.join(run_dir, 'ray_info.pkl'), 'wb') as f:
-            pickle.dump(ray_info, f)

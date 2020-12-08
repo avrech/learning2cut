@@ -25,14 +25,14 @@ class CutDQNWorker(CutDQNAgent):
         self.is_tester = is_tester
         self.generate_demonstration_data = False
 
-        # # set worker specific tensorboard logdir
-        # worker_logdir = os.path.join(self.run_dir, 'tensorboard', f'worker-{worker_id}')  # todo remove after wandb is verified
-        # self.writer = SummaryWriter(log_dir=worker_logdir)  # todo remove after wandb is verified
-        wandb.init(resume='allow', # hparams['resume'],
-                   id=hparams['run_id'],
-                   project=hparams['project'],
-                   reinit=True  # todo for distributed_unittest.py
-                   )
+        # # # set worker specific tensorboard logdir
+        # # worker_logdir = os.path.join(self.run_dir, 'tensorboard', f'worker-{worker_id}')  # todo remove after wandb is verified
+        # # self.writer = SummaryWriter(log_dir=worker_logdir)  # todo remove after wandb is verified
+        # wandb.init(resume='allow', # hparams['resume'],
+        #            id=hparams['run_id'],
+        #            project=hparams['project'],
+        #            reinit=True  # todo for distributed_unittest.py
+        #            )
 
         # set special checkpoint file for tester (workers use the learner checkpoints)
         if is_tester:
@@ -47,22 +47,22 @@ class CutDQNWorker(CutDQNAgent):
         print(self.print_prefix, "initializing sockets..")
         # for receiving params from learner and requests from replay server
         context = zmq.Context()
-        self.params_pubsub_port = hparams['com']["learner_2_workers_pubsub_port"]
-        self.data_requests_pubsub_port = hparams['com']["replay_server_2_workers_pubsub_port"]
+        self.send_2_apex_socket = context.socket(zmq.PUSH)  # for sending logs
         self.sub_socket = context.socket(zmq.SUB)
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
         self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
+        # connect to the main apex process
+        self.send_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
         # connect to learner pub socket
-        self.sub_socket.connect(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+        self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
         # connect to replay_server pub socket
-        self.sub_socket.connect(f"tcp://127.0.0.1:{self.data_requests_pubsub_port}")
+        self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_workers_pubsub_port"]}')
 
         # for sending replay data to buffer
         if self.is_worker:
             context = zmq.Context()
-            self.workers_2_replay_server_port = hparams['com']["workers_2_replay_server_port"]
             self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
-            self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
+            self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
 
     def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with learner's policy_net params """

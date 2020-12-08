@@ -24,7 +24,7 @@ class CutDQNLearner(CutDQNAgent):
     link above, and run the IO in a background process on Actor instantiation.
     The main Actor's thread will optimize the model using the GPU.
     """
-    def __init__(self, hparams, use_gpu=True, gpu_id=None, run_io=False, **kwargs):
+    def __init__(self, hparams, use_gpu=True, gpu_id=None, run_io=False, run_setup=False, **kwargs):
         super(CutDQNLearner, self).__init__(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id, **kwargs)
         # set GDQN instance role
         self.is_learner = True
@@ -50,38 +50,56 @@ class CutDQNLearner(CutDQNAgent):
         # number of SGD steps between each workers update
         self.param_sync_interval = hparams.get("param_sync_interval", 50)
         self.print_prefix = '[Learner] '
-        # initialize zmq sockets
+
+
+        # initialize zmq sockets reusing last run communication config
         print(self.print_prefix, "initializing sockets..")
-        # for receiving batch from replay server
+
         context = zmq.Context()
-        self.replay_server_2_learner_port = hparams['com']["replay_server_2_learner_port"]
-        self.replay_server_2_learner_socket = context.socket(zmq.PULL)
-        self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
-        # for sending back new priorities to replay server
-        context = zmq.Context()
-        self.learner_2_replay_server_port = hparams['com']["learner_2_replay_server_port"]
-        self.learner_2_replay_server_socket = context.socket(zmq.PUSH)
-        self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
-        # for publishing new params to workers
-        context = zmq.Context()
-        self.params_pubsub_port = hparams['com']["learner_2_workers_pubsub_port"]
-        self.params_pub_socket = context.socket(zmq.PUB)
-        self.params_pub_socket.bind(f"tcp://127.0.0.1:{self.params_pubsub_port}")
+        self.learner_2_apex_socket = context.socket(zmq.PUSH)  # for sending logs
+        self.replay_server_2_learner_socket = context.socket(zmq.PULL)  # for receiving batch from replay server
+        self.learner_2_replay_server_socket = context.socket(zmq.PUSH)  # for sending back new priorities to replay server
+        self.params_pub_socket = context.socket(zmq.PUB)  # for publishing new params to workers
+
+        if run_setup:
+            # connect to the main apex process
+            self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
+            # bind sockets to random free ports
+            hparams['com']["replay_server_2_learner_port"] = self.replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            hparams['com']["learner_2_workers_pubsub_port"] = self.params_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            # send com config to apex
+            message = pa.serialize(('learner_com_cfg', list(hparams['com'].items()))).to_buffer()
+            self.learner_2_apex_socket.send(message)
+            # wait for replay_server com config
+            message = self.replay_server_2_learner_socket.recv()
+            topic, body = pa.deserialize(message)
+            assert topic == 'replay_server_com_cfg'
+            learner_2_replay_server_port = {k: v for k, v in body}['learner_2_replay_server_port']
+            self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{learner_2_replay_server_port}')
+            hparams['com']['learner_2_replay_server_port'] = learner_2_replay_server_port
+
+        else:
+            # reuse com config
+            self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
+            self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_learner_port"]}')
+            self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_replay_server_port"]}')
+            self.params_pub_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
+
         self.initialize_training()
 
-        # todo wandb
-        # we must call wandb.init in each process wandb.log is called.
-        # in distributed_unittest we shouldn't do it however.
-        # create a config dict for comparing hparams, grouping and other operations on wandb dashboard
-        wandb_config = hparams.copy()
-        wandb_config.pop('datasets')
-        wandb_config.pop('com')
-        wandb.init(resume='allow',  # hparams['resume'],
-                   id=hparams['run_id'],
-                   project=hparams['project'],
-                   config=wandb_config,
-                   reinit=True  # for distributed_unittest.py
-                   )
+        # # todo wandb
+        # # we must call wandb.init in each process wandb.log is called.
+        # # in distributed_unittest we shouldn't do it however.
+        # # create a config dict for comparing hparams, grouping and other operations on wandb dashboard
+        # wandb_config = hparams.copy()
+        # wandb_config.pop('datasets')
+        # wandb_config.pop('com')
+        # wandb.init(resume='allow',  # hparams['resume'],
+        #            id=hparams['run_id'],
+        #            project=hparams['project'],
+        #            config=wandb_config,
+        #            reinit=True  # for distributed_unittest.py
+        #            )
 
         if run_io:
             self.background_io = threading.Thread(target=self.run_io, args=())

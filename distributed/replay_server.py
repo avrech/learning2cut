@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 
 class PrioritizedReplayServer(PrioritizedReplayBuffer):
-    def __init__(self, config):
+    def __init__(self, config, run_setup=False):
         super(PrioritizedReplayServer, self).__init__(config)
         self.config = config
         self.pending_priority_requests_cnt = 0
@@ -19,27 +19,34 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.print_prefix = '[ReplayServer] '
         # initialize zmq sockets
         print(self.print_prefix, "initializing sockets...")
-        # for sending a batch to learner
+
         context = zmq.Context()
-        self.replay_server_2_learner_port = config['com']["replay_server_2_learner_port"]
-        self.replay_server_2_learner_socket = context.socket(zmq.PUSH)
-        self.replay_server_2_learner_socket.connect(f'tcp://127.0.0.1:{self.replay_server_2_learner_port}')
-        # for receiving new priorities from learner
-        context = zmq.Context()
-        self.learner_2_replay_server_port = config['com']["learner_2_replay_server_port"]
-        self.learner_2_replay_server_socket = context.socket(zmq.PULL)
-        self.learner_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.learner_2_replay_server_port}')
-        # for receiving replay data from workers
-        context = zmq.Context()
-        self.workers_2_replay_server_port = config['com']["workers_2_replay_server_port"]
-        self.workers_2_replay_server_socket = context.socket(zmq.PULL)
-        self.workers_2_replay_server_socket.bind(f'tcp://127.0.0.1:{self.workers_2_replay_server_port}')
-        # for publishing data requests to workers
-        context = zmq.Context()
-        self.data_request_pubsub_port = config['com']["replay_server_2_workers_pubsub_port"]
-        self.data_request_pub_socket = context.socket(zmq.PUB)
-        self.data_request_pub_socket.bind(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
-        # self.data_request_pub_socket.connect(f"tcp://127.0.0.1:{self.data_request_pubsub_port}")
+        self.replay_server_2_apex_socket = context.socket(zmq.PUSH)  # for sending logs
+        self.replay_server_2_learner_socket = context.socket(zmq.PUSH)  # for sending a batch to learner
+        self.learner_2_replay_server_socket = context.socket(zmq.PULL)  # for receiving new priorities from learner
+        self.workers_2_replay_server_socket = context.socket(zmq.PULL)  # for receiving replay data from workers
+        self.data_request_pub_socket = context.socket(zmq.PUB)  # for publishing data requests to workers
+
+        if run_setup:
+            # connect to the main apex process and to the learner
+            self.replay_server_2_apex_socket.connect(f'tcp://127.0.0.1:{config["com"]["apex_port"]}')
+            self.replay_server_2_learner_socket.connect(f'tcp://127.0.0.1:{config["com"]["replay_server_2_learner_port"]}')
+            # bind sockets to random free ports
+            config['com']["learner_2_replay_server_port"] = self.learner_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            config['com']["workers_2_replay_server_port"] = self.workers_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            config['com']["replay_server_2_workers_pubsub_port"] = self.data_request_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            # send com config to apex and learner
+            message = pa.serialize(('replay_server_com_cfg', list(config['com'].items()))).to_buffer()
+            self.replay_server_2_apex_socket.send(message)
+            self.replay_server_2_learner_socket.send(message)
+
+        else:
+            # reuse com config
+            self.replay_server_2_apex_socket.connect(f'tcp://127.0.0.1:{config["com"]["apex_port"]}')
+            self.replay_server_2_learner_socket.connect(f'tcp://127.0.0.1:{config["com"]["replay_server_2_learner_port"]}')
+            self.learner_2_replay_server_socket.bind(f'tcp://127.0.0.1:{config["com"]["learner_2_replay_server_port"]}')
+            self.workers_2_replay_server_socket.bind(f'tcp://127.0.0.1:{config["com"]["workers_2_replay_server_port"]}')
+            self.data_request_pub_socket.bind(f'tcp://127.0.0.1:{config["com"]["replay_server_2_workers_pubsub_port"]}')
 
         # failure tolerance
         self.run_dir = config['run_dir']

@@ -32,8 +32,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug-actor', type=str, default=None,
                         help='allows debugging the specified actor locally while the rest of actors run remotely.'
                              'only one actor can be debugged at a time.'
-                             'if there is already a running ray server, set --restart to connect to this instance.'
-                             'in this case the other actors will not be affected.'
+                             'launch first apex in run mode. then run again with `--debug-actor --restart --resume --run_id <run_id>`'
                              'after debugging, the specified actor can be killed and restarted as usual'
                              'using --restart --restart-actors <actor_name> --force-restart')
     parser.add_argument('--kill-actors', nargs='+', type=str, default=[],
@@ -45,7 +44,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     config = get_hparams(args)
     assert (not args.restart) or (args.resume and args.run_id is not None), 'provide wandb run_id for resuming'
-
+    assert args.debug_actor is None or args.restart, f'run apex first in terminal, then restart with --debug-actor {args.debug_actor}'
     if config.get('debug_cuda', False):
         os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
@@ -75,19 +74,15 @@ if __name__ == '__main__':
     # instantiate apex launcher
     apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
 
-    def main():
-        apex.spawn()
-        apex.train()
-
     if args.debug_actor is not None:
-        # spawn all the other actors as usual
-        all_actor_names = apex.actors.copy()
-        debug_actor = all_actor_names.pop(args.debug_actor)
-        rest_of_actors = list(all_actor_names.keys())
-        apex.restart(actors=rest_of_actors)
+        # # spawn all the other actors as usual
+        # all_actor_names = apex.actors.copy()
+        # debug_actor = all_actor_names.pop(args.debug_actor)
+        # rest_of_actors = list(all_actor_names.keys())
+        # apex.restart(actors=rest_of_actors)
 
         # run the debugged actor locally
-        apex.debug_actor(actor_name=args.debug_actor)
+        apex.run_debug(actor_name=args.debug_actor)
 
     elif args.restart:
         apex.restart(actors=args.restart_actors, force_restart=args.force_restart)
@@ -97,7 +92,7 @@ if __name__ == '__main__':
         pr = cProfile.Profile()
         pr.enable()
 
-        main()
+        apex.run()
 
         pr.disable()
         s = io.StringIO()
@@ -108,4 +103,4 @@ if __name__ == '__main__':
         print('Saved pstats to ', os.path.join(args.rootdir, 'profile_pstats.txt'))
 
     else:
-        main()
+        apex.run()
