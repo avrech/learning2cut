@@ -3,6 +3,7 @@ from pyscipopt import Sepa, SCIP_RESULT
 from time import time
 import numpy as np
 from utils.data import Transition
+from utils.misc import get_img_from_fig
 import os
 import math
 import random
@@ -1238,7 +1239,7 @@ class CutDQNAgent(Sepa):
         self.policy_net.train()
 
     # done
-    def log_stats(self, save_best=False, plot_figures=False, global_step=None, info={}):
+    def log_stats(self, save_best=False, plot_figures=False, global_step=None, info={}, log_directly=True):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
@@ -1286,8 +1287,14 @@ class CutDQNAgent(Sepa):
                     # self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
                     #                        global_step=global_step, walltime=cur_time_sec)
                     # todo wandb
-                    log_dict[self.dataset_name] = self.figures[figname]['fig']
-
+                    if log_directly:
+                        log_dict[figname + '/' + self.dataset_name] = self.figures[figname]['fig']
+                    else:
+                        # in order to send to apex logger, we should serialize the image as numpy array.
+                        # so convert first to numpy array
+                        fig_rgb = get_img_from_fig(self.figures[figname]['fig'], dpi=300)
+                        # and store with a label 'fig' to decode on the logger side
+                        log_dict[figname + '/' + self.dataset_name] = ('fig', fig_rgb)
 
             # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
             for k, vals in self.test_stats_buffer.items():
@@ -1349,8 +1356,9 @@ class CutDQNAgent(Sepa):
             log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
             log_dict['Demonstration_Loss'] = self.demonstration_loss_moving_avg
 
-        # todo wandb modify log dict keys with actor_name, or maybe agging is better?
-        wandb.log(log_dict, step=global_step)
+        if log_directly:
+            # todo wandb modify log dict keys with actor_name, or maybe agging is better?
+            wandb.log(log_dict, step=global_step)
 
         # print the additional info
         for k, v in info.items():
@@ -1364,6 +1372,8 @@ class CutDQNAgent(Sepa):
         print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
+
+        return global_step, log_dict
 
     # done
     def init_figures(self, fignames, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
@@ -1667,7 +1677,7 @@ class CutDQNAgent(Sepa):
         return trajectory
 
     # done
-    def evaluate(self, datasets=None, ignore_eval_interval=False):
+    def evaluate(self, datasets=None, ignore_eval_interval=False, log_directly=True):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
@@ -1675,7 +1685,7 @@ class CutDQNAgent(Sepa):
             # wait until the model starts learning
             return
         global_step = self.num_param_updates
-
+        log_dict = {}
         # initialize cycle_stats first time
         if self.hparams.get('record_cycles', False) and self.cycle_stats is None:
             self.cycle_stats = {dataset_name: {inst_idx: {seed_idx: {}
@@ -1717,7 +1727,8 @@ class CutDQNAgent(Sepa):
                             self.cycle_stats[dataset_name][inst_idx]['G'] = G
                             self.cycle_stats[dataset_name][inst_idx]['baseline'] = baseline
 
-                self.log_stats(save_best='validset' in dataset_name, plot_figures=True)
+                step, logs = self.log_stats(save_best='validset' in dataset_name, plot_figures=True, log_directly=log_directly)
+                log_dict.update(logs)
 
         # if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
         #     with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
@@ -1725,6 +1736,7 @@ class CutDQNAgent(Sepa):
         #     self.cycle_stats = None
 
         self.set_training_mode()
+        return step, log_dict
 
     # done
     def train(self):

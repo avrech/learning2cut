@@ -13,6 +13,30 @@ import pickle
 if __name__ == '__main__':
     """
     Run Ape-X DQN
+    Examples:
+    1.  Standard run:
+        > python run_apex_dqn.py 
+        will create a new run_id on wandb server. ApexDQN will setup all actors, binding to free random ports. 
+        the communication config will be saved to rootdir/run_id
+        ApexDQN central controller will run on the current python driver,
+        while a learner, replay_server, workers and tester will run remotely in separated processes, and on independent 
+        python drivers. This means that any actor, (todo except ApexDQN itself) can be restarted with potentially 
+        updated python code.  
+        all logs will be sent to the ApexDQN main process, who logs them to wandb server.
+    
+    2.  Restart some of the actors:
+        while the main ApexDQN process is running, one can restart some of the actors in a separate shell. 
+        > python run_apex_dqn.py --resume --run_id <run_id> --restart [--restart-actors <list of actors>] [--force-restart]
+        will instantiate ApexDQN, loading the existing communication config from run dir,
+        restart must follow an active standard run.
+       
+    3.  Debug an actor:
+        > python run_apex_dqn.py --resume --run_id <run_id> --restart --debug-actor <actor_name> [--restart-actors <list of actors>] [--force-restart]
+        will run the specified actor locally (killing the exiting one).
+        debug must follow an active standard run.  
+        
+    4.  Killing zombie processes
+        todo complete
     """
     from experiments.dqn.default_parser import parser, get_hparams
     # parser = argparse.ArgumentParser()
@@ -35,10 +59,10 @@ if __name__ == '__main__':
                              'launch first apex in run mode. then run again with `--debug-actor --restart --resume --run_id <run_id>`'
                              'after debugging, the specified actor can be killed and restarted as usual'
                              'using --restart --restart-actors <actor_name> --force-restart')
-    parser.add_argument('--kill-actors', nargs='+', type=str, default=[],
-                        help='list of actors to kill. if not specified, kills all running actors')
-    parser.add_argument('--kill', action='store_true',
-                        help='kill all running actors or a specified lise of actors in the currently running ray server')
+    # parser.add_argument('--kill-actors', nargs='+', type=str, default=[],
+    #                     help='list of actors to kill. if not specified, kills all running actors')
+    # parser.add_argument('--kill', action='store_true',
+    #                     help='kill all running actors or a specified lise of actors in the currently running ray server')
                         # todo support multiple ray servers running in parallel. how to link to the correct one.
 
     args = parser.parse_args()

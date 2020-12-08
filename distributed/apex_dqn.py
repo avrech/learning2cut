@@ -58,6 +58,9 @@ class ApeXDQN:
         # initialize ray server
         self.init_ray()
 
+        # apex controller socket for receiving logs
+        self.apex_logger_socket = None
+
         # reuse communication setting
         if cfg['restart']:
             assert len(self.get_running_actors()) > 0, 'no running actors exist. run without --restart'
@@ -200,11 +203,36 @@ class ApeXDQN:
             pickle.dump(self.cfg['com'], f)
         print('[Apex] saving communication config to ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
 
+        # initialize wandb logger
+        # todo wandb
+        print('[Apex] initializing wandb')
+        wandb_config = self.cfg.copy()
+        wandb_config.pop('com')
+        wandb.init(resume='allow',  # hparams['resume'],
+                   id=self.cfg['run_id'],
+                   project=self.cfg['project'],
+                   config=wandb_config)
+        print('[Apex] setup finished')
+
     def train(self):
-        print("Running main training loop...")
+        print("[Apex] running logger loop")
         ready_ids, remaining_ids = ray.wait([actor.run.remote() for actor in self.actors.values()])
         # todo - loop here wandb logs - send logs from all actors, recv here and wandb.log
-        ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
+        while True:
+            # receive message
+            topic, body = self.apex_logger_socket.recv()
+            assert topic == 'log'
+            # log all key-value items
+            log_dict = {}
+            for k, v in body:
+                if type(v) == tuple and v[0] == 'fig':
+                    log_dict[k] = wandb.Image(v[1], caption=k)
+                else:
+                    log_dict[k] = v
+            global_step = log_dict.pop('global_step')
+            wandb.log(log_dict, step=global_step)
+
+        # ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
         print('finished')
 
     def get_running_actors(self, actors=None):

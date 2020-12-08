@@ -142,7 +142,11 @@ class CutDQNWorker(CutDQNAgent):
                 #        This is because the current stats are related to the previous policy.
                 #        In addition, maybe workers shouldn't log stats every update ?
                 # if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
-                self.log_stats(global_step=self.num_param_updates - 1)
+                global_step, log_dict = self.log_stats(global_step=self.num_param_updates - 1, log_directly=False)
+                logs_packet = ('log', [('global_step', global_step)] + [(k, v) for k, v in log_dict])
+                logs_packet = pa.serialize(logs_packet)
+                self.send_2_apex_socket.send(logs_packet)
+
             replay_data = self.collect_data()
             self.send_replay_data(replay_data)
 
@@ -154,7 +158,10 @@ class CutDQNWorker(CutDQNAgent):
             received = self.recv_messages(wait_for_new_params=True)
             assert received
             # todo consider not ignoring eval interval
-            self.evaluate(datasets, ignore_eval_interval=True)
+            global_step, log_dict = self.evaluate(datasets, ignore_eval_interval=True)
+            logs_packet = ('log', [('global_step', global_step)] + [(k, v) for k, v in log_dict])
+            logs_packet = pa.serialize(logs_packet)
+            self.send_2_apex_socket.send(logs_packet)
             self.save_checkpoint()
 
     def collect_data(self):

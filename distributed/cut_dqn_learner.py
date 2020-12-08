@@ -158,7 +158,10 @@ class CutDQNLearner(CutDQNAgent):
             # todo - if self.num_param_updates > 0 and self.num_param_updates % self.hparams.get('log_interval', 100) == 0:
             cur_time_sec = time.time() - self.start_time + self.walltime_offset
             info = {'Idle time': '{:.2f}%'.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec))}
-            self.log_stats(info=info)
+            global_step, log_dict = self.log_stats(info=info, log_directly=False)
+            logs_packet = ('log', [('global_step', global_step)] + [(k, v) for k, v in log_dict])
+            logs_packet = pa.serialize(logs_packet)
+            self.learner_2_apex_socket.send(logs_packet)
             self.save_checkpoint()
 
     def unpack_batch_packet(self, batch_packet):
