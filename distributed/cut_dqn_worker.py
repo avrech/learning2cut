@@ -53,16 +53,22 @@ class CutDQNWorker(CutDQNAgent):
         self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
         # connect to the main apex process
         self.send_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
+        self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
+
         # connect to learner pub socket
         self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
+        self.print(f'connecting to learner_2_workers_pubsub_port: {hparams["com"]["learner_2_workers_pubsub_port"]}')
+
         # connect to replay_server pub socket
         self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_workers_pubsub_port"]}')
+        self.print(f'connecting to replay_server_2_workers_pubsub_port: {hparams["com"]["replay_server_2_workers_pubsub_port"]}')
 
         # for sending replay data to buffer
         if self.is_worker:
             context = zmq.Context()
             self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
             self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
+            self.print(f'connecting to workers_2_replay_server_port: {hparams["com"]["workers_2_replay_server_port"]}')
 
     def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with learner's policy_net params """
@@ -143,8 +149,8 @@ class CutDQNWorker(CutDQNAgent):
                 #        In addition, maybe workers shouldn't log stats every update ?
                 # if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
                 global_step, log_dict = self.log_stats(global_step=self.num_param_updates - 1, log_directly=False)
-                logs_packet = ('log', [('global_step', global_step)] + [(k, v) for k, v in log_dict])
-                logs_packet = pa.serialize(logs_packet)
+                logs_packet = ('log', f'worker_{self.worker_id}', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
+                logs_packet = pa.serialize(logs_packet).to_buffer()
                 self.send_2_apex_socket.send(logs_packet)
 
             replay_data = self.collect_data()
@@ -158,9 +164,9 @@ class CutDQNWorker(CutDQNAgent):
             received = self.recv_messages(wait_for_new_params=True)
             assert received
             # todo consider not ignoring eval interval
-            global_step, log_dict = self.evaluate(datasets, ignore_eval_interval=True)
-            logs_packet = ('log', [('global_step', global_step)] + [(k, v) for k, v in log_dict])
-            logs_packet = pa.serialize(logs_packet)
+            global_step, log_dict = self.evaluate(datasets, ignore_eval_interval=True, log_directly=False)
+            logs_packet = ('log', 'tester', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
+            logs_packet = pa.serialize(logs_packet).to_buffer()
             self.send_2_apex_socket.send(logs_packet)
             self.save_checkpoint()
 

@@ -64,6 +64,8 @@ class CutDQNLearner(CutDQNAgent):
         if run_setup:
             # connect to the main apex process
             self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
+            self.print(f'binding to apex_port: {hparams["com"]["apex_port"]}')
+
             # bind sockets to random free ports
             hparams['com']["replay_server_2_learner_port"] = self.replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
             hparams['com']["learner_2_workers_pubsub_port"] = self.params_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
@@ -76,6 +78,7 @@ class CutDQNLearner(CutDQNAgent):
             assert topic == 'replay_server_com_cfg'
             learner_2_replay_server_port = {k: v for k, v in body}['learner_2_replay_server_port']
             self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{learner_2_replay_server_port}')
+            self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
             hparams['com']['learner_2_replay_server_port'] = learner_2_replay_server_port
 
         else:
@@ -84,6 +87,7 @@ class CutDQNLearner(CutDQNAgent):
             self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_learner_port"]}')
             self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_replay_server_port"]}')
             self.params_pub_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
+            self.print('reusing ports', hparams['com'])
 
         self.initialize_training()
 
@@ -159,8 +163,8 @@ class CutDQNLearner(CutDQNAgent):
             cur_time_sec = time.time() - self.start_time + self.walltime_offset
             info = {'Idle time': '{:.2f}%'.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec))}
             global_step, log_dict = self.log_stats(info=info, log_directly=False)
-            logs_packet = ('log', [('global_step', global_step)] + [(k, v) for k, v in log_dict])
-            logs_packet = pa.serialize(logs_packet)
+            logs_packet = ('log', 'learner', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
+            logs_packet = pa.serialize(logs_packet).to_buffer()
             self.learner_2_apex_socket.send(logs_packet)
             self.save_checkpoint()
 

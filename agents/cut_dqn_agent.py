@@ -205,7 +205,7 @@ class CutDQNAgent(Sepa):
     # done
     def sepaexeclp(self):
         if self.hparams.get('debug', False):
-            print(self.print_prefix, 'dqn')
+            self.print('dqn')
 
         # assert proper behavior
         self.nseparounds += 1
@@ -242,7 +242,7 @@ class CutDQNAgent(Sepa):
         else:
             # stop optimization (implicitly), and don't add any more cuts
             if self.hparams.get('verbose', 0) == 2:
-                print(self.print_prefix + 'LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
+                self.print('LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
             self.terminal_state = 'LP_ITERATIONS_LIMIT_REACHED'
             # get stats of prev_action
             self.model.getState(query=self.prev_action)
@@ -337,7 +337,7 @@ class CutDQNAgent(Sepa):
                     # force SCIP to "discard" all the available cuts by flushing the separation storage
                     self.model.clearCuts()
                     if self.hparams.get('verbose', 0) == 2:
-                        print(self.print_prefix + 'discarded all cuts')
+                        self.print('discarded all cuts')
                     self.terminal_state = 'EMPTY_ACTION'
                     self._update_episode_stats()
                     self.finished_episode_stats = True
@@ -1792,3 +1792,6 @@ class CutDQNAgent(Sepa):
     def get_model(self):
         """ useful for distributed actors """
         return self.policy_net
+
+    def print(self, expr):
+        print(self.print_prefix, expr)

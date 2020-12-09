@@ -54,12 +54,14 @@ class ApeXDQN:
         self.actors['tester'] = None
         self.actors['learner'] = None
         self.actors['replay_server'] = None
-
         # initialize ray server
         self.init_ray()
-
         # apex controller socket for receiving logs
-        self.apex_logger_socket = None
+        self.apex_socket = None
+        # logging
+        self.step_counter = {actor_name: -1 for actor_name in self.actors.keys() if actor_name != 'replay_server'}
+        self.pending_logs = []
+        self.history = {}
 
         # reuse communication setting
         if cfg['restart']:
@@ -161,8 +163,8 @@ class ApeXDQN:
         assert 'com' not in self.cfg.keys()
         # open main logger socket for receiving logs from all actors
         context = zmq.Context()
-        self.apex_logger_socket = context.socket(zmq.PULL)
-        apex_port = self.apex_recv_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+        self.apex_socket = context.socket(zmq.PULL)
+        apex_port = self.apex_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
         self.cfg['com'] = {'apex_port': apex_port}
         print(f"[Apex] binding to {apex_port} for receiving logs")
 
@@ -172,7 +174,7 @@ class ApeXDQN:
         # instantiate learner and run its io process in a background thread
         self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True, run_setup=True)
         # wait for learner's com config
-        learner_msg = self.apex_logger_socket.recv()
+        learner_msg = self.apex_socket.recv()
         topic, body = pa.deserialize(learner_msg)
         assert topic == 'learner_com_cfg'
         for k, v in body:
@@ -184,7 +186,7 @@ class ApeXDQN:
         self.actors['replay_server'] = ray_replay_server.options(name='replay_server').remote(config=self.cfg, run_setup=True)
         # todo go to replay_server, connect to apex port. bind to others, send com config, and start run
         # wait for replay_server's com config
-        replay_server_msg = self.apex_logger_socket.recv()
+        replay_server_msg = self.apex_socket.recv()
         topic, body = pa.deserialize(replay_server_msg)
         assert topic == 'replay_server_com_cfg'
         for k, v in body:
@@ -207,6 +209,7 @@ class ApeXDQN:
         # todo wandb
         print('[Apex] initializing wandb')
         wandb_config = self.cfg.copy()
+        wandb_config.pop('datasets')
         wandb_config.pop('com')
         wandb.init(resume='allow',  # hparams['resume'],
                    id=self.cfg['run_id'],
@@ -216,13 +219,16 @@ class ApeXDQN:
 
     def train(self):
         print("[Apex] running logger loop")
-        ready_ids, remaining_ids = ray.wait([actor.run.remote() for actor in self.actors.values()])
+        # ready_ids, remaining_ids = ray.wait([actor.run.remote() for actor in self.actors.values()])
+        for actor in self.actors.values():
+            actor.run.remote()
         # todo - loop here wandb logs - send logs from all actors, recv here and wandb.log
         while True:
             # receive message
-            topic, body = self.apex_logger_socket.recv()
+            packet = self.apex_socket.recv()
+            topic, sender, body = pa.deserialize(packet)
             assert topic == 'log'
-            # log all key-value items
+            # put things into a dictionary
             log_dict = {}
             for k, v in body:
                 if type(v) == tuple and v[0] == 'fig':
@@ -230,7 +236,23 @@ class ApeXDQN:
                 else:
                     log_dict[k] = v
             global_step = log_dict.pop('global_step')
-            wandb.log(log_dict, step=global_step)
+            # increment sender step counter
+            self.step_counter[sender] = global_step
+            # update history
+            if global_step in self.history.keys():
+                self.history[global_step].update(log_dict)
+            else:
+                self.history[global_step] = log_dict
+            # push to pending logs
+            if not self.pending_logs or global_step > self.pending_logs[-1]:
+                self.pending_logs.append(global_step)
+            # if all actors finished a certain step, log to wandb
+            while self.pending_logs and all([self.pending_logs[0] <= cnt for cnt in self.step_counter.values()]):
+                step = self.pending_logs.pop(0)
+                log_dict = self.history.pop(step)
+                wandb.log(log_dict, step=step)
+            if len(self.pending_logs) > 1000:
+                print('[Apex] some actor is dead. restart to continue logging.')
 
         # ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
         print('finished')
