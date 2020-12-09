@@ -7,6 +7,7 @@ import pickle
 import wandb
 import zmq
 import pyarrow as pa
+import signal
 
 
 class ApeXDQN:
@@ -215,6 +216,13 @@ class ApeXDQN:
                    id=self.cfg['run_id'],
                    project=self.cfg['project'],
                    config=wandb_config)
+
+        # save pid to run_dir
+        pid = os.getpid()
+        pid_file = os.path.join(self.cfg["run_dir"], 'apex_pid.txt')
+        self.print(f'[Apex] saving pid {pid} to {pid_file}')
+        with open(pid_file, 'w') as f:
+            f.writelines(str(pid) + '\n')
         print('[Apex] setup finished')
 
     def train(self):
@@ -381,3 +389,5 @@ class ApeXDQN:
                 os.system('echo $(lsof -t -i:8080)')
                 os.system('kill -9 $(lsof -t -i:8080)')
 
+    def print(self, expr):
+        print('[Apex] ', expr)

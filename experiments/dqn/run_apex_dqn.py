@@ -59,10 +59,10 @@ if __name__ == '__main__':
                              'launch first apex in run mode. then run again with `--debug-actor --restart --resume --run_id <run_id>`'
                              'after debugging, the specified actor can be killed and restarted as usual'
                              'using --restart --restart-actors <actor_name> --force-restart')
-    # parser.add_argument('--kill-actors', nargs='+', type=str, default=[],
-    #                     help='list of actors to kill. if not specified, kills all running actors')
-    # parser.add_argument('--kill', action='store_true',
-    #                     help='kill all running actors or a specified lise of actors in the currently running ray server')
+    parser.add_argument('--kill-actors', nargs='+', type=str, default=[],
+                        help='list of actors to kill. if not specified, kills all running actors')
+    parser.add_argument('--kill', action='store_true',
+                        help='kill all running actors or a specified lise of actors in the currently running ray server')
                         # todo support multiple ray servers running in parallel. how to link to the correct one.
 
     args = parser.parse_args()

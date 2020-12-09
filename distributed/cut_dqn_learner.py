@@ -11,6 +11,7 @@ import os
 import threading
 import numpy as np
 import wandb
+import pickle
 
 
 class CutDQNLearner(CutDQNAgent):
@@ -108,6 +109,13 @@ class CutDQNLearner(CutDQNAgent):
         if run_io:
             self.background_io = threading.Thread(target=self.run_io, args=())
             self.background_io.start()
+
+        # save pid to run_dir
+        pid = os.getpid()
+        pid_file = os.path.join(hparams["run_dir"], 'learner_pid.txt')
+        self.print(f'saving pid {pid} to {pid_file}')
+        with open(pid_file, 'w') as f:
+            f.writelines(str(pid) + '\n')
 
     @staticmethod
     def params_to_numpy(model: torch.nn.Module):

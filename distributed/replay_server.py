@@ -4,6 +4,7 @@ from utils.buffer import PrioritizedReplayBuffer
 import torch
 import os
 from tqdm import tqdm
+import pickle
 
 
 class PrioritizedReplayServer(PrioritizedReplayBuffer):
@@ -53,6 +54,16 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.checkpoint_filepath = os.path.join(self.run_dir, 'replay_server_checkpoint.pt')
         # checkpoint every time params are published (like the other components do)
         self.checkpoint_interval = config.get("param_sync_interval", 50)
+
+        # save pid to run_dir
+        pid = os.getpid()
+        pid_file = os.path.join(self.run_dir, 'replay_server_pid.txt')
+        self.print(f'saving pid {pid} to {pid_file}')
+        with open(pid_file, 'w') as f:
+            f.writelines(str(pid) + '\n')
+
+    def print(self, expr):
+        print(self.print_prefix, expr)
 
     def save_checkpoint(self):
         torch.save({

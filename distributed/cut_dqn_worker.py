@@ -6,6 +6,7 @@ from agents.cut_dqn_agent import CutDQNAgent
 import os
 # from torch.utils.tensorboard import SummaryWriter
 import wandb
+import pickle
 
 
 class CutDQNWorker(CutDQNAgent):
@@ -69,6 +70,17 @@ class CutDQNWorker(CutDQNAgent):
             self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
             self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
             self.print(f'connecting to workers_2_replay_server_port: {hparams["com"]["workers_2_replay_server_port"]}')
+
+        # save pid to run_dir
+        pid = os.getpid()
+        pid_file = os.path.join(hparams["run_dir"], f'{self.actor_name}_pid.txt')
+        self.print(f'saving pid {pid} to {pid_file}')
+        with open(pid_file, 'w') as f:
+            f.writelines(str(pid) + '\n')
+
+    @property
+    def actor_name(self):
+        return "tester" if self.is_tester else f"worker_{self.worker_id}"
 
     def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with learner's policy_net params """
