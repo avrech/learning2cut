@@ -99,5 +99,5 @@ The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_itera
 Inside `learning2cut/experiments/dqn` run:  
 > python run_apex_dqn.py --rootdir results/exp1 --configfile configs/exp1-overfitVal25-demoLossOnly-fixedTrainingScipSeed.yaml --use-gpu  
 
-In experiment 1 we fix a maxcut instance and SCIP random seed, and train the model to imitate SCIP, using onlt demonstrations. This sanity check shows that the model is capable of learning high quality sequential cut selection. 
+In experiment 1 we fix a maxcut instance and SCIP random seed, and train the model to imitate SCIP, using only demonstrations. This sanity check shows that the model is capable of learning high quality sequential cut selection. 
 
