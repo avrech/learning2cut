@@ -67,14 +67,14 @@ use_general_cuts: False
 chordless_only: False
 simple_cycle_only: True
 enable_chordality_check: True  # set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!
-record_cycles: True  # set True to record the generated cycles along test episodes.
+record_cycles: False  # set True to record the generated cycles along test episodes.
 
 # DISTRIBUTED RL PARAMETERS
 
 # Learning parameters
 learner_gpu: True
 worker_gpu: False
-tester_gpu: True
+tester_gpu: False
 num_workers: 3
 num_learners: 1
 param_update_interval: 100  # number of learner.sgd_steps between workers policy update
