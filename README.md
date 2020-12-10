@@ -52,6 +52,7 @@ The distributed version is useful also for debugging and development, as each ac
 `run_apex_dqn.py` allows debugging and updating the code of a specific actor while the entire system keep running. 
 Run
 > python run_apex_dqn.py --rootdir /path/to/save/results --configfile /path/to/config/file --use-gpu  
+
 Example config files can be found at `learning2cut/experiments/dqn/configs`. Those files conveniently pack parameters for training. 
 All parameters are controlled also from command line, where the command line args override the config file setting. 
 Each run is assigned a random 8-characters `run_id` which can be used for resuming and for viewing results on `wandb` dashboard. 
@@ -72,6 +73,7 @@ Example:
 ### Debugging Remote Actors
 In order to debug a remote actors, run:
 > python run_apex_dqn.py --resume --run_id <run_id> --restart [--restart-actors <list of actors>] --debug-actor <actor_name>  
+
 This will restart the debugged actor main loop in the debugger, so one can step into the actor code, while the rest of remote actors keep running.  
 
 
@@ -79,6 +81,7 @@ This will restart the debugged actor main loop in the debugger, so one can step 
 ### Cycles Variability
 Inside `learning2cut/experiments/dqn` run:  
 > python cycles_variability.py --logdir results/cycles_variability [--simple_cycle_only --chordless_only --enable_chordality_check] --record_cycles  
+
 `cycles_variability.py` will solve each graph in `validset_20_30` and `validset_50_60` 10 times with seeds ranging from 0 to 9. In each separation round it will save the cycles generated along with other related stats.  
 The script will pickle a dictionary of the following structure:  
 ```
@@ -95,5 +98,6 @@ The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_itera
 ### Experiment 1
 Inside `learning2cut/experiments/dqn` run:  
 > python run_apex_dqn.py --rootdir results/exp1 --configfile configs/exp1-overfitVal25-demoLossOnly-fixedTrainingScipSeed.yaml --use-gpu  
+
 In experiment 1 we fix a maxcut instance and SCIP random seed, and train the model to imitate SCIP, using onlt demonstrations. This sanity check shows that the model is capable of learning high quality sequential cut selection. 
 
