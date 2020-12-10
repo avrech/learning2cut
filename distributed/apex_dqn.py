@@ -190,7 +190,7 @@ class ApeXDQN:
         self.apex_socket = context.socket(zmq.PULL)
         apex_port = self.apex_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
         self.cfg['com'] = {'apex_port': apex_port}
-        self.print("binding to {apex_port} for receiving logs")
+        self.print(f"binding to {apex_port} for receiving logs")
 
         # spawn learner
         self.print('spawning learner process')
@@ -227,7 +227,7 @@ class ApeXDQN:
         # pickle com config to experiment dir
         with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
             pickle.dump(self.cfg['com'], f)
-        self.print('saving communication config to ', os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'))
+        self.print(f'saving communication config to {os.path.join(self.cfg["run_dir"], "com_cfg.pkl")}')
 
         # initialize wandb logger
         # todo wandb
