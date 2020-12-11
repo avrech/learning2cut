@@ -56,7 +56,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug-actor', type=str, default=None,
                         help='allows debugging the specified actor locally while the rest of actors run remotely.'
                              'only one actor can be debugged at a time.'
-                             'launch first apex in run mode. then run again with `--debug-actor --restart --resume --run_id <run_id>`'
+                             'launch first apex in run mode. then run again with `--debug-actor <actor_name> --restart --resume --run_id <run_id>`'
                              'after debugging, the specified actor can be killed and restarted as usual'
                              'using --restart --restart-actors <actor_name> --force-restart')
     parser.add_argument('--kill-actors', nargs='+', type=str, default=[],

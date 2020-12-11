@@ -327,7 +327,8 @@ class ApeXDQN:
         """ restart actors as remote entities """
         actors = list(self.actors.keys()) + ['apex'] if len(actors) == 0 else actors
         # move 'apex' to the end of list
-        actors.append(actors.pop(actors.index('apex')))
+        if 'apex' in actors:
+            actors.append(actors.pop(actors.index('apex')))
 
         ray_running_actors = self.get_ray_running_actors(actors)
         actor_processes = self.get_actors_running_process(actors)
@@ -402,9 +403,7 @@ class ApeXDQN:
 
     def run_debug(self, actor_name):
         # spawn all the other actors as usual
-        all_actor_names = self.actors.copy()
-        actor_name = all_actor_names.pop(actor_name)
-        rest_of_actors = list(all_actor_names.keys())
+        rest_of_actors = [name for name in self.actors.keys() if name != actor_name]
         self.restart(actors=rest_of_actors)
 
         # debug actor locally

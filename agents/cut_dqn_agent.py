@@ -420,9 +420,6 @@ class CutDQNAgent(Sepa):
 
         # take greedy action
         with torch.no_grad():
-            # t.max(1) will return largest column value of each row.
-            # second column on max result is the index of where max element was found.
-            # we pick action with the larger expected reward.
             # todo - move all architectures to output dict format
             output = self.policy_net(
                 x_c=batch.x_c,
@@ -1422,7 +1419,7 @@ class CutDQNAgent(Sepa):
             ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
             ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
 
-        # plot imitation performance bars (in percents)
+        # plot imitation performance bars
         if 'Similarity_to_SCIP' in self.figures.keys():
             true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
             for info in self.episode_history:
