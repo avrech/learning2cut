@@ -10,7 +10,7 @@
 python run_apex_dqn.py \
   --configfile configs/exp3-demoLossOnly.yaml \
   --rootdir $SCRATCH/dqn/results/exp3 \
-  --datadir $SCRATCH/dqn/data \
+  --datadir $SCRATCH/dqn/data/maxcut \
   --tags exp3 \
   --use-gpu \
   --num_workers 10

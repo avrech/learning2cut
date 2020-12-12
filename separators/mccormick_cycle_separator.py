@@ -469,7 +469,7 @@ class MccormickCycleSeparator(Sepa):
         if all_zeros:
             assert cutlhs <= 0 <= cutrhs
             # skip this cut
-            return scip_result, cut_added
+            return {'result': scip_result}, cut_added
 
         # debug
         # check if inequality is valid with respect to the optimal solution found
@@ -486,7 +486,7 @@ class MccormickCycleSeparator(Sepa):
         cut_id = (tuple(x_items), tuple(y_items), cutrhs, cutlhs)
         if cut_id in self.added_cuts:
             # skip this cycle
-            return scip_result, cut_added
+            return {'result': scip_result}, cut_added
 
         # else - add to the added_cuts set, and add the cut to scip separation storage
         self.added_cuts.add(cut_id)

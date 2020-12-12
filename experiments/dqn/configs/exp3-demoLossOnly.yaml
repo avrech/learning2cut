@@ -67,7 +67,7 @@ use_general_cuts: False
 chordless_only: False  #
 simple_cycle_only: True
 enable_chordality_check: False  # set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!
-record_cycles: True  # set True to record the generated cycles along test episodes.
+record_cycles: False  # set True to record the generated cycles along test episodes.
 
 # DISTRIBUTED RL PARAMETERS
 
