@@ -48,7 +48,8 @@ if __name__ == '__main__':
     wandb.init(resume=args.resume,
                id=run_id,
                project=args.project,
-               config=wandb_config
+               config=wandb_config,
+               tags=args.tags
                )
 
     dqn_single_thread = CutDQNAgent(hparams=hparams, use_gpu=args.use_gpu, gpu_id=args.gpu_id)

@@ -94,6 +94,7 @@ parser.add_argument("--local_buffer_size", type=int, default=200, help="number o
 parser.add_argument('--resume', type=str2bool, nargs='?', const=True, default=False, help='set to load the last training status from checkpoint file')
 parser.add_argument("--run_id", type=str, default=None, help='wandb run id for resuming')
 parser.add_argument("--project", type=str, default='learning2cut', help='wandb project name')
+parser.add_argument("--tags", type=str, nargs='+', default=[], help='wandb tags')
 parser.add_argument('--rootdir', type=str, default='results', help='path to save results')
 parser.add_argument('--datadir', type=str, default='data/maxcut', help='path to generate/read data')
 parser.add_argument('--data_config', type=str, default='configs/data_config.yaml', help='general experiment settings')

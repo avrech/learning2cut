@@ -239,7 +239,8 @@ class ApeXDQN:
         wandb.init(resume='allow',  # hparams['resume'],
                    id=self.cfg['run_id'],
                    project=self.cfg['project'],
-                   config=wandb_config)
+                   config=wandb_config,
+                   tags=self.cfg['tags'])
 
         # save pid to run_dir
         pid = os.getpid()
