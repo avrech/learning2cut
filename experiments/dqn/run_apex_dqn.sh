@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mail-user=avrech@campus.tecnion.ac.il
 python run_apex_dqn.py \
-  --configfile experiment_config.yaml \
+  --configfile configs/exp3-demoLossOnly.yaml \
   --rootdir $SCRATCH/dqn/results/exp3 \
   --datadir $SCRATCH/dqn/data \
   --tags exp3 \
