@@ -43,7 +43,7 @@ Or on `graham` (recommended):
 `generate_dataset.py` does the following:  
 - Randomizes `barabasi-albert` graphs according to `experiments/dqn/configs/data_config.yaml`
 - Validates that there is no isomorphism between any pair of graphs
-- For each graph, solves MAXCUT to optimality using `scip` and saves stats for training
+- For each graph, solves MAXCUT to optimality using SCIP saves stats for training
 
 ## Running Experiments
 ### Single run 
@@ -88,12 +88,12 @@ The script will pickle a dictionary of the following structure:
 {dataset: [{seed: stats for seed in range(10)} for graph in dataset] for dataset in [`validset_20_30`, `validset_50_60`]}  
 ```  
 The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_iterations` etc. A cycle is stored as a dictionary with items:
-- 'edges': a list of the edges in cycle  
-- 'F': a list of odd number of cut edges  
-- 'C_minus_F': a list of the rest of the edges  
-- 'is_simple': True if the cycle is simple cycle else False  
-- 'is_chordless': True if the cycle has no chords else False  
-- 'applied': True if the cycle was selected to the LP else False  
+- `edges`: a list of the edges in cycle  
+- `F`: a list of odd number of cut edges  
+- `C_minus_F`: a list of the rest of the edges  
+- `is_simple`: True if the cycle is simple cycle else False  
+- `is_chordless`: True if the cycle has no chords else False  
+- `applied`: True if the cycle was selected to the LP else False  
 
 ### Experiment 1
 Inside `learning2cut/experiments/dqn` run:  
