@@ -78,9 +78,9 @@ class CutDQNLearner(CutDQNAgent):
             topic, body = pa.deserialize(message)
             assert topic == 'replay_server_com_cfg'
             learner_2_replay_server_port = {k: v for k, v in body}['learner_2_replay_server_port']
-            self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{learner_2_replay_server_port}')
-            self.print(f'connecting to learner_2_replay_server_port: {hparams["com"]["learner_2_replay_server_port"]}')
             hparams['com']['learner_2_replay_server_port'] = learner_2_replay_server_port
+            self.print(f'connecting to learner_2_replay_server_port: {hparams["com"]["learner_2_replay_server_port"]}')
+            self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{learner_2_replay_server_port}')
 
         else:
             # reuse com config
