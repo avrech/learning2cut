@@ -65,7 +65,7 @@ class CutDQNLearner(CutDQNAgent):
         if run_setup:
             # connect to the main apex process
             self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
-            self.print(f'binding to apex_port: {hparams["com"]["apex_port"]}')
+            self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
 
             # bind sockets to random free ports
             hparams['com']["replay_server_2_learner_port"] = self.replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
@@ -79,7 +79,7 @@ class CutDQNLearner(CutDQNAgent):
             assert topic == 'replay_server_com_cfg'
             learner_2_replay_server_port = {k: v for k, v in body}['learner_2_replay_server_port']
             self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{learner_2_replay_server_port}')
-            self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
+            self.print(f'connecting to learner_2_replay_server_port: {hparams["com"]["learner_2_replay_server_port"]}')
             hparams['com']['learner_2_replay_server_port'] = learner_2_replay_server_port
 
         else:
