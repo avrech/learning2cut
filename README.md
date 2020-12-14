@@ -34,6 +34,17 @@ Reinforcement Learning for Cut Selection
 
 6. Sign up to [Weights & Biases](https://www.wandb.com/), and follow the [instructions](https://docs.wandb.com/quickstart) to connect your device to your `wandb` account. 
 
+## Running on Compute Canada
+* `pyarrow` cannot be installed directly, and must be loaded using `module load arrow`.  
+* `torch_geometric` is compiled for specific `torch` and `cuda` versions. For available `torch` versions contact CC support. 
+* The following setup was tested successfully on Graham:
+> $ module load StdEnv/2018.3 gcc/7.3.0 python/3.7.4 arrow  
+$ virtualenv env && source env/bin/activate  
+(env) ~ $ pip install torch==1.4.0 torch_geometric torchvision torch-scatter torch-sparse torch-cluster torch-spline-conv -U --force  
+(env) ~ $ python -c "import pyarrow; torch_geometric; import torch_cluster; import torch_cluster.graclus_cpu"  
+(env) ~ $  
+
+
 ## Reproducing Datasets  
 ### Maxcut  
 Inside `learning2cut/experiments/dqn` run:  
