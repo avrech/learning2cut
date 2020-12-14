@@ -176,7 +176,7 @@ class CutDQNWorker(CutDQNAgent):
             received = self.recv_messages(wait_for_new_params=True)
             assert received
             # todo consider not ignoring eval interval
-            global_step, log_dict = self.evaluate(datasets, ignore_eval_interval=True, log_directly=False)
+            global_step, log_dict = self.evaluate(datasets, ignore_eval_interval=self.hparams['ignore_eval_interval'], log_directly=False)
             logs_packet = ('log', 'tester', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
             logs_packet = pa.serialize(logs_packet).to_buffer()
             self.send_2_apex_socket.send(logs_packet)

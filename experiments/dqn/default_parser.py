@@ -54,6 +54,7 @@ parser.add_argument("--num_episodes", type=int, default=2000000, help="number of
 parser.add_argument("--log_interval", type=int, default=20, help="number of model parameters updates between logs")
 parser.add_argument("--checkpoint_interval", type=int, default=20, help="number of model param updates between consequent checkpoints")
 parser.add_argument("--verbose", type=int, default=1, help="verbosity")
+parser.add_argument("--ignore_eval_interval", type=str2bool, nargs='?', const=True, default=False, help="if True, evaluates all validation sets every evaluation round, else, follows data config")
 parser.add_argument("--debug", type=str2bool, nargs='?', const=True, default=False, help="debug mode")
 parser.add_argument("--debug_cuda", type=str2bool, nargs='?', const=True, default=False, help="enable tracing cuda errors")
 parser.add_argument("--overfit", type=str, default="validset_20_30", help="specify dataset to train and validate on")

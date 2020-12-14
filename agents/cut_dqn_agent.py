@@ -1674,13 +1674,13 @@ class CutDQNAgent(Sepa):
         return trajectory
 
     # done
-    def evaluate(self, datasets=None, ignore_eval_interval=False, log_directly=True):
+    def evaluate(self, datasets=None, ignore_eval_interval=False, log_directly=True, eval_testset=False):
         if datasets is None:
             datasets = self.datasets
         # evaluate the model on the validation and test sets
         if self.num_param_updates == 0:
             # wait until the model starts learning
-            return
+            return None, None
         global_step = self.num_param_updates
         log_dict = {}
         # initialize cycle_stats first time
@@ -1692,7 +1692,7 @@ class CutDQNAgent(Sepa):
 
         self.set_eval_mode()
         for dataset_name, dataset in datasets.items():
-            if 'trainset' in dataset_name:
+            if 'trainset' in dataset_name or (not eval_testset and 'testset' in dataset_name):
                 continue
             if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
                 fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
