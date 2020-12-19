@@ -120,10 +120,10 @@ Inside `learning2cut/experiments/dqn` run:
 
 
 
-|Done |Exp | Input Graph | Data | Loss | SCIP Seed  | Goal | Results |
+|Done |Exp | Train on | Behaviour Policy | Loss | SCIP Seed  | Goal | Results |
 |---|:---:|:---:|:---:|:---:|:---:|:---|:---:|
-| &#9745; |1 | Fixed | Demo | Demo | Fixed | Perfect overfitting | [here](https://app.wandb.ai/avrech/learning2cut/runs/2v0lez39)|  
-| &#9745; |2 | Fixed | Demo | Demo | Random | Generalization across seeds | [here](https://app.wandb.ai/avrech/learning2cut/runs/3i8f068p)|  
-| &#9745; |3 | Random | Demo | Demo | Random | Generalization across graphs | [here](https://app.wandb.ai/avrech/learning2cut/runs/dyvqmmp9)|  
-| &#9744; |4 | Random | Demo + DQN| Demo | Random | See convergence to "interesting" policy | |
-| &#9744; |5 | Random | Demo + DQN| Demo + DQN | Random | Improving over SCIP | |
+| &#9745; |1 | Fixed graph| Demo | Demo | Fixed | Perfect overfitting | [here](https://app.wandb.ai/avrech/learning2cut/runs/2v0lez39)|  
+| &#9745; |2 | Fixed graph| Demo | Demo | Random | Generalization across seeds | [here](https://app.wandb.ai/avrech/learning2cut/runs/3i8f068p)|  
+| &#9745; |3 | Random graphs| Demo | Demo | Random | Generalization across graphs | [here](https://app.wandb.ai/avrech/learning2cut/runs/dyvqmmp9)|  
+| &#9744; |4 | Random graphs| Demo + DQN| Demo | Random | See convergence to "interesting" policy | |
+| &#9744; |5 | Random graphs| Demo + DQN| Demo + DQN | Random | Improving over SCIP | |
