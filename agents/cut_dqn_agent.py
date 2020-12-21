@@ -1550,7 +1550,7 @@ class CutDQNAgent(Sepa):
 
             # read all graphs with their baselines from disk
             dataset['instances'] = []
-            for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'Loading {dataset_name}'):
+            for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'{self.print_prefix}Loading {dataset_name}'):
                 # todo - overfitting sanity check consider only graph_0_0.pkl
                 if overfit_dataset_name and filename != 'graph_0_0.pkl':
                     continue

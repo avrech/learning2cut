@@ -104,6 +104,7 @@ class ApeXDQN:
                 ray_info = pickle.load(f)
             # connect to the existing ray server
             ray_info = ray.init(ignore_reinit_error=True, address=ray_info['redis_address'])
+
         else:
             if self.cfg['resume']:
                 # check first that there are no processes running with the current run_id
@@ -118,10 +119,11 @@ class ApeXDQN:
 
             # create a new ray server.
             ray_info = ray.init()  # todo - do we need ignore_reinit_error=True to launch several ray servers concurrently?
+            # save ray info for reconnecting
+            with open(os.path.join(self.cfg['run_dir'], 'ray_info.pkl'), 'wb') as f:
+                pickle.dump(ray_info, f)
+
         self.cfg['ray_info'] = ray_info
-        # save ray info for reconnecting
-        with open(os.path.join(self.cfg['run_dir'], 'ray_info.pkl'), 'wb') as f:
-            pickle.dump(ray_info, f)
 
     def find_free_ports(self):
         """ finds free ports for all actors and returns a dictionary of all ports """
