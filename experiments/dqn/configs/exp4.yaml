@@ -1,0 +1,104 @@
+# exp4:
+# train on random graphs, generate demonstrations and dqn data, use only demonstration loss.
+
+# NOTES:
+# All intervals are measured in num_param_updates,
+# except target_update_interval and param_update_interval which are measured in number of sgd steps done on the learner.
+# SINGLE THREAD SETTING:
+# - num_policy_updates equals to the number of episodes done and to the number of sgd steps done.
+# - it is recommended to sparsify the logs and checkpoints to reduce the tensorboard memory consumption.
+# - specifically it is recommended to evaluate the hard validation and test sets in low frequency.
+# DISTRIBUTED SETTING:
+# - num_policy_updates equals to the number of workers' policy updates, which happen every param_update_interval
+# - the hard datasets can be evaluated on the tester in the same frequency as the easy datasets.
+# DQN ALGORITHM HPARAMS
+batch_size: 128
+lr: 0.001
+weight_decay: 0.0001
+nstep_learning: 1 # 1, 8
+target_update_interval: 1000  # num sgd steps between target_net's parameters update
+value_aggr: max  # tqnet v2 works only with max. the other models work also with mean
+credit_assignment: True  # False, True
+gamma: 0.99
+eps_start: 0.9
+eps_end: 0.05
+eps_decay: 100000
+dqn_objective: db_auc  # options: db_auc, gap_auc
+empty_action_penalty: 0
+select_at_least_one_cut: True
+update_rule: DQN
+discard_bad_experience: True  # discard training episodes which terminated before LP_ITERATIONS_LIMIT due to weak cuts
+
+# LEARNING FROM DEMONSTRATIONS
+n_step_loss_coef: 1.0
+demonstration_loss_coef: 1.0
+demonstration_large_margin: 0.1
+
+# DQN ARCHITECTURE HPARAMS
+dqn_arch: TQNet     # options: TQNet , QNet
+tqnet_version: v3   # options: v1, v2
+emb_dim: 128
+cut_conv: CutConv   # options: CutConv, CATConv
+encoder_cut_conv_layers: 1
+encoder_lp_conv_layers: 1
+decoder_layers: 1
+decoder_conv: RemainingCutsConv
+attention_heads: 4
+lp_conv_aggr: mean
+cut_conv_aggr: mean
+
+# GENERAL
+seed: 259385
+hide_scip_output: True
+num_episodes: 2000000
+log_interval: 20
+checkpoint_interval: 20
+verbose: 1
+
+# DEBUG FLAGS
+debug: False
+debug_cuda: False
+overfit: False
+sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
+fix_training_scip_seed: 0  # 0 -> use random seed, 0 < int -> fix the specified seed
+
+# SCIP STUFF
+reset_maxcuts_every_round: True  # avoid undesired "unoughcuts" in SCIPseparationRoundLP
+use_general_cuts: False
+
+# CYCLE INEQUALITIES
+chordless_only: False  #
+simple_cycle_only: True
+enable_chordality_check: False  # set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!
+record_cycles: False  # set True to record the generated cycles along test episodes.
+
+# DISTRIBUTED RL PARAMETERS
+
+# Learning parameters
+learner_gpu: True
+worker_gpu: False
+tester_gpu: True
+num_workers: 3
+num_learners: 1
+param_update_interval: 100  # number of learner.sgd_steps between workers policy update
+max_num_updates: 100000  # relevant to PER to increase beta across time
+
+# Buffer parameters
+replay_buffer_capacity: 100000
+replay_buffer_n_demonstrations: 100000
+replay_buffer_demonstration_priority_bonus: 0.0001  # todo - tune
+replay_buffer_minimum_size: 10000
+use_per: True
+priority_alpha: 0.6
+priority_beta: 0.4
+priority_beta_start: 0.4
+priority_beta_end: 1.0
+priority_beta_decay: 100000  # exponentially increase to priority_beta_end like decreasing eps_greedy
+worker_buffer_size: 1000
+local_buffer_size: 200  # todo tune this parameter on the real distributed program
+# Communication configs
+#replay_server_2_workers_pubsub_port: 5554
+#learner_2_workers_pubsub_port: 5555
+#replay_server_2_learner_port: 5556
+#learner_2_replay_server_port: 5557
+#workers_2_replay_server_port: 5558
