@@ -126,4 +126,5 @@ Inside `learning2cut/experiments/dqn` run:
 | &#9745; |2 | Fixed graph| Demo | Demo | Random | Generalization across seeds | [here](https://app.wandb.ai/avrech/learning2cut/runs/3i8f068p)|  
 | &#9745; |3 | Random | Demo | Demo | Random | Generalization across graphs | [here](https://app.wandb.ai/avrech/learning2cut/runs/dyvqmmp9)|  
 | &#9744; |4 | Random | Demo | Demo+DQN | Random | See convergence to "interesting" policy | [here](https://app.wandb.ai/avrech/learning2cut/runs/1jmcareo)|
-| &#9744; |5 | Random | Demo+DQN| Demo+DQN | Random | Improving over SCIP | |
+| &#9744; |5 | Random | Demo+DQN| Demo+DQN | Random | Improving over SCIP | [here](https://wandb.ai/avrech/learning2cut/runs/1jmcareo?workspace=user-avrech)|
+
