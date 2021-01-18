@@ -1506,11 +1506,13 @@ class CutDQNAgent(Sepa):
             self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
 
     # done
-    def load_checkpoint(self):
-        if not os.path.exists(self.checkpoint_filepath):
+    def load_checkpoint(self, filepath=None):
+        if filepath is None:
+            filepath = self.checkpoint_filepath
+        if not os.path.exists(filepath):
             print(self.print_prefix, 'Checkpoint file does not exist! starting from scratch.')
             return
-        checkpoint = torch.load(self.checkpoint_filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device)
         self.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
         self.target_net.load_state_dict(checkpoint['target_net_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -1523,7 +1525,7 @@ class CutDQNAgent(Sepa):
         self.n_step_loss_moving_avg = checkpoint['n_step_loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
-        print(self.print_prefix, 'Loaded checkpoint from: ', self.checkpoint_filepath)
+        print(self.print_prefix, 'Loaded checkpoint from: ', filepath)
 
     # done
     def load_datasets(self):
