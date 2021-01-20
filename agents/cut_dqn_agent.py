@@ -1787,6 +1787,18 @@ class CutDQNAgent(Sepa):
 
         return 0
 
+    def test(self):
+        """ playground for testing """
+        self.load_datasets()
+        self.load_checkpoint(filepath='/home/avrech/learning2cut/experiments/dqn/results/exp5/24jo87jy/best_validset_90_100_checkpoint.pt')
+        # focus test on
+        dataset = self.datasets['validset_90_100']
+        dataset['instances'] = [dataset['instances'][idx] for idx in [3, 6]]
+        dataset['scip_seed'] = [176]
+
+        datasets = {'validset_90_100': dataset}
+        stat = self.evaluate(datasets=datasets, ignore_eval_interval=True, log_directly=False)
+
     # done
     def get_model(self):
         """ useful for distributed actors """
