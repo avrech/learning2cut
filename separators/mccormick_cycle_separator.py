@@ -114,8 +114,8 @@ class MccormickCycleSeparator(Sepa):
             self.cutoff_occured = False
 
     def sepaexeclp(self):
-        if self.hparams.get('debug', False):
-            print('cycle separator')
+        if self.hparams.get('debug_events', False):
+            print('DEBUG MSG: cycles separator called')
 
         # reset solver maxcuts and maxcutsroot
         # because dqn_agent can set it to a low number

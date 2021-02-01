@@ -4,6 +4,7 @@ from time import time
 import numpy as np
 from utils.data import Transition
 from utils.misc import get_img_from_fig
+from utils.debug_events import DebugEvents
 import os
 import math
 import random
@@ -204,8 +205,8 @@ class CutDQNAgent(Sepa):
 
     # done
     def sepaexeclp(self):
-        if self.hparams.get('debug', False):
-            self.print('dqn')
+        if self.hparams.get('debug_events', False):
+            self.print('DEBUG MSG: dqn separator called')
 
         # assert proper behavior
         self.nseparounds += 1
@@ -1668,6 +1669,10 @@ class CutDQNAgent(Sepa):
         if self.hparams.get('hide_scip_output', True):
             model.hideOutput()
 
+        if self.hparams.get('debug_events'):
+            eventhdlr = DebugEvents()
+            model.includeEventhdlr(eventhdlr, "DebugEvents", "Catches LPSOLVED and ROWADDEDSEPA events")
+
         # gong! run episode
         model.optimize()
 
@@ -1806,3 +1811,4 @@ class CutDQNAgent(Sepa):
 
     def print(self, expr):
         print(self.print_prefix, expr)
+
