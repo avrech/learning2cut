@@ -33,5 +33,33 @@ class DebugEvents(Eventhdlr):
         else:
             raise ValueError('event error')
 
+
+class BranchingEventHdlr(Eventhdlr):
+    # detect branching
+    def __init__(self, on_nodebranched_event, on_lpsolved_event):
+        """
+        execute callbacks on events
+        :param on_nodebranched_event: callable
+        :param on_lpsolved_event: callable
+        """
+        self.on_nodebranched_event = on_nodebranched_event
+        self.on_lpsolved_event = on_lpsolved_event
+
+    def eventinit(self):
+        self.model.catchEvent(SCIP_EVENTTYPE.NODEBRANCHED, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.LPSOLVED, self)
+
+    def eventexit(self):
+        self.model.dropEvent(SCIP_EVENTTYPE.NODEBRANCHED, self)
+        self.model.dropEvent(SCIP_EVENTTYPE.LPSOLVED, self)
+
+    def eventexec(self, event):
+        if event.getType() == SCIP_EVENTTYPE.NODEBRANCHED:
+            self.on_nodebranched_event()
+        elif event.getType() == SCIP_EVENTTYPE.LPSOLVED:
+            self.on_lpsolved_event()
+        else:
+            raise ValueError('event error')
+
 # eventhdlr = MyEvent()
 # model.includeEventhdlr(eventhdlr, "TestFirstLPevent", "python event handler to catch FIRSTLPEVENT")

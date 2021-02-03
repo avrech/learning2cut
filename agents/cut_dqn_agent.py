@@ -4,7 +4,7 @@ from time import time
 import numpy as np
 from utils.data import Transition
 from utils.misc import get_img_from_fig
-from utils.debug_events import DebugEvents
+from utils.event_hdlrs import DebugEvents, BranchingEventHdlr
 import os
 import math
 import random
@@ -122,7 +122,8 @@ class CutDQNAgent(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
-        self.finished_episode_stats = False
+        self.stats_updated = False
+        self.branching_occured = False
         self.cut_generator = None
         self.nseparounds = 0
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
@@ -195,13 +196,14 @@ class CutDQNAgent(Sepa):
             'lp_iterations': [],
             'dualbound': []
         }
-        self.finished_episode_stats = False
+        self.stats_updated = False
         self.cut_generator = cut_generator
         self.nseparounds = 0
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
         self.demonstration_episode = demonstration_episode
+        self.branching_occured = False
 
     # done
     def sepaexeclp(self):
@@ -221,12 +223,13 @@ class CutDQNAgent(Sepa):
             self.add_identical_and_weak_cuts()
 
         # finish with the previous step:
+        # todo - in case of no cuts, we return here a second time without any new action. we shouldn't record stats twice.
         self._update_episode_stats()
 
         # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
         # we dont want to run any further dqn steps, and therefore we return immediately.
         if self.terminal_state:
-            # discard potentially added cuts and return
+            # discard all the cuts in the separation storage and return
             self.model.clearCuts()
             result = {"result": SCIP_RESULT.DIDNOTRUN}
 
@@ -247,8 +250,6 @@ class CutDQNAgent(Sepa):
             self.terminal_state = 'LP_ITERATIONS_LIMIT_REACHED'
             # get stats of prev_action
             self.model.getState(query=self.prev_action)
-            # finish collecting episode stats
-            self.finished_episode_stats = True
             # clear cuts and terminate
             self.model.clearCuts()
             result = {"result": SCIP_RESULT.DIDNOTRUN}
@@ -308,7 +309,7 @@ class CutDQNAgent(Sepa):
             for k, v in action_info.items():
                 info[k] = v
 
-            # prob what scip cut selection algorithm was doing had it been used
+            # prob what scip cut selection algorithm would do in this state
             # todo - check overhead, and if too large then enable only in evaluate()
             cut_names_selected_by_scip = self.prob_scip_cut_selection()
             available_cuts['selected_by_scip'] = np.array([cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
@@ -329,6 +330,7 @@ class CutDQNAgent(Sepa):
                     result = {"result": SCIP_RESULT.SEPARATED}
 
                 else:
+                    raise Exception('this case is not valid anymore. use hparam select_at_least_one_cut=True')
                     # todo - This action leads to the terminal state.
                     #        SCIP may apply now heuristics which will further improve the dualbound/gap.
                     #        However, this improvement is not related to the currently taken action.
@@ -341,7 +343,7 @@ class CutDQNAgent(Sepa):
                         self.print('discarded all cuts')
                     self.terminal_state = 'EMPTY_ACTION'
                     self._update_episode_stats()
-                    self.finished_episode_stats = True
+                    self.stats_updated = True
                     result = {"result": SCIP_RESULT.DIDNOTFIND}
 
                 # SCIP will execute the action,
@@ -354,21 +356,25 @@ class CutDQNAgent(Sepa):
             # todo - old: self.episode_history.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
             self.prev_action = available_cuts
             self.prev_state = cur_state
+            self.stats_updated = False  # mark false to record relevant stats after this action will make effect
 
-        # If there are no available cuts we terminate the episode.
-        # The stats of the previous action are already collected,
-        # so we can finish collecting stats.
-        # We don't store the current state-action pair,
-        # since the terminal state is not important.
-        # The final gap in this state can be either zero (OPTIMAL) or strictly positive.
-        # However, model.getGap() can potentially return gap > 0, as SCIP stats will be updated only afterward.
+        # todo
+        # If there are no available cuts we simply ignore this round.
+        # The stats related to the previous action are already collected, and we are updated.
+        # We don't store the current state-action pair, because there is no action at all, and the state is useless.
+        # There is a case that after SCIP will apply heuristics we will return here again with new cuts,
+        # and in this case the state will be different anyway.
+        # If SCIP will decide to branch, we don't care, it is not related to us, and we won't consider improvements
+        # in the dual bound caused by the branching.
+        # The current gap can be either zero (OPTIMAL) or strictly positive.
+        # model.getGap() can return gap > 0 even if the dual bound is optimal,
+        # because SCIP stats will be updated only afterward.
         # So we temporarily set terminal_state to True (general description)
         # and we will accurately characterize it after the optimization terminates.
         elif available_cuts['ncuts'] == 0:
-            # todo: check if we ever get here, and verify behavior
             self.prev_action = None
-            self.terminal_state = True
-            self.finished_episode_stats = True
+            # self.terminal_state = True
+            # self.finished_episode_stats = True
             result = {"result": SCIP_RESULT.DIDNOTFIND}
 
         return result
@@ -449,18 +455,18 @@ class CutDQNAgent(Sepa):
         because the solver allows to access the information only in SCIP_STAGE.SOLVING
         We distinguish between 4 types of terminal states:
         OPTIMAL:
-            Gap == 0. If the LP_ITERATIONS_LIMIT was reached, we interpolate the final db/gap at the limit.
+            Gap == 0. If the LP_ITERATIONS_LIMIT has been reached, we interpolate the final db/gap at the limit.
             Otherwise, the final statistics are taken as is.
             In this case the agent is rewarded also for all SCIP's side effects (e.g. heuristics)
             which potentially helped in solving the instance.
         LP_ITERATIONS_LIMIT_REACHED:
-            Gap >= 0. This state refers to the case in which the last action was not empty.
+            Gap >= 0.
             We snapshot the current db/gap and interpolate the final db/gap at the limit.
         DIDNOTFIND:
             Gap > 0, ncuts == 0.
-            We save the current db/gap as the final values,
-            and do not consider any more db improvements (e.g. by heuristics)
-        EMPTY_ACTION:
+            We save the db/gap of the last round before ncuts == 0 occured as the final values,
+            and specifically we do not consider improvements caused by branching.
+        EMPTY_ACTION (deprecated):
             Gap > 0, ncuts > 0, nselected == 0.
             The treatment is the same as DIDNOTFIND.
 
@@ -474,6 +480,7 @@ class CutDQNAgent(Sepa):
 
         # classify the terminal state
         if self.terminal_state == 'EMPTY_ACTION':
+            raise ValueError('invalid state. set argument select_at_least_one_cut=True')
             # all the available cuts were discarded.
             # the dualbound / gap might have been changed due to heuristics etc.
             # however, this improvement is not related to the empty action.
@@ -485,39 +492,54 @@ class CutDQNAgent(Sepa):
 
         elif self.terminal_state == 'LP_ITERATIONS_LIMIT_REACHED':
             pass
-        elif self.terminal_state and self.model.getGap() == 0:
-            self.terminal_state = 'OPTIMAL'
-            # todo: correct gap, dual bound and LP iterations records:
-            #  model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
-            #  last transition stats, so it is probably > 0 at this point.
-            #  The dualbound might also be incorrect. For example, if primal heuristics improved, and conflict analysis
-            #  or other heuristics improved the dualbound to its optimal value. As a consequence,
-            #  the dual bound recorded at the last separation round is not optimal.
-            #  In this case, the final LP iter might also be greater than the last value recorded,
-            #  If they haven't reached the limit, then we take them as is.
-            #  Otherwise, we truncate the curve as usual.
-            #  By convention, we override the last records with the final values,
-            #  and truncate the curves if necessary
-            self.episode_stats['gap'][-1] = self.model.getGap()
-            self.episode_stats['dualbound'][-1] = self.model.getDualbound()
-            self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()  # todo - subtract probing mode lp_iters if any
-            self.truncate_to_lp_iterations_limit()
+        # elif self.terminal_state and self.model.getGap() == 0:
+        # todo: detect branching. if branching occured and stats are not updated, this is invalid episode.
+        #  if branching occured but stats are updated, don't do anything and continue.
+        #  if no branching occured, update stats and continue.
 
-        elif self.terminal_state and self.model.getGap() > 0:
-            self.terminal_state = 'DIDNOTFIND'
+        # elif self.branching_event.branching_occured:
+        #     self.terminal_state = 'BRANCHED'
+        #     if self.hparams.get('discard_bad_experience', True) and self.training:
+        #         return []
+        #     # if updated
+
+        elif self.model.getGap() == 0:
+            assert self.stats_updated
+            if not self.branching_occured:
+                self.terminal_state = 'OPTIMAL'
+                # todo: correct gap, dual bound and LP iterations records:
+                #  model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
+                #  last transition stats, so it is probably > 0 at this point.
+                #  The dualbound might also be incorrect. For example, if primal heuristics improved, and conflict analysis
+                #  or other heuristics improved the dualbound to its optimal value. As a consequence,
+                #  the dual bound recorded at the last separation round is not optimal.
+                #  In this case, the final LP iter might also be greater than the last value recorded,
+                #  If they haven't reached the limit, then we take them as is.
+                #  Otherwise, we truncate the curve as usual.
+                #  By convention, we override the last records with the final values,
+                #  and truncate the curves if necessary
+                self.episode_stats['gap'][-1] = self.model.getGap()
+                self.episode_stats['dualbound'][-1] = self.model.getDualbound()
+                self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()  # todo - subtract probing mode lp_iters if any
+                self.truncate_to_lp_iterations_limit()
+            else:
+                self.terminal_state = 'BRANCHED'
+        else:
+        # elif self.terminal_state and self.model.getGap() > 0:
+        #     self.terminal_state = 'DIDNOTFIND'
             # todo
-            #  the episode terminated unexpectedly, generating a bad reward,
+            #  The episode terminated unexpectedly, generating a bad reward,
             #  so terminate and discard trajectory.
-            #  observed reason: the generated cuts were very weak. They were considered as non-efficacious,
-            #  and were discarded inside the cycle cuts generator. SCIP, as it has no other choice,
-            #  decides to branch and terminates due to the root only constraint.
-            # while generating experience we discard the episode trajectory to avoid extremely bad rewards from
-            # biasing the agent too much.
-            # in evaluation episodes we process it as is.
-            if self.hparams.get('discard_bad_experience', True) and self.training:
-                return []
+            #  possible reasons: no available cuts (cycle inequalities are not sufficient for maxcut with K5 minors)
+            #  In training we discard the episode to avoid extremely bad rewards.
+            #  In testing we process it as is.
+            assert self.branching_occured
+            self.terminal_state = 'BRANCHED'
 
-        assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'DIDNOTFIND', 'EMPTY_ACTION']
+        if self.terminal_state == 'BRANCHED' and self.hparams.get('discard_bad_experience', True) and self.training:
+            return []
+
+        assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'BRANCHED', 'EMPTY_ACTION']
         assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
         # in a case SCIP terminated without calling the agent,
         # we need to complete some feedback manually.
@@ -1191,7 +1213,7 @@ class CutDQNAgent(Sepa):
         A corner case is when choosing "EMPTY_ACTION" (shouldn't happen if we force selecting at least one cut)
         then the function is called immediately, and we need to add 1 to the number of lp_rounds.
         """
-        if self.finished_episode_stats:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
+        if self.stats_updated:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
             return
         # todo verify recording initial state stats before taking any action
         self.episode_stats['ncuts'].append(0 if self.prev_action is None else self.prev_action['ncuts'] )
@@ -1208,6 +1230,7 @@ class CutDQNAgent(Sepa):
         else:
             self.episode_stats['lp_rounds'].append(self.model.getNLPs())
         self.truncate_to_lp_iterations_limit()
+        self.stats_updated = True
 
     def truncate_to_lp_iterations_limit(self):
         # enforce the lp_iterations_limit on the last two records
@@ -1626,6 +1649,14 @@ class CutDQNAgent(Sepa):
             if self.use_per:
                 self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
+    def on_nodebranched_event(self):
+        self.branching_occured = True
+
+    def on_lpsolved_event(self):
+        # todo verification
+        self.model.getState(query=self.prev_action)
+        self._update_episode_stats()
+
     # done
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
         # fix training scip_seed for debug purpose
@@ -1641,6 +1672,11 @@ class CutDQNAgent(Sepa):
         model.includeSepa(cycle_sepa, 'MLCycles',
                           "Generate cycle inequalities for the MaxCut McCormick formulation",
                           priority=1000000, freq=1)
+
+        # include branching event handler
+        branching_event = BranchingEventHdlr(on_nodebranched_event=self.on_nodebranched_event,
+                                             on_lpsolved_event=self.on_lpsolved_event)
+        model.includeEventhdlr(branching_event, "BranchingEventhdlr", "Catches NODEBRANCHED event")
 
         # reset new episode
         self.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline,
@@ -1670,8 +1706,8 @@ class CutDQNAgent(Sepa):
             model.hideOutput()
 
         if self.hparams.get('debug_events'):
-            eventhdlr = DebugEvents()
-            model.includeEventhdlr(eventhdlr, "DebugEvents", "Catches LPSOLVED and ROWADDEDSEPA events")
+            debug_eventhdlr = DebugEvents()
+            model.includeEventhdlr(debug_eventhdlr, "DebugEvents", "Catches LPSOLVED and ROWADDEDSEPA events")
 
         # gong! run episode
         model.optimize()
