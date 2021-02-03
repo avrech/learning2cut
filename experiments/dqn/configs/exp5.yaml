@@ -54,6 +54,7 @@ num_episodes: 2000000
 log_interval: 20
 checkpoint_interval: 20
 verbose: 1
+ignore_test_early_stop: True  # report performance ignoring early stops due to branching
 
 # DEBUG FLAGS
 debug: False

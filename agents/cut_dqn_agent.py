@@ -147,6 +147,7 @@ class CutDQNAgent(Sepa):
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
         self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
+        self.test_perf_list = []
 
         # tmp buffer for holding cycle-statistics
         self.cycle_stats = None
@@ -158,6 +159,8 @@ class CutDQNAgent(Sepa):
         self.tmp_stats_buffer['Demonstrations/f1_score'] = []
         for k in list(self.test_stats_buffer.keys()):
             self.test_stats_buffer['Demonstrations/' + k] = []
+
+        self.test_stats_dict = {} # store testset stats by graph_id and seed
 
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
@@ -760,12 +763,15 @@ class CutDQNAgent(Sepa):
         self.tmp_stats_buffer[stats_folder + 'applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
         if self.baseline.get('rootonly_stats', None) is not None:
             # this is evaluation round.
-            self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
-            self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+            if not self.branching_occured or self.hparams.get('ignore_test_early_stop', False):
+                self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
+                self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
         # if self.demonstration_episode:  todo verification
         self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list
         self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list
-
+        # store performance for tracking best models, ignoring bad outliers (e.g branching occured)
+        if not self.branching_occured or self.hparams.get('ignore_test_early_stop', False):
+            self.test_perf_list.append(db_auc if self.dqn_objective == 'db_auc' else gap_auc)
         return trajectory
 
     # done
@@ -1296,11 +1302,16 @@ class CutDQNAgent(Sepa):
                 self.decorate_figures()  # todo replace with wandb plot line
 
             if save_best:
-                perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])
+                # todo check if ignoring outliers is a good idea
+                # perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])
+                perf = np.mean(self.test_perf_list)
                 if perf > self.best_perf[self.dataset_name]:
                     self.best_perf[self.dataset_name] = perf
                     self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
                     self.save_figures(filename_prefix='best')
+                    # save full test stats dict
+                    with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_test_stats.pkl'), 'wb') as f:
+                        pickle.dump(self.test_stats_dict[self.dataset_name], f)
 
             # add episode figures (for validation and test sets only)
             if plot_figures:
@@ -1393,6 +1404,8 @@ class CutDQNAgent(Sepa):
         print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
+
+        self.test_perf_list = []  # reset for the next testset
 
         return global_step, log_dict
 
@@ -1745,8 +1758,9 @@ class CutDQNAgent(Sepa):
                                   col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
                                   row_labels=[f'inst {inst_idx}' for inst_idx in
                                               range(dataset['num_instances'])])
-
+                self.test_stats_dict[dataset_name] = {}
                 for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+                    self.test_stats_dict[dataset_name][inst_idx] = {}
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
                         if self.hparams.get('verbose', 0) == 2:
                             print('##################################################################################')
@@ -1755,6 +1769,8 @@ class CutDQNAgent(Sepa):
                         self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
+                        self.test_stats_dict[dataset_name][inst_idx][scip_seed] = {'stats': self.episode_stats,
+                                                                                   'branched': self.branching_occured}
 
                         # record cycles statistics
                         if self.hparams.get('record_cycles', False):
