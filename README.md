@@ -34,6 +34,17 @@ Reinforcement Learning for Cut Selection
 
 6. Sign up to [Weights & Biases](https://www.wandb.com/), and follow the [instructions](https://docs.wandb.com/quickstart) to connect your device to your `wandb` account. 
 
+## Running on Compute Canada
+* `pyarrow` cannot be installed directly, and must be loaded using `module load arrow`.  
+* `torch_geometric` is compiled for specific `torch` and `cuda` versions. For available `torch` versions contact CC support. 
+* The following setup was tested successfully on Graham:
+> $ module load StdEnv/2018.3 gcc/7.3.0 python/3.7.4 arrow  
+$ virtualenv env && source env/bin/activate  
+(env) ~ $ pip install torch==1.4.0 torch_geometric torchvision torch-scatter torch-sparse torch-cluster torch-spline-conv -U --force  
+(env) ~ $ python -c "import pyarrow; torch_geometric; import torch_cluster; import torch_cluster.graclus_cpu"  
+(env) ~ $  
+
+
 ## Reproducing Datasets  
 ### Maxcut  
 Inside `learning2cut/experiments/dqn` run:  
@@ -102,34 +113,18 @@ The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_itera
 Inside `learning2cut/experiments/dqn` run:  
 > python run_apex_dqn.py --rootdir results/exp1 --configfile configs/exp1-overfitVal25-demoLossOnly-fixedTrainingScipSeed.yaml --use-gpu  
 
-Description:  
-* Training on validset.20-30[0]  
-* SCIP seed is fixed to 223 during training  
-* Optimizing demonstration loss only  
-* Testing on the same instance with SCIP seeds [52, 176, 223]  
-* Goal: perfect overfitting - a sanity check.
-* results [here](https://app.wandb.ai/avrech/learning2cut/runs/2v0lez39)  
-
 ### Experiment 2
 Inside `learning2cut/experiments/dqn` run:  
 > python run_apex_dqn.py --use-gpu --rootdir results/exp2 --configfile configs/exp2-overfitVal25-demoLossOnly.yaml
 
-Description:
-* Training on validset.20-30[0]  
-* SCIP seed is *random*
-* Optimizing demonstration loss only  
-* Testing on the same instance with SCIP seeds [52, 176, 223]  
-* Goal: generalization across seeds. 
-* results [here](https://app.wandb.ai/avrech/learning2cut/runs/3i8f068p)  
 
 
 
-
-
-|Done |Exp | Input Graph | Data | Loss | SCIP Seed  | Goal | Results |
+|Done |Exp | Train Set | Behaviour | Loss | SCIP Seed  | Goal | Results |
 |---|:---:|:---:|:---:|:---:|:---:|:---|:---:|
-| &#9745; |1 | Fixed | Demo | Demo | Fixed | Perfect overfitting | [here](https://app.wandb.ai/avrech/learning2cut/runs/2v0lez39)|
-| &#9745; |2 | Fixed | Demo | Demo | Random | Generalization across seeds | [here](https://app.wandb.ai/avrech/learning2cut/runs/3i8f068p)  |
-| &#9744; |3 | Random | Demo | Demo | Random | Generalization across graphs | |
-| &#9744; |4 | Random | Demo | Demo + DQN | Random | ? | |
-| &#9744; |5 | Random | Demo + DQN| Demo + DQN | Random | Improving over SCIP | |
+| &#9745; |1 | Fixed graph| Demo | Demo | Fixed | Perfect overfitting | [here](https://app.wandb.ai/avrech/learning2cut/runs/2v0lez39)|  
+| &#9745; |2 | Fixed graph| Demo | Demo | Random | Generalization across seeds | [here](https://app.wandb.ai/avrech/learning2cut/runs/3i8f068p)|  
+| &#9745; |3 | Random | Demo | Demo | Random | Generalization across graphs | [here](https://app.wandb.ai/avrech/learning2cut/runs/dyvqmmp9)|  
+| &#9744; |4 | Random | Demo | Demo+DQN | Random | See convergence to "interesting" policy | [here](https://app.wandb.ai/avrech/learning2cut/runs/1jmcareo)|
+| &#9744; |5 | Random | Demo+DQN| Demo+DQN | Random | Improving over SCIP | [here](https://wandb.ai/avrech/learning2cut/runs/1jmcareo?workspace=user-avrech)|
+
