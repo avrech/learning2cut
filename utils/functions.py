@@ -176,3 +176,26 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
         ft_areas = ft_areas[:-1]
 
     return ft_areas
+
+
+def truncate(t, ft, support, interpolate=False):
+    """
+    Truncate curves to support, interpolating last point at the end of the support.
+    If t < support does not do anything.
+    """
+    assert type(t) == list and type(ft) == list
+    if t[-1] <= support:
+        return
+    # find first index of t > support
+    last_index = np.nonzero(np.array(t) > support)[0]
+    # discard elements after last index
+    t = t[:last_index + 1]
+    ft = ft[:last_index + 1]
+    # interpolate ft at last index
+    if interpolate:
+        slope = (ft[-1] - ft[-2]) / (t[-1] - t[-2])
+        # compute the linear interpolation of ft at t_support
+        ft[-1] = ft[-2] + slope * (support - t[-2])
+    t[-1] = support
+
+    return t, ft
