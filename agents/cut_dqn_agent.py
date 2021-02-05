@@ -18,7 +18,7 @@ from torch_scatter import scatter_mean, scatter_max, scatter_add
 # from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.data import Data
 from tqdm import tqdm
-from utils.functions import get_normalized_areas
+from utils.functions import get_normalized_areas, truncate
 from collections import namedtuple
 import matplotlib as mpl
 import pickle
@@ -1449,12 +1449,12 @@ class CutDQNAgent(Sepa):
             ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
             ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
             ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
-            ax.plot([0, self.baseline['lp_iterations_limit']], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+            ax.plot([0, self.lp_iterations_limit], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
             # plot gap
             ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
             ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
             ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
-            ax.plot([0, self.baseline['lp_iterations_limit']], [0, 0], 'k', label='optimal gap')
+            ax.plot([0, self.lp_iterations_limit], [0, 0], 'k', label='optimal gap')
 
         # plot imitation performance bars
         if 'Similarity_to_SCIP' in self.figures.keys():
@@ -1611,13 +1611,22 @@ class CutDQNAgent(Sepa):
             for (_, baseline) in dataset['instances']:
                 optimal_value = baseline['optimal_value']
                 for scip_seed in dataset['scip_seed']:
+                    # align curves to lp_iterations_limit
+                    tmp_stats = {}
+                    for k, v in baseline['rootonly_stats'][scip_seed].items():
+                        if k != 'lp_iterations' and len(v) > 0:
+                            aligned_lp_iterations, aligned_v = truncate(t=baseline['rootonly_stats'][scip_seed]['lp_iterations'], ft=v,
+                                                                        support=dataset['lp_iterations_limit'], interpolate=type(v[0]) == float)
+                            tmp_stats[k] = aligned_v
+                            tmp_stats['lp_iterations'] = aligned_lp_iterations
+                    # override with aligned stats
+                    baseline['rootonly_stats'][scip_seed] = tmp_stats
+
                     dualbound = baseline['rootonly_stats'][scip_seed]['dualbound']
                     gap = baseline['rootonly_stats'][scip_seed]['gap']
                     lpiter = baseline['rootonly_stats'][scip_seed]['lp_iterations']
-                    db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'],
-                                                      reference=optimal_value))
-                    gap_auc = sum(
-                        get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+                    db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
+                    gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
                     baseline['rootonly_stats'][scip_seed]['db_auc'] = db_auc
                     baseline['rootonly_stats'][scip_seed]['gap_auc'] = gap_auc
                     db_auc_list.append(db_auc)
