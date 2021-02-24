@@ -266,6 +266,7 @@ class ApeXDQN:
             packet = self.apex_socket.recv()
             topic, sender, body = pa.deserialize(packet)
             assert topic == 'log'
+            self.print(f'Packet from {sender}')
             # put things into a dictionary
             log_dict = {}
             for k, v in body:
@@ -289,9 +290,9 @@ class ApeXDQN:
                 step = self.pending_logs.pop(0)
                 log_dict = self.history.pop(step)
                 wandb.log(log_dict, step=step)
-            if len(self.pending_logs) > 1000:
+            if len(self.pending_logs) > 10:  # todo return to 1000
                 self.print('some actor is dead. restart to continue logging.')
-
+                print(self.step_counter)
         # ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
 
     def get_actors_running_process(self, actors=None):
@@ -344,15 +345,15 @@ class ApeXDQN:
         # restart all actors
         for actor_name, actor_process in actor_processes.items():
             # actor_process = running_actors[actor_name]
-            if actor_process is not None:
+            if actor_process is not None or ray_running_actors.get(actor_name, None) is not None:
                 if force_restart:
-                    print(f'killing {actor_name} process (pid {actor_process.pid})')
+                    print(f'killing {actor_name} process (pid {actor_process.pid if actor_process is not None else "?"})')
                     if actor_name == 'apex':
                         actor_process.kill()
                     else:
                         ray.kill(ray_running_actors[actor_name])
                 else:
-                    print(f'{actor_name} is running (pid {actor_process.pid}). '
+                    print(f'{actor_name} is running (pid {actor_process.pid if actor_process is not None else ray_running_actors[actor_name]}). '
                           f'use --force-restart for killing running actors and restarting new ones.')
                     continue
 
