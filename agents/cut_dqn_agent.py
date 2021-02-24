@@ -13,10 +13,7 @@ import torch
 import scipy as sp
 import torch.optim as optim
 import torch.nn.functional as F
-from torch_geometric.data.batch import Batch
 from torch_scatter import scatter_mean, scatter_max, scatter_add
-# from torch.utils.tensorboard import SummaryWriter
-from torch_geometric.data import Data
 from tqdm import tqdm
 from utils.functions import get_normalized_areas, truncate
 from collections import namedtuple
@@ -27,8 +24,6 @@ from utils.buffer import ReplayBuffer, PrioritizedReplayBuffer
 from separators.mccormick_cycle_separator import MccormickCycleSeparator
 from copy import deepcopy
 mpl.rc('figure', max_open_warning=0)
-# mpl.rcParams['text.antialiased'] = False
-# mpl.use('agg')
 import matplotlib.pyplot as plt
 import wandb
 
@@ -158,10 +153,10 @@ class CutDQNAgent(Sepa):
             self.tmp_stats_buffer['Demonstrations/' + k] = []
         self.tmp_stats_buffer['Demonstrations/accuracy'] = []
         self.tmp_stats_buffer['Demonstrations/f1_score'] = []
-        for k in list(self.test_stats_buffer.keys()):
-            self.test_stats_buffer['Demonstrations/' + k] = []
+        # for k in list(self.test_stats_buffer.keys()):
+        #     self.test_stats_buffer['Demonstrations/' + k] = []
 
-        self.test_stats_dict = {} # store testset stats by graph_id and seed
+        self.test_stats_dict = {}  # store testset stats by graph_id and seed
 
         # best performance log for validation sets
         self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
@@ -515,7 +510,7 @@ class CutDQNAgent(Sepa):
 
         elif self.model.getGap() == 0:
             # assert self.stats_updated
-            if not self.node_limit_reached:
+            if self.model.getStatus() != 'nodelimit':
                 self.terminal_state = 'OPTIMAL'
                 # todo: correct gap, dual bound and LP iterations records:
                 #  model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
@@ -548,12 +543,11 @@ class CutDQNAgent(Sepa):
             self.terminal_state = 'NODE_LIMIT'
 
         # discard episodes which terminated early without optimal solution, to avoid extremely bad rewards.
-        if self.terminal_state == 'NODE_LIMIT' and self.hparams.get('discard_bad_experience', True) \
+        if self.terminal_state == 'NODE_LIMIT' and self.hparams.get('discard_bad_experience', False) \
                 and self.training and self.model.getNLPIterations() < 0.90 * self.lp_iterations_limit:
             # todo remove printing-  debug
             self.debug_n_early_stop += 1
             self.print(f'discarded early stop {self.debug_n_early_stop}/{self.debug_n_episodes_done}')
-
             return []
 
         assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'NODE_LIMIT', 'EMPTY_ACTION']
@@ -1345,9 +1339,6 @@ class CutDQNAgent(Sepa):
             # add episode figures (for validation and test sets only)
             if plot_figures:
                 for figname in self.figures['fignames']: # todo replace with wandb plot line. in the meanwhile use wandb Image
-                    # self.writer.add_figure(figname + '/' + self.dataset_name, self.figures[figname]['fig'],
-                    #                        global_step=global_step, walltime=cur_time_sec)
-                    # todo wandb
                     if log_directly:
                         log_dict[figname + '/' + self.dataset_name] = self.figures[figname]['fig']
                     else:
@@ -1361,14 +1352,11 @@ class CutDQNAgent(Sepa):
             for k, vals in self.test_stats_buffer.items():
                 if len(vals) > 0:
                     avg = np.mean(vals)
-                    std = np.std(vals)
+                    # std = np.std(vals)
                     print('{}: {:.4f} | '.format(k, avg), end='')
-                    # self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
-                    # self.writer.add_scalar(k+'_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                     self.test_stats_buffer[k] = []
-                    # todo wandb
                     log_dict[self.dataset_name + '/' + k + actor_name] = avg
-                    log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
+                    # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
 
             # sanity check
             if self.hparams.get('sanity_check', False):
@@ -1381,8 +1369,6 @@ class CutDQNAgent(Sepa):
                     avg = np.mean(vals)
                     std = np.std(vals)
                     print('{}: {:.4f} | '.format(k, avg), end='')
-                    # self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
-                    # self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
                     log_dict[self.dataset_name + '/' + k + actor_name] = avg
                     log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
 
@@ -1396,22 +1382,16 @@ class CutDQNAgent(Sepa):
                 if len(vals) == 0:
                     continue
                 avg = np.mean(vals)
-                std = np.std(vals)
+                # std = np.std(vals)
                 print('{}: {:.4f} | '.format(k, avg), end='')
-                # self.writer.add_scalar(k + '/' + self.dataset_name, avg, global_step=global_step, walltime=cur_time_sec)
-                # self.writer.add_scalar(k + '_std' + '/' + self.dataset_name, std, global_step=global_step, walltime=cur_time_sec)
-                # todo wandb
                 log_dict[self.dataset_name + '/' + k + actor_name] = avg
-                log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
-
+                # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
                 self.tmp_stats_buffer[k] = []
 
         if self.is_learner:
             # log the average loss of the last training session
             print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
             print('Demonstration Loss: {:.4f} | '.format(self.demonstration_loss_moving_avg), end='')
-            # self.writer.add_scalar('Nstep_Loss', self.n_step_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
-            # self.writer.add_scalar('Demonstration_Loss', self.demonstration_loss_moving_avg, global_step=global_step, walltime=cur_time_sec)
             print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
             # todo wandb
             log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
