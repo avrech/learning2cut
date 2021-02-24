@@ -185,9 +185,9 @@ def truncate(t, ft, support, interpolate=False):
     """
     assert type(t) == list and type(ft) == list
     if t[-1] <= support:
-        return
+        return t, ft
     # find first index of t > support
-    last_index = np.nonzero(np.array(t) > support)[0]
+    last_index = np.nonzero(np.array(t) > support)[0][0]
     # discard elements after last index
     t = t[:last_index + 1]
     ft = ft[:last_index + 1]
