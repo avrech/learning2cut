@@ -5,7 +5,8 @@ from collections import OrderedDict
 
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
-                          use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True):
+                          use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
+                          use_random_branching=True):
     r"""
     Returns MAXCUT model of G assuming edge attributes named 'weight', denoted by `w`.
 
@@ -79,7 +80,8 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
         model.disablePropagation()
     if not use_heuristics:
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
-
+    if use_random_branching:
+        model.setIntParam('branching/random/priority', 999999)
     return model, x, y
 
 
