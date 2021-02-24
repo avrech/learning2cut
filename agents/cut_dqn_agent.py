@@ -1,5 +1,5 @@
 from sklearn.metrics import f1_score
-from pyscipopt import Sepa, SCIP_RESULT
+from pyscipopt import Sepa, SCIP_RESULT, SCIP_STAGE
 from time import time
 import numpy as np
 from utils.data import Transition
@@ -101,6 +101,7 @@ class CutDQNAgent(Sepa):
         self.datasets = None
         self.trainset = None
         self.graph_indices = None
+        self.cur_graph = None
 
         # instance specific data needed to be reset every episode
         self.G = None
@@ -123,7 +124,7 @@ class CutDQNAgent(Sepa):
             'dualbound': []
         }
         self.stats_updated = False
-        self.branching_occured = False
+        self.node_limit_reached = False
         self.cut_generator = None
         self.nseparounds = 0
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
@@ -146,7 +147,7 @@ class CutDQNAgent(Sepa):
 
         # tmp buffer for holding each episode results until averaging and appending to experiment_stats
         self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
-        self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': []}
+        self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': [], 'db_auc': [], 'gap_auc': []}
         self.test_perf_list = []
 
         # tmp buffer for holding cycle-statistics
@@ -174,6 +175,11 @@ class CutDQNAgent(Sepa):
         self.sanity_check_stats = {'n_duplicated_cuts': [],
                                    'n_weak_cuts': [],
                                    'n_original_cuts': []}
+
+        # debug todo remove when finished
+        self.debug_n_tracking_errors = 0
+        self.debug_n_early_stop = 0
+        self.debug_n_episodes_done = 0
 
         # initialize (set seed and load checkpoint)
         self.initialize_training()
@@ -206,7 +212,7 @@ class CutDQNAgent(Sepa):
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
         self.demonstration_episode = demonstration_episode
-        self.branching_occured = False
+        self.node_limit_reached = False
 
     # done
     def sepaexeclp(self):
@@ -346,7 +352,6 @@ class CutDQNAgent(Sepa):
                         self.print('discarded all cuts')
                     self.terminal_state = 'EMPTY_ACTION'
                     self._update_episode_stats()
-                    self.stats_updated = True
                     result = {"result": SCIP_RESULT.DIDNOTFIND}
 
                 # SCIP will execute the action,
@@ -478,6 +483,8 @@ class CutDQNAgent(Sepa):
         self.terminal_state is set to the appropriate value.
 
         """
+        self.debug_n_episodes_done += 1         # todo debug remove when finished
+
         if self.cut_generator is not None:
             assert self.nseparounds == self.cut_generator.nseparounds
 
@@ -501,14 +508,14 @@ class CutDQNAgent(Sepa):
         #  if no branching occured, update stats and continue.
 
         # elif self.branching_event.branching_occured:
-        #     self.terminal_state = 'BRANCHED'
+        #     self.terminal_state = 'NODE_LIMIT'
         #     if self.hparams.get('discard_bad_experience', True) and self.training:
         #         return []
         #     # if updated
 
         elif self.model.getGap() == 0:
-            assert self.stats_updated
-            if not self.branching_occured:
+            # assert self.stats_updated
+            if not self.node_limit_reached:
                 self.terminal_state = 'OPTIMAL'
                 # todo: correct gap, dual bound and LP iterations records:
                 #  model.getGap() returns incorrect value in the last (redundant) LP round when we collect the
@@ -526,7 +533,7 @@ class CutDQNAgent(Sepa):
                 self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()  # todo - subtract probing mode lp_iters if any
                 self.truncate_to_lp_iterations_limit()
             else:
-                self.terminal_state = 'BRANCHED'
+                self.terminal_state = 'NODE_LIMIT'
         else:
         # elif self.terminal_state and self.model.getGap() > 0:
         #     self.terminal_state = 'DIDNOTFIND'
@@ -536,13 +543,20 @@ class CutDQNAgent(Sepa):
             #  possible reasons: no available cuts (cycle inequalities are not sufficient for maxcut with K5 minors)
             #  In training we discard the episode to avoid extremely bad rewards.
             #  In testing we process it as is.
-            assert self.branching_occured
-            self.terminal_state = 'BRANCHED'
+            assert self.model.getStatus() == 'nodelimit'
+            self.node_limit_reached = True  # todo - why event handler doesn't catch all branching events?
+            self.terminal_state = 'NODE_LIMIT'
 
-        if self.terminal_state == 'BRANCHED' and self.hparams.get('discard_bad_experience', True) and self.training:
+        # discard episodes which terminated early without optimal solution, to avoid extremely bad rewards.
+        if self.terminal_state == 'NODE_LIMIT' and self.hparams.get('discard_bad_experience', True) \
+                and self.training and self.model.getNLPIterations() < 0.90 * self.lp_iterations_limit:
+            # todo remove printing-  debug
+            self.debug_n_early_stop += 1
+            self.print(f'discarded early stop {self.debug_n_early_stop}/{self.debug_n_episodes_done}')
+
             return []
 
-        assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'BRANCHED', 'EMPTY_ACTION']
+        assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'NODE_LIMIT', 'EMPTY_ACTION']
         assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
         # in a case SCIP terminated without calling the agent,
         # we need to complete some feedback manually.
@@ -555,23 +569,35 @@ class CutDQNAgent(Sepa):
             #  restore the applied cuts from sepastore->selectedcutsnames
             selected_cuts_names = self.model.getSelectedCutsNames()
             for i, cut_name in enumerate(selected_cuts_names):
-                self.prev_action[cut_name]['applied'] = True
-                self.prev_action[cut_name]['selection_order'] = i
+                self.prev_action['cuts'][cut_name]['applied'] = True
+                self.prev_action['cuts'][cut_name]['selection_order'] = i
             applied = np.zeros((ncuts,), dtype=np.bool)
             selection_order = np.full_like(applied, fill_value=ncuts, dtype=np.long)
-            for i, cut in enumerate(self.prev_action.values()):
+            for i, cut in enumerate(self.prev_action['cuts'].values()):
                 if i == ncuts:
                     break
                 applied[i] = cut['applied']
                 selection_order[i] = cut['selection_order']
             self.prev_action['applied'] = applied
-            self.prev_action['selection_order'] = np.argsort(selection_order)[len(selected_cuts_names)]
+            self.prev_action['selection_order'] = np.argsort(selection_order)[:len(selected_cuts_names)]  # todo verify bug fix
 
             # assert that the action taken by agent was actually applied
             selected_cuts = self.prev_action['selected_by_scip'] if self.demonstration_episode else self.prev_action['selected_by_agent']
-            assert all(selected_cuts == self.prev_action['applied'])
+            # todo
+            #  assert all(selected_cuts == self.prev_action['applied'])
+            #  for some reason this assertion fails because of self.model.getSelectedCutsNames() returns empty list,
+            #  although there was at least one cut. the selected cuts names are important only for demonstrations,
+            #  so if we are in training and in a demonstration episode then we just return here.
+            if not all(selected_cuts == self.prev_action['applied']):
+                # something gone wrong.
+                # assert len(selection_order) == 0  # this is the known reason for this problem
+                if self.training and self.demonstration_episode:
+                    # todo remove printing-  debug
+                    self.debug_n_tracking_errors += 1
+                    self.print(f'discarded tracking error {self.debug_n_tracking_errors}/{self.debug_n_episodes_done} ({self.cur_graph})')
+                    return []
 
-            assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED']
+            assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'NODE_LIMIT']
             nvars = self.model.getNVars()
 
             cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
@@ -763,14 +789,17 @@ class CutDQNAgent(Sepa):
         self.tmp_stats_buffer[stats_folder + 'applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
         if self.baseline.get('rootonly_stats', None) is not None:
             # this is evaluation round.
-            if not self.branching_occured or self.hparams.get('ignore_test_early_stop', False):
+            if not self.node_limit_reached or self.hparams.get('ignore_test_early_stop', False):
                 self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
                 self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+                self.test_stats_buffer['db_auc'].append(db_auc)
+                self.test_stats_buffer['gap_auc'].append(gap_auc)
+
         # if self.demonstration_episode:  todo verification
         self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list
         self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list
         # store performance for tracking best models, ignoring bad outliers (e.g branching occured)
-        if not self.branching_occured or self.hparams.get('ignore_test_early_stop', False):
+        if not self.node_limit_reached or self.hparams.get('ignore_test_early_stop', False):
             self.test_perf_list.append(db_auc if self.dqn_objective == 'db_auc' else gap_auc)
         return trajectory
 
@@ -1308,7 +1337,7 @@ class CutDQNAgent(Sepa):
                 if perf > self.best_perf[self.dataset_name]:
                     self.best_perf[self.dataset_name] = perf
                     self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
-                    self.save_figures(filename_prefix='best')
+                    self.save_figures(filename_suffix=f'best_{self.num_param_updates}')
                     # save full test stats dict
                     with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_test_stats.pkl'), 'wb') as f:
                         pickle.dump(self.test_stats_dict[self.dataset_name], f)
@@ -1430,31 +1459,76 @@ class CutDQNAgent(Sepa):
         should be called after each validation/test episode with row=graph_idx, col=seed_idx
         """
         if 'Dual_Bound_vs_LP_Iterations' in self.figures.keys():
-            bsl = self.baseline['rootonly_stats'][self.scip_seed]
-            bsl_lpiter, bsl_db, bsl_gap = bsl['lp_iterations'], bsl['dualbound'], bsl['gap']
-            dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
-            if dqn_lpiter[-1] < self.lp_iterations_limit:
-                # extend curve to the limit
-                dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
-                dqn_db = dqn_db + dqn_db[-1:]
-                dqn_gap = dqn_gap + dqn_gap[-1:]
-            if bsl_lpiter[-1] < self.lp_iterations_limit:
-                # extend curve to the limit
-                bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
-                bsl_db = bsl_db + bsl_db[-1:]
-                bsl_gap = bsl_gap + bsl_gap[-1:]
-            assert dqn_lpiter[-1] == self.lp_iterations_limit
-            assert bsl_lpiter[-1] == self.lp_iterations_limit
-            # plot dual bound
-            ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
-            ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
-            ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
-            ax.plot([0, self.lp_iterations_limit], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
-            # plot gap
-            ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
-            ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
-            ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
-            ax.plot([0, self.lp_iterations_limit], [0, 0], 'k', label='optimal gap')
+            dqn = self.episode_stats
+            bsl_0 = self.baseline['rootonly_stats'][self.scip_seed]
+            bsl_1 = self.baseline['10_random'][self.scip_seed]
+            bsl_2 = self.baseline['10_most_violated'][self.scip_seed]
+            bsl_stats = self.datasets[self.dataset_name]['stats']
+            # bsl_lpiter, bsl_db, bsl_gap = bsl_0['lp_iterations'], bsl_0['dualbound'], bsl_0['gap']
+            # dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
+
+            # set labels for the last subplot
+            if row == self.figures['nrows'] - 1 and col == self.figures['ncols'] - 1:
+                dqn_db_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['db_auc'])
+                dqn_gap_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['gap_auc'])
+                dqn_db_auc_avg = np.mean(self.tmp_stats_buffer['db_auc'])
+                dqn_gap_auc_avg = np.mean(self.tmp_stats_buffer['gap_auc'])
+                db_labels = ['DQN {:.4f}({:.4f})'.format(dqn_db_auc_avg, dqn_db_auc_avg_without_early_stop),
+                             'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['db_auc_avg']),
+                             '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['db_auc_avg']),
+                             '10 MOST VIOLATED {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_most_violated']['db_auc_avg']),
+                             'OPTIMAL'
+                             ]
+                gap_labels = ['DQN {:.4f}({:.4f})'.format(dqn_gap_auc_avg, dqn_gap_auc_avg_without_early_stop),
+                              'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['gap_auc_avg']),
+                              '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['gap_auc_avg']),
+                              '10 MOST VIOLATED {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_most_violated']['gap_auc_avg']),
+                              'OPTIMAL'
+                              ]
+            else:
+                db_labels = [None] * 5
+                gap_labels = [None] * 5
+
+            for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
+                                                                   ['b', 'g', 'y', 'r', 'k'],
+                                                                   [dqn['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
+                                                                   [dqn['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
+                                                                   [dqn['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
+                                                                   ):
+                if lpiter[-1] < self.lp_iterations_limit:
+                    # extend curve to the limit
+                    lpiter = lpiter + [self.lp_iterations_limit]
+                    db = db + db[-1:]
+                    gap = gap + gap[-1:]
+                assert lpiter[-1] == self.lp_iterations_limit
+                # plot dual bound and gap
+                ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+                ax.plot(lpiter, db, color, label=db_label)
+                ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+                ax.plot(lpiter, gap, color, label=gap_label)
+
+            # if dqn_lpiter[-1] < self.lp_iterations_limit:
+            #     # extend curve to the limit
+            #     dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
+            #     dqn_db = dqn_db + dqn_db[-1:]
+            #     dqn_gap = dqn_gap + dqn_gap[-1:]
+            # if bsl_lpiter[-1] < self.lp_iterations_limit:
+            #     # extend curve to the limit
+            #     bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
+            #     bsl_db = bsl_db + bsl_db[-1:]
+            #     bsl_gap = bsl_gap + bsl_gap[-1:]
+            # assert dqn_lpiter[-1] == self.lp_iterations_limit
+            # assert bsl_lpiter[-1] == self.lp_iterations_limit
+            # # plot dual bound
+            # ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+            # ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
+            # ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
+            # ax.plot([0, self.lp_iterations_limit], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+            # # plot gap
+            # ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+            # ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
+            # ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
+            # ax.plot([0, self.lp_iterations_limit], [0, 0], 'k', label='optimal gap')
 
         # plot imitation performance bars
         if 'Similarity_to_SCIP' in self.figures.keys():
@@ -1502,16 +1576,17 @@ class CutDQNAgent(Sepa):
                     ax.set_ylabel(self.figures['row_labels'][row])
             if legend:
                 # add legend to the bottom-left subplot only
-                ax = self.figures[figname]['axes'][-1, 0]
+                ax = self.figures[figname]['axes'][-1, -1]
                 ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), fancybox=True, shadow=True, ncol=1, borderaxespad=0.)
 
     # done
-    def save_figures(self, filename_prefix=None):
+    def save_figures(self, filename_suffix=None):
         for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
             # save png
-            fname = f'{self.dataset_name}_{figname}.png'
-            if filename_prefix is not None:
-                fname = filename_prefix + '_' + fname
+            fname = f'{self.dataset_name}_{figname}'
+            if filename_suffix is not None:
+                fname = fname + '_' + filename_suffix
+            fname += '.png'
             fpath = os.path.join(self.run_dir, fname)
             self.figures[figname]['fig'].savefig(fpath)
 
@@ -1602,45 +1677,46 @@ class CutDQNAgent(Sepa):
                         print(filename, ' is not solved to optimality')
             dataset['num_instances'] = len(dataset['instances'])
 
-        # for the validation and test datasets compute some metrics:
+        # for the validation and test datasets compute average performance of all baselines:
         for dataset_name, dataset in datasets.items():
             if dataset_name[:8] == 'trainset':
                 continue
-            db_auc_list = []
-            gap_auc_list = []
-            for (_, baseline) in dataset['instances']:
-                optimal_value = baseline['optimal_value']
-                for scip_seed in dataset['scip_seed']:
-                    # align curves to lp_iterations_limit
-                    tmp_stats = {}
-                    for k, v in baseline['rootonly_stats'][scip_seed].items():
-                        if k != 'lp_iterations' and len(v) > 0:
-                            aligned_lp_iterations, aligned_v = truncate(t=baseline['rootonly_stats'][scip_seed]['lp_iterations'], ft=v,
-                                                                        support=dataset['lp_iterations_limit'], interpolate=type(v[0]) == float)
-                            tmp_stats[k] = aligned_v
-                            tmp_stats['lp_iterations'] = aligned_lp_iterations
-                    # override with aligned stats
-                    baseline['rootonly_stats'][scip_seed] = tmp_stats
-
-                    dualbound = baseline['rootonly_stats'][scip_seed]['dualbound']
-                    gap = baseline['rootonly_stats'][scip_seed]['gap']
-                    lpiter = baseline['rootonly_stats'][scip_seed]['lp_iterations']
-                    db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
-                    gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
-                    baseline['rootonly_stats'][scip_seed]['db_auc'] = db_auc
-                    baseline['rootonly_stats'][scip_seed]['gap_auc'] = gap_auc
-                    db_auc_list.append(db_auc)
-                    gap_auc_list.append(gap_auc)
-            # compute stats for the whole dataset
-            db_auc_avg = np.mean(db_auc)
-            db_auc_std = np.std(db_auc)
-            gap_auc_avg = np.mean(gap_auc)
-            gap_auc_std = np.std(gap_auc)
             dataset['stats'] = {}
-            dataset['stats']['db_auc_avg'] = db_auc_avg
-            dataset['stats']['db_auc_std'] = db_auc_std
-            dataset['stats']['gap_auc_avg'] = gap_auc_avg
-            dataset['stats']['gap_auc_std'] = gap_auc_std
+            for bsl in ['rootonly_stats', '10_random', '10_most_violated']:
+                db_auc_list = []
+                gap_auc_list = []
+                for (_, baseline) in dataset['instances']:
+                    optimal_value = baseline['optimal_value']
+                    for scip_seed in dataset['scip_seed']:
+                        # align curves to lp_iterations_limit
+                        tmp_stats = {}
+                        for k, v in baseline[bsl][scip_seed].items():
+                            if k != 'lp_iterations' and len(v) > 0:
+                                aligned_lp_iterations, aligned_v = truncate(t=baseline[bsl][scip_seed]['lp_iterations'], ft=v,
+                                                                            support=dataset['lp_iterations_limit'], interpolate=type(v[0]) == float)
+                                tmp_stats[k] = aligned_v
+                                tmp_stats['lp_iterations'] = aligned_lp_iterations
+                        # override with aligned stats
+                        baseline[bsl][scip_seed] = tmp_stats
+
+                        dualbound = baseline[bsl][scip_seed]['dualbound']
+                        gap = baseline[bsl][scip_seed]['gap']
+                        lpiter = baseline[bsl][scip_seed]['lp_iterations']
+                        db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
+                        gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+                        baseline[bsl][scip_seed]['db_auc'] = db_auc
+                        baseline[bsl][scip_seed]['gap_auc'] = gap_auc
+                        db_auc_list.append(db_auc)
+                        gap_auc_list.append(gap_auc)
+                # compute stats for the whole dataset
+                db_auc_avg = np.mean(db_auc)
+                db_auc_std = np.std(db_auc)
+                gap_auc_avg = np.mean(gap_auc)
+                gap_auc_std = np.std(gap_auc)
+                dataset['stats'][bsl] = {'db_auc_avg': db_auc_avg,
+                                         'db_auc_std': db_auc_std,
+                                         'gap_auc_avg': gap_auc_avg,
+                                         'gap_auc_std': gap_auc_std}
 
         self.datasets = datasets
         # todo - overfitting sanity check -
@@ -1672,12 +1748,19 @@ class CutDQNAgent(Sepa):
                 self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
     def on_nodebranched_event(self):
-        self.branching_occured = True
+        # self.print('BRANCHING EVENT')
+        self.node_limit_reached = True
 
     def on_lpsolved_event(self):
         # todo verification
-        self.model.getState(query=self.prev_action)
-        self._update_episode_stats()
+        # self.print('LPSOLVED EVENT')
+        # if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None and self.model.getStage() == SCIP_STAGE.SOLVING:
+        #     self.model.getState(query=self.prev_action)
+        # self._update_episode_stats()
+        # pass
+        # todo - for some reason we get at some point
+        # ): /home/avrech/scipoptsuite-6.0.2-avrech/scip/src/scip/lp.c:3899: SCIPcolGetRedcost: Assertion `lp->validsollp == stat->lpcount' failed.
+        pass
 
     # done
     def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
@@ -1695,7 +1778,7 @@ class CutDQNAgent(Sepa):
                           "Generate cycle inequalities for the MaxCut McCormick formulation",
                           priority=1000000, freq=1)
 
-        # include branching event handler
+        # # include branching event handler
         branching_event = BranchingEventHdlr(on_nodebranched_event=self.on_nodebranched_event,
                                              on_lpsolved_event=self.on_lpsolved_event)
         model.includeEventhdlr(branching_event, "BranchingEventhdlr", "Catches NODEBRANCHED event")
@@ -1771,6 +1854,7 @@ class CutDQNAgent(Sepa):
                 for inst_idx, (G, baseline) in enumerate(dataset['instances']):
                     self.test_stats_dict[dataset_name][inst_idx] = {}
                     for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
+                        self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
                         if self.hparams.get('verbose', 0) == 2:
                             print('##################################################################################')
                             print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
@@ -1779,7 +1863,7 @@ class CutDQNAgent(Sepa):
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
                         self.test_stats_dict[dataset_name][inst_idx][scip_seed] = {'stats': self.episode_stats,
-                                                                                   'branched': self.branching_occured}
+                                                                                   'node_limit_reached': self.node_limit_reached}
 
                         # record cycles statistics
                         if self.hparams.get('record_cycles', False):
@@ -1814,7 +1898,7 @@ class CutDQNAgent(Sepa):
         for i_episode in range(self.i_episode + 1, hparams['num_episodes']):
             # sample graph randomly
             graph_idx = graph_indices[i_episode % len(graph_indices)]
-
+            self.cur_graph = f'trainset graph {graph_idx}'
             if self.hparams.get('verbose', 0) == 2:
                 print(f'############################# starting episode {i_episode} (graph index {graph_idx}) #############################')
             G, baseline = trainset['instances'][graph_idx]
