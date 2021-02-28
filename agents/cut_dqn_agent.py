@@ -553,15 +553,39 @@ class CutDQNAgent(Sepa):
         assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'NODE_LIMIT', 'EMPTY_ACTION']
         assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
         # in a case SCIP terminated without calling the agent,
-        # we need to complete some feedback manually.
-        # (it can happen only in terminal_state = OPTIMAL/LP_ITERATIONS_LIMIT_REACHED).
-        # we need to evaluate the normalized slack of the applied cuts,
+        # we need to restore some information:
+        # the normalized slack of the applied cuts, the selection order in demonstration episodes,
         # and to update the episode stats with the latest SCIP stats.
         if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None:
+            # update stats for the last step
+            self._update_episode_stats()
             ncuts = self.prev_action['ncuts']
-            # todo not verified.
-            #  restore the applied cuts from sepastore->selectedcutsnames
+
+            # todo:
+            #  In rare cases self.model.getSelectedCutsNames() returns an empty list, although there were cuts applied.
+            #  In such a case, we cannot restore the selection order, and therefore demonstration episodes will be discarded.
+            #  If it is not demonstration episode, we can just assume that the cuts applied were those who selected by the agent.
+
+            # try to restore the applied cuts from sepastore->selectedcutsnames
             selected_cuts_names = self.model.getSelectedCutsNames()
+            # if failed:
+            if len(selected_cuts_names) == 0 and self.demonstration_episode and self.training:
+                # cannot restore the selection order. discarding episode.
+                self.debug_n_tracking_errors += 1
+                self.print(f'discarded tracking error {self.debug_n_tracking_errors}/{self.debug_n_episodes_done} ({self.cur_graph})')
+                return []
+            elif len(selected_cuts_names) == 0 and not self.demonstration_episode:
+                # assert that the number of cuts selected by the agent is the number of cuts applied in the last round
+                assert len(self.episode_stats['ncuts_applied'])-1 == len(self.episode_history)
+                assert self.episode_stats['ncuts_applied'][-1] - self.episode_stats['ncuts_applied'][-2] == \
+                       sum(self.episode_history[-1]['action_info']['selected_by_agent'])
+                selected_cuts_names = []
+                for cut_idx, cut_name in enumerate(self.episode_history[-1]['action_info']['cuts'].keys()):
+                    if self.episode_history[-1]['action_info']['selected_by_agent'][cut_idx]:
+                        selected_cuts_names.append(cut_name)
+                assert len(selected_cuts_names) > 0
+
+            # now compute the normalized slack etc.
             for i, cut_name in enumerate(selected_cuts_names):
                 self.prev_action['cuts'][cut_name]['applied'] = True
                 self.prev_action['cuts'][cut_name]['selection_order'] = i
@@ -615,9 +639,6 @@ class CutDQNAgent(Sepa):
             # assign tightness penalty only to the selected cuts.
             self.prev_action['normalized_slack'] = np.zeros_like(self.prev_action['selected_by_agent'], dtype=np.float32)
             self.prev_action['normalized_slack'][self.prev_action['selected_by_agent']] = normalized_slack[self.prev_action['selected_by_agent']]
-
-            # update the rest of statistics needed to compute rewards
-            self._update_episode_stats()
 
         # compute rewards and other stats for the whole episode,
         # and if in training session, push transitions into memory
