@@ -31,8 +31,8 @@ discard_bad_experience: False  # discard training episodes which terminated befo
 
 # LEARNING FROM DEMONSTRATIONS
 n_step_loss_coef: 1.0
-demonstration_loss_coef: 1.0
-demonstration_large_margin: 0.1
+demonstration_loss_coef: 0.5 # 1.0
+demonstration_large_margin: 0.05 # 1
 
 # DQN ARCHITECTURE HPARAMS
 dqn_arch: TQNet     # options: TQNet , QNet
@@ -81,7 +81,7 @@ worker_gpu: False
 tester_gpu: True
 num_workers: 3
 num_learners: 1
-param_update_interval: 100  # number of learner.sgd_steps between workers policy update
+param_update_interval: 10 # 100  # number of learner.sgd_steps between workers policy update
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters

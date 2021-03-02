@@ -529,6 +529,7 @@ class CutDQNAgent(Sepa):
                 self.truncate_to_lp_iterations_limit()
             else:
                 self.terminal_state = 'NODE_LIMIT'
+                self.node_limit_reached = True
         else:
         # elif self.terminal_state and self.model.getGap() > 0:
         #     self.terminal_state = 'DIDNOTFIND'
@@ -1164,6 +1165,7 @@ class CutDQNAgent(Sepa):
     def update_target(self):
         # Update the target network, copying all weights and biases in DQN
         self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.print(f'target net updated (sgd step = {self.num_sgd_steps_done})')
 
     def add_identical_and_weak_cuts(self):
         """
@@ -1491,7 +1493,7 @@ class CutDQNAgent(Sepa):
                 gap_labels = [None] * 5
 
             for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
-                                                                   ['b', 'g', 'y', 'r', 'k'],
+                                                                   ['b', 'g', 'y', 'c', 'k'],
                                                                    [dqn['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
                                                                    [dqn['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
                                                                    [dqn['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
@@ -1502,11 +1504,17 @@ class CutDQNAgent(Sepa):
                     db = db + db[-1:]
                     gap = gap + gap[-1:]
                 assert lpiter[-1] == self.lp_iterations_limit
-                # plot dual bound and gap
+                # plot dual bound and gap, marking early stops with red borders
                 ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
                 ax.plot(lpiter, db, color, label=db_label)
+                if self.terminal_state == 'NODE_LIMIT':
+                    for spine in ax.spines.values():
+                        spine.set_edgecolor('red')
                 ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
                 ax.plot(lpiter, gap, color, label=gap_label)
+                if self.terminal_state == 'NODE_LIMIT':
+                    for spine in ax.spines.values():
+                        spine.set_edgecolor('red')
 
             # if dqn_lpiter[-1] < self.lp_iterations_limit:
             #     # extend curve to the limit
