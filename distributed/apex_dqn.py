@@ -81,6 +81,7 @@ class ApeXDQN:
         self.step_counter = {actor_name: -1 for actor_name in self.actors.keys() if actor_name != 'replay_server'}
         self.pending_logs = []
         self.history = {}
+        self.last_logging_step = -1
 
         # reuse communication setting
         if cfg['restart']:
@@ -266,7 +267,6 @@ class ApeXDQN:
             packet = self.apex_socket.recv()
             topic, sender, body = pa.deserialize(packet)
             assert topic == 'log'
-            self.print(f'Packet from {sender}')
             # put things into a dictionary
             log_dict = {}
             for k, v in body:
@@ -274,26 +274,37 @@ class ApeXDQN:
                     log_dict[k] = wandb.Image(v[1], caption=k)
                 else:
                     log_dict[k] = v
+
             global_step = log_dict.pop('global_step')
             # increment sender step counter
+            assert self.step_counter[sender] < global_step
             self.step_counter[sender] = global_step
+
+            # check if packet is outdated
+            if global_step <= self.last_logging_step:
+                self.print(f'Outdated packet from {sender} discarded (last logging step = {self.last_logging_step}, packet step = {global_step})')
+                continue
+
             # update history
             if global_step in self.history.keys():
                 self.history[global_step].update(log_dict)
             else:
                 self.history[global_step] = log_dict
+
             # push to pending logs
             if not self.pending_logs or global_step > self.pending_logs[-1]:
                 self.pending_logs.append(global_step)
-            # if all actors finished a certain step, log to wandb
-            while self.pending_logs and all([self.pending_logs[0] <= cnt for cnt in self.step_counter.values()]):
-                step = self.pending_logs.pop(0)
-                log_dict = self.history.pop(step)
-                wandb.log(log_dict, step=step)
+
+            # if all actors finished a certain step, log this step to wandb.
+            # wait for late actors up to 10 steps. after that, late packets will be discarded.
             if len(self.pending_logs) > 10:  # todo return to 1000
                 self.print('some actor is dead. restart to continue logging.')
                 print(self.step_counter)
-        # ray.get(ready_ids + remaining_ids, timeout=self.cfg.get('time_limit', 3600*48))
+            while self.pending_logs and (all([self.pending_logs[0] <= cnt for cnt in self.step_counter.values()]) or len(self.pending_logs) > 10):
+                step = self.pending_logs.pop(0)
+                log_dict = self.history.pop(step)
+                wandb.log(log_dict, step=step)
+                self.last_logging_step = step
 
     def get_actors_running_process(self, actors=None):
         actors = actors if actors is not None else list(self.actors.keys()) + ['apex']
