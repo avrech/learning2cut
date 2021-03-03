@@ -805,7 +805,9 @@ class CutDQNAgent(Sepa):
         self.tmp_stats_buffer[stats_folder + 'applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
         if self.baseline.get('rootonly_stats', None) is not None:
             # this is evaluation round.
-            if not self.node_limit_reached or self.hparams.get('ignore_test_early_stop', False):
+            # test_stats_buffer uses for determining the best model performance.
+            # if we ignore_test_early_stop, then we don't consider episodes which terminated due to branching
+            if not (self.node_limit_reached and self.hparams.get('ignore_test_early_stop', False)):
                 self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
                 self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
                 self.test_stats_buffer['db_auc'].append(db_auc)
