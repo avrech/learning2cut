@@ -59,6 +59,13 @@ Or on `graham` (recommended):
 - Validates that there is no isomorphism between any pair of graphs
 - For each graph, solves MAXCUT to optimality using SCIP saves stats for training
 
+After `generate_dataset.py` finished successfully, generate additional baselines:
+> python generate_simple_baselines.py --nworkers 10 --mp ray  
+
+This script will solve the validation and test instances using two simple cut selection policies:
+- `10_random` - select 10 random cuts every separation round
+- `10_most_violated` - select the 10 most violated cuts every round
+
 ## Running Experiments
 ### Single run 
 There are two run files, `run_single_thread_dqn.py` for single thread training, and `run_apex_dqn.py` for distributed training.
