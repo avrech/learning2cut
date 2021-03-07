@@ -807,7 +807,7 @@ class CutDQNAgent(Sepa):
             # this is evaluation round.
             # test_stats_buffer uses for determining the best model performance.
             # if we ignore_test_early_stop, then we don't consider episodes which terminated due to branching
-            if not (self.node_limit_reached and self.hparams.get('ignore_test_early_stop', False)):
+            if not (self.terminal_state == 'NODE_LIMIT' and self.hparams.get('ignore_test_early_stop', False)):
                 self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
                 self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
                 self.test_stats_buffer['db_auc'].append(db_auc)
@@ -817,7 +817,7 @@ class CutDQNAgent(Sepa):
         self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list
         self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list
         # store performance for tracking best models, ignoring bad outliers (e.g branching occured)
-        if not self.node_limit_reached or self.hparams.get('ignore_test_early_stop', False):
+        if not self.terminal_state == 'NODE_LIMIT' or self.hparams.get('ignore_test_early_stop', False):
             self.test_perf_list.append(db_auc if self.dqn_objective == 'db_auc' else gap_auc)
         return trajectory
 
@@ -1874,7 +1874,7 @@ class CutDQNAgent(Sepa):
                                              scip_seed=scip_seed)
                         self.add_episode_subplot(inst_idx, seed_idx)
                         self.test_stats_dict[dataset_name][inst_idx][scip_seed] = {'stats': self.episode_stats,
-                                                                                   'node_limit_reached': self.node_limit_reached}
+                                                                                   'terminal_state': self.terminal_state}
 
                         # record cycles statistics
                         if self.hparams.get('record_cycles', False):
