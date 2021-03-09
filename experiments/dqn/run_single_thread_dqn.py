@@ -43,6 +43,9 @@ if __name__ == '__main__':
         os.makedirs(hparams['run_dir'])
 
     # todo wandb
+    if hparams['wandb_offline']:
+        os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
+        os.environ['WANDB_MODE'] = 'dryrun'
     wandb_config = hparams.copy()
     wandb_config.pop('datasets')
     wandb.init(resume=args.resume,
