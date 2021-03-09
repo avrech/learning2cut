@@ -64,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--kill', action='store_true',
                         help='kill all running actors or a specified lise of actors in the currently running ray server')
                         # todo support multiple ray servers running in parallel. how to link to the correct one.
+    parser.add_argument('--ray_init_sleep', type=int, default=1, help='sleep after ray init. avoids weird errors. set to 40 on Compute Canada. see https://github.com/ray-project/ray/issues/8326')
 
     args = parser.parse_args()
     config = get_hparams(args)

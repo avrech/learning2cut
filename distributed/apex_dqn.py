@@ -8,6 +8,7 @@ import wandb
 import zmq
 import pyarrow as pa
 import psutil
+import time
 
 
 class ApeXDQN:
@@ -125,6 +126,7 @@ class ApeXDQN:
                 pickle.dump(ray_info, f)
 
         self.cfg['ray_info'] = ray_info
+        time.sleep(self.cfg.get('ray_init_sleep', 0))
 
     def find_free_ports(self):
         """ finds free ports for all actors and returns a dictionary of all ports """
