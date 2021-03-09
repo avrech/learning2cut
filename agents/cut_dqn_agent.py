@@ -1668,25 +1668,31 @@ class CutDQNAgent(Sepa):
                 if dataset_name != overfit_dataset_name:
                     datasets.pop(dataset_name)
 
+        # load maxcut instances:
+        with open(os.path.join(hparams['datadir'], 'instances.pkl'), 'rb') as f:
+            instances = pickle.load(f)
         for dataset_name, dataset in datasets.items():
-            datasets[dataset_name]['datadir'] = os.path.join(
-                hparams['datadir'], dataset['dataset_name'],
-                f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{dataset['seed']}")
+            dataset.update(instances[dataset_name])
 
-            # read all graphs with their baselines from disk
-            dataset['instances'] = []
-            for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'{self.print_prefix}Loading {dataset_name}'):
-                # todo - overfitting sanity check consider only graph_0_0.pkl
-                if overfit_dataset_name and filename != 'graph_0_0.pkl':
-                    continue
-
-                with open(os.path.join(datasets[dataset_name]['datadir'], filename), 'rb') as f:
-                    G, baseline = pickle.load(f)
-                    if baseline['is_optimal']:
-                        dataset['instances'].append((G, baseline))
-                    else:
-                        print(filename, ' is not solved to optimality')
-            dataset['num_instances'] = len(dataset['instances'])
+        # for dataset_name, dataset in datasets.items():
+        #     datasets[dataset_name]['datadir'] = os.path.join(
+        #         hparams['datadir'], dataset['dataset_name'],
+        #         f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{dataset['seed']}")
+        #
+        #     # read all graphs with their baselines from disk
+        #     dataset['instances'] = []
+        #     for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'{self.print_prefix}Loading {dataset_name}'):
+        #         # todo - overfitting sanity check consider only graph_0_0.pkl
+        #         if overfit_dataset_name and filename != 'graph_0_0.pkl':
+        #             continue
+        #
+        #         with open(os.path.join(datasets[dataset_name]['datadir'], filename), 'rb') as f:
+        #             G, baseline = pickle.load(f)
+        #             if baseline['is_optimal']:
+        #                 dataset['instances'].append((G, baseline))
+        #             else:
+        #                 print(filename, ' is not solved to optimality')
+        #     dataset['num_instances'] = len(dataset['instances'])
 
         # for the validation and test datasets compute average performance of all baselines:
         for dataset_name, dataset in datasets.items():
