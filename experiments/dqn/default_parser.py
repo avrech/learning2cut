@@ -104,6 +104,7 @@ parser.add_argument('--data_config', type=str, default='configs/data_config.yaml
 parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml', help='general experiment settings')
 parser.add_argument('--gpu-id', type=int, default=None, help='gpu id to use')
 parser.add_argument('--use-gpu', type=str2bool, nargs='?', const=True, default=False, help='use gpu if available')
+parser.add_argument('--wandb_offline', type=str2bool, nargs='?', const=True, default=False, help='set to run wandb offline')
 
 
 def update_hparams(hparams, args):

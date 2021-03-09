@@ -241,6 +241,9 @@ class ApeXDQN:
         wandb_config.pop('datasets')
         wandb_config.pop('com')
         wandb_config.pop('ray_info')
+        if self.cfg('wandb_offline'):
+            os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
+            os.environ['WANDB_MODE'] = 'dryrun'
         wandb.init(resume='allow',  # hparams['resume'],
                    id=self.cfg['run_id'],
                    project=self.cfg['project'],
