@@ -60,8 +60,8 @@ class ApeXDQN:
         self.num_workers = self.cfg["num_workers"]
         self.use_gpu = use_gpu
         self.learner_gpu = use_gpu and self.cfg.get('learner_gpu', True)
-        self.worker_gpu = use_gpu and self.cfg.get('worker_gpu', True)
-        self.tester_gpu = use_gpu and self.cfg.get('tester_gpu', True)
+        self.worker_gpu = use_gpu and self.cfg.get('worker_gpu', False)
+        self.tester_gpu = use_gpu and self.cfg.get('tester_gpu', False)
 
         # container of all ray actors
         self.actors = {f'worker_{n}': None for n in range(1, self.num_workers + 1)}

@@ -70,6 +70,7 @@ class CutDQNLearner(CutDQNAgent):
             # bind sockets to random free ports
             hparams['com']["replay_server_2_learner_port"] = self.replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
             hparams['com']["learner_2_workers_pubsub_port"] = self.params_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            self.print(f'binding to random ports: replay_server_2_learner_port={hparams["com"]["replay_server_2_learner_port"]}, learner_2_workers_pubsub_port={hparams["com"]["learner_2_workers_pubsub_port"]}')
             # send com config to apex
             message = pa.serialize(('learner_com_cfg', list(hparams['com'].items()))).to_buffer()
             self.learner_2_apex_socket.send(message)
@@ -84,6 +85,7 @@ class CutDQNLearner(CutDQNAgent):
 
         else:
             # reuse com config
+            self.print('connecting to ports: ', hparams["com"])
             self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
             self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_learner_port"]}')
             self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_replay_server_port"]}')
@@ -107,6 +109,7 @@ class CutDQNLearner(CutDQNAgent):
         #            )
 
         if run_io:
+            self.print('running io in background')
             self.background_io = threading.Thread(target=self.run_io, args=())
             self.background_io.start()
 
@@ -228,12 +231,13 @@ class CutDQNLearner(CutDQNAgent):
         asynchronously receive data and return new priorities to replay server,
         and publish new params to workers
         """
-        print(self.print_prefix + 'started io process in background...')
-        print(self.print_prefix + 'sending "restart" message to replay_server...')
+        self.print('(background) started io process in background...')
+        self.print('(background) sending "restart" message to replay_server...')
         restart_message = pa.serialize("restart").to_buffer()
         self.learner_2_replay_server_socket.send(restart_message)
 
         time.sleep(2)
+        self.print('(background) running io loop')
         while True:
             self.recv_batch(blocking=False)
             self.send_new_priorities()
