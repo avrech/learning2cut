@@ -2,11 +2,12 @@ import networkx as nx
 from pyscipopt import quicksum
 import pyscipopt as scip
 from collections import OrderedDict
+from separators.mccormick_cycle_separator import MccormickCycleSeparator
 
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
                           use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
-                          use_random_branching=True):
+                          use_random_branching=True, use_cycles=True, hparams={}):
     r"""
     Returns MAXCUT model of G assuming edge attributes named 'weight', denoted by `w`.
 
@@ -82,7 +83,16 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
     if use_random_branching:
         model.setIntParam('branching/random/priority', 999999)
-    return model, x, y
+    if use_cycles:
+        # include cycle inequalities separator with high priority
+        cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
+        model.includeSepa(cycle_sepa, 'MLCycles',
+                          "Generate cycle inequalities for the MaxCut McCormick formulation",
+                          priority=1000000, freq=1)
+    # unify x and y to a single dictionary
+    x_dict = {**x, **y}
+
+    return model, x_dict, cycle_sepa
 
 
 def get_separator_cuts_applied(model, separator_name):

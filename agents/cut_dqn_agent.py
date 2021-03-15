@@ -101,7 +101,7 @@ class CutDQNAgent(Sepa):
         # instance specific data needed to be reset every episode
         self.G = None
         self.x = None
-        self.y = None
+        # self.y = None
         self.baseline = None
         self.scip_seed = None
         self.action = None
@@ -180,10 +180,10 @@ class CutDQNAgent(Sepa):
         self.initialize_training()
 
     # done
-    def init_episode(self, G, x, y, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None, demonstration_episode=False):
+    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None, demonstration_episode=False):
         self.G = G
         self.x = x
-        self.y = y
+        # self.y = y
         self.baseline = baseline
         self.scip_seed = scip_seed
         self.action = None
@@ -625,7 +625,7 @@ class CutDQNAgent(Sepa):
             cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)), shape=[ncuts, nvars]).toarray()
             final_solution = self.model.getBestSol()
             sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
-            sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
+            # sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
             sol_vector = np.array(sol_vector)
             # rhs slack of all cuts added at the previous round (including the discarded cuts)
             # generally, LP rows look like
@@ -1787,13 +1787,13 @@ class CutDQNAgent(Sepa):
 
         # create a SCIP model for G, and disable default cuts
         hparams = self.hparams
-        model, x, y = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False))
+        model, x, cut_generator = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False), hparams=hparams)
 
-        # include cycle inequalities separator with high priority
-        cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
-        model.includeSepa(cycle_sepa, 'MLCycles',
-                          "Generate cycle inequalities for the MaxCut McCormick formulation",
-                          priority=1000000, freq=1)
+        # # include cycle inequalities separator with high priority
+        # cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
+        # model.includeSepa(cycle_sepa, 'MLCycles',
+        #                   "Generate cycle inequalities for the MaxCut McCormick formulation",
+        #                   priority=1000000, freq=1)
 
         # # include branching event handler
         branching_event = BranchingEventHdlr(on_nodebranched_event=self.on_nodebranched_event,
@@ -1801,7 +1801,7 @@ class CutDQNAgent(Sepa):
         model.includeEventhdlr(branching_event, "BranchingEventhdlr", "Catches NODEBRANCHED event")
 
         # reset new episode
-        self.init_episode(G, x, y, lp_iterations_limit, cut_generator=cycle_sepa, baseline=baseline,
+        self.init_episode(G, x, lp_iterations_limit, cut_generator=cut_generator, baseline=baseline,
                           dataset_name=dataset_name, scip_seed=scip_seed,
                           demonstration_episode=demonstration_episode)
 
