@@ -100,7 +100,6 @@ class DQNWorker(Sepa):
         # todo unifiy x and y to x only (common for all combinatorial problems)
         self.G = None
         self.x = None
-        # self.y = None
         self.baseline = None
         self.scip_seed = None
         self.action = None
@@ -120,54 +119,18 @@ class DQNWorker(Sepa):
         self.stats_updated = False
         self.node_limit_reached = False
         self.cut_generator = None
-        self.nseparounds = 0
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
         self.lp_iterations_limit = -1
         self.terminal_state = False
         # learning from demonstrations stuff
         self.demonstration_episode = False
         self.num_demonstrations_done = 0
-
-        # logging
-        self.is_tester = True  # todo set in distributed setting
-        self.is_worker = True
         # file system paths
-        # todo - set worker-specific logdir for distributed DQN
         self.run_dir = hparams['run_dir']
-        self.checkpoint_filepath = os.path.join(self.run_dir, 'checkpoint.pt')
-        # self.writer = SummaryWriter(log_dir=os.path.join(self.run_dir, 'tensorboard'))  # todo remove after wandb works
-        self.print_prefix = ''
-
-        # tmp buffer for holding each episode results until averaging and appending to experiment_stats
-        self.tmp_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': []}
-        self.test_stats_buffer = {'db_auc_imp': [], 'gap_auc_imp': [], 'db_auc': [], 'gap_auc': []}
-        self.test_perf_list = []
-
-        # tmp buffer for holding cycle-statistics
-        self.cycle_stats = None
-
-        # learning from demonstrations stats
-        for k in list(self.tmp_stats_buffer.keys()):
-            self.tmp_stats_buffer['Demonstrations/' + k] = []
-        self.tmp_stats_buffer['Demonstrations/accuracy'] = []
-        self.tmp_stats_buffer['Demonstrations/f1_score'] = []
-        # for k in list(self.test_stats_buffer.keys()):
-        #     self.test_stats_buffer['Demonstrations/' + k] = []
-
-        self.test_stats_dict = {}  # store testset stats by graph_id and seed
-
-        # best performance log for validation sets
-        self.best_perf = {k: -1000000 for k in hparams['datasets'].keys() if k[:8] == 'validset'}
-        self.n_step_loss_moving_avg = 0
-        self.demonstration_loss_moving_avg = 0
-
-        # self.figures = {'Dual_Bound_vs_LP_Iterations': [], 'Gap_vs_LP_Iterations': []}
-        self.figures = {}
-
-        # debug
-        self.sanity_check_stats = {'n_duplicated_cuts': [],
-                                   'n_weak_cuts': [],
-                                   'n_original_cuts': []}
+        # training logs
+        self.training_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
+        # tmp buffer for holding cutting planes statistics
+        self.sepa_stats = None
 
         # debug todo remove when finished
         self.debug_n_tracking_errors = 0
@@ -177,31 +140,26 @@ class DQNWorker(Sepa):
         # initialize (set seed and load checkpoint)
         self.initialize_training()
 
+        # assign the validation instances according to worker_id and num_workers:
+        # flatten all instances to a list of tuples of (dataset_name, inst_idx, seed_idx)
+        datasets = hparams['datasets']
+        flat_instances = []
+        for dataset_name, dataset in datasets.items():
+            if 'train' in dataset_name or 'test' in dataset_name:
+                continue
+            for inst_idx in range(len(dataset['instances'])):
+                for seed_idx in range(len(dataset['scip_seed'])):
+                    flat_instances.append((dataset_name, inst_idx, seed_idx))
+        idx = worker_id-1
+        self.eval_instances = []
+        while idx < len(flat_instances):
+            self.eval_instances.append(flat_instances[idx])
+            idx += hparams['num_workers']
 
-###########################################
-
-        # set GDQN instance role
+        # distributed system stuff
         self.worker_id = worker_id
-        self.is_learner = False
-        self.is_worker = not is_tester
-        self.is_tester = is_tester
         self.generate_demonstration_data = False
-
-        # # # set worker specific tensorboard logdir
-        # # worker_logdir = os.path.join(self.run_dir, 'tensorboard', f'worker-{worker_id}')  # todo remove after wandb is verified
-        # # self.writer = SummaryWriter(log_dir=worker_logdir)  # todo remove after wandb is verified
-        # wandb.init(resume='allow', # hparams['resume'],
-        #            id=hparams['run_id'],
-        #            project=hparams['project'],
-        #            reinit=True  # todo for distributed_unittest.py
-        #            )
-
-        # set special checkpoint file for tester (workers use the learner checkpoints)
-        if is_tester:
-            self.checkpoint_filepath = os.path.join(self.run_dir, 'tester_checkpoint.pt')
-        else:
-            self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
-
+        self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
         self.print_prefix = f'[Worker {self.worker_id}] '
         # initialize zmq sockets
         # use socket.connect() instead of .bind() because workers are the least stable part in the system
@@ -226,11 +184,10 @@ class DQNWorker(Sepa):
         self.print(f'connecting to replay_server_2_workers_pubsub_port: {hparams["com"]["replay_server_2_workers_pubsub_port"]}')
 
         # for sending replay data to buffer
-        if self.is_worker:
-            context = zmq.Context()
-            self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
-            self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
-            self.print(f'connecting to workers_2_replay_server_port: {hparams["com"]["workers_2_replay_server_port"]}')
+        context = zmq.Context()
+        self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
+        self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
+        self.print(f'connecting to workers_2_replay_server_port: {hparams["com"]["workers_2_replay_server_port"]}')
 
         # save pid to run_dir
         pid = os.getpid()
@@ -304,47 +261,47 @@ class DQNWorker(Sepa):
             received_new_params = False
         return received_new_params
 
-    # todo update to unified worker and tester
-    def run(self):
-        """ uniform remote run wrapper for tester and worker actors """
-        if self.is_tester:
-            self.run_test()
-        else:
-            self.run_work()
+    # # todo update to unified worker and tester
+    # def run(self):
+    #     """ uniform remote run wrapper for tester and worker actors """
+    #     if self.is_tester:
+    #         self.run_test()
+    #     else:
+    #         self.run_work()
 
-    # todo - update to unified worker and tester
-    def run_work(self):
+    def run(self):
         self.initialize_training()
         self.load_datasets()
         while True:
             received_new_params = self.recv_messages()
             if received_new_params:
-                # todo - Log stats with global_step == num_param_updates-1 (== the previous params_id).
-                #        This is because the current stats are related to the previous policy.
-                #        In addition, maybe workers shouldn't log stats every update ?
-                # if self.num_param_updates > 0 and self.num_param_updates % self.hparams['log_interval'] == 0:
-                global_step, log_dict = self.log_stats(global_step=self.num_param_updates - 1, log_directly=False)
-                logs_packet = ('log', f'worker_{self.worker_id}', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
-                logs_packet = pa.serialize(logs_packet).to_buffer()
-                self.send_2_apex_socket.send(logs_packet)
-
+                # evaluate validation instances, and send all training and test stats to apex
+                global_step, validation_stats = self.evaluate()
+                log_packet = ('log', f'worker_{self.worker_id}', global_step,
+                              [(k, v) for k, v in self.training_stats_buffer.items()],
+                              validation_stats)
+                log_packet = pa.serialize(log_packet).to_buffer()
+                self.send_2_apex_socket.send(log_packet)
+                # reset training stats for the next round
+                for k in self.training_stats_buffer.keys():
+                    self.training_stats_buffer[k] = []
             replay_data = self.collect_data()
             self.send_replay_data(replay_data)
 
-    # todo - update to unified worker and tester
-    def run_test(self):
-        # self.eps_greedy = 0
-        self.initialize_training()
-        datasets = self.load_datasets()
-        while True:
-            received = self.recv_messages(wait_for_new_params=True)
-            assert received
-            # todo consider not ignoring eval interval
-            global_step, log_dict = self.evaluate(datasets, ignore_eval_interval=self.hparams['ignore_eval_interval'], log_directly=False)
-            logs_packet = ('log', 'tester', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
-            logs_packet = pa.serialize(logs_packet).to_buffer()
-            self.send_2_apex_socket.send(logs_packet)
-            self.save_checkpoint()
+    # # todo - update to unified worker and tester
+    # def run_test(self):
+    #     # self.eps_greedy = 0
+    #     self.initialize_training()
+    #     self.load_datasets()
+    #     while True:
+    #         received = self.recv_messages(wait_for_new_params=True)
+    #         assert received
+    #         # todo consider not ignoring eval interval
+    #         global_step, summary = self.evaluate()
+    #         logs_packet = ('log', 'tester', [('global_step', global_step)] + [(k, v) for k, v in summary.items()])
+    #         logs_packet = pa.serialize(logs_packet).to_buffer()
+    #         self.send_2_apex_socket.send(logs_packet)
+    #         self.save_checkpoint()
 
     def collect_data(self):
         """ Fill local buffer until some stopping criterion is satisfied """
@@ -356,9 +313,9 @@ class DQNWorker(Sepa):
             G, baseline = trainset['instances'][graph_idx]
 
             # execute episodes, collect experience and append to local_buffer
-            trajectory = self.execute_episode(G, baseline, trainset['lp_iterations_limit'],
-                                              dataset_name=trainset['dataset_name'],
-                                              demonstration_episode=self.generate_demonstration_data)
+            trajectory, _ = self.execute_episode(G, baseline, trainset['lp_iterations_limit'],
+                                                 dataset_name=trainset['dataset_name'],
+                                                 demonstration_episode=self.generate_demonstration_data)
 
             local_buffer += trajectory
             if self.i_episode + 1 % len(self.graph_indices) == 0:
@@ -401,7 +358,6 @@ class DQNWorker(Sepa):
         }
         self.stats_updated = False
         self.cut_generator = cut_generator
-        self.nseparounds = 0
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
@@ -412,18 +368,6 @@ class DQNWorker(Sepa):
     def sepaexeclp(self):
         if self.hparams.get('debug_events', False):
             self.print('DEBUG MSG: dqn separator called')
-
-        # assert proper behavior
-        self.nseparounds += 1
-        # if self.cut_generator is not None:
-        #     assert self.nseparounds == self.cut_generator.nseparounds
-        #     # assert self.nseparounds == self.model.getNLPs() todo: is it really important?
-
-        # sanity check only:
-        # for each cut in the separation storage add an identical cut with only a different scale,
-        # and a weak cut with right shifted rhs
-        if self.hparams.get('sanity_check', False) and self.is_tester:
-            self.add_identical_and_weak_cuts()
 
         # finish with the previous step:
         # todo - in case of no cuts, we return here a second time without any new action. we shouldn't record stats twice.
@@ -437,14 +381,7 @@ class DQNWorker(Sepa):
             result = {"result": SCIP_RESULT.DIDNOTRUN}
 
         elif self.model.getNLPIterations() < self.lp_iterations_limit:
-
             result = self._do_dqn_step()
-
-            # sanity check: for each cut in the separation storage
-            # check if its weak version was applied
-            # and if both the original and the identical versions were applied.
-            if self.hparams.get('sanity_check', False) and self.is_tester:
-                self.track_identical_and_weak_cuts()
 
         else:
             # stop optimization (implicitly), and don't add any more cuts
@@ -484,8 +421,6 @@ class DQNWorker(Sepa):
         SCIP's actions.
         After the episode is done, SCIP actions are analyzed and a decoder context is reconstructed following
         SCIP's policy.
-        TODO demonstration data is stored with additional flag demonstration=True, to inform
-         the learner to compute the expert loss J_E.
         """
         info = {}
         # get the current state, a dictionary of available cuts (keyed by their names,
@@ -505,7 +440,6 @@ class DQNWorker(Sepa):
         if available_cuts['ncuts'] > 0:
 
             # select an action, and get the decoder context for a case we use transformer and q_values for PER
-            # todo old: action, q_values, decoder_context = self._select_action(cur_state)
             action_info = self._select_action(cur_state)
             selected = action_info['selected_by_agent']
             available_cuts['selected_by_agent'] = action_info['selected_by_agent'].numpy()
@@ -513,7 +447,6 @@ class DQNWorker(Sepa):
                 info[k] = v
 
             # prob what scip cut selection algorithm would do in this state
-            # todo - check overhead, and if too large then enable only in evaluate()
             cut_names_selected_by_scip = self.prob_scip_cut_selection()
             available_cuts['selected_by_scip'] = np.array([cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
             if self.demonstration_episode:
@@ -555,12 +488,10 @@ class DQNWorker(Sepa):
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
             self.episode_history.append(info)
-            # todo - old: self.episode_history.append(StateActionContext(cur_state, available_cuts, q_values, decoder_context))
             self.prev_action = available_cuts
             self.prev_state = cur_state
             self.stats_updated = False  # mark false to record relevant stats after this action will make effect
 
-        # todo
         # If there are no available cuts we simply ignore this round.
         # The stats related to the previous action are already collected, and we are updated.
         # We don't store the current state-action pair, because there is no action at all, and the state is useless.
@@ -678,9 +609,6 @@ class DQNWorker(Sepa):
 
         """
         self.debug_n_episodes_done += 1         # todo debug remove when finished
-
-        # if self.cut_generator is not None:
-        #     assert self.nseparounds == self.cut_generator.nseparounds
 
         # classify the terminal state
         if self.terminal_state == 'EMPTY_ACTION':
@@ -842,12 +770,12 @@ class DQNWorker(Sepa):
 
         # compute rewards and other stats for the whole episode,
         # and if in training session, push transitions into memory
-        trajectory = self._compute_rewards_and_stats()
+        trajectory, stats = self._compute_rewards_and_stats()
         # increase the number of episodes done
         if self.training:
             self.i_episode += 1
 
-        return trajectory
+        return trajectory, stats
 
     # done
     def _compute_rewards_and_stats(self):
@@ -979,6 +907,8 @@ class DQNWorker(Sepa):
         active_applied_ratio = []
         applied_available_ratio = []
         accuracy_list, f1_score_list = [], []
+        true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
+
         for info in self.episode_history:
             action = info['action_info']
             normalized_slack = action['normalized_slack']
@@ -993,32 +923,49 @@ class DQNWorker(Sepa):
             # if self.demonstration_episode: todo verification
             accuracy_list.append(np.mean(action['selected_by_scip'] == action['selected_by_agent']))
             f1_score_list.append(f1_score(action['selected_by_scip'], action['selected_by_agent']))
-
+            # store for plotting later
+            scip_action = info['action_info']['selected_by_scip']
+            agent_action = info['action_info']['selected_by_agent']
+            true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
+            true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
+            false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
+            false_neg += sum(scip_action[agent_action == 0] != agent_action[agent_action == 0])
         # store episode results in tmp_stats_buffer
         db_auc = sum(dualbound_area)
         gap_auc = sum(gap_area)
-        stats_folder = 'Demonstrations/' if self.demonstration_episode else ''
-        self.tmp_stats_buffer[stats_folder + 'db_auc'].append(db_auc)
-        self.tmp_stats_buffer[stats_folder + 'gap_auc'].append(gap_auc)
-        self.tmp_stats_buffer[stats_folder + 'active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
-        self.tmp_stats_buffer[stats_folder + 'applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
-        if self.baseline.get('rootonly_stats', None) is not None:
-            # this is evaluation round.
-            # test_stats_buffer uses for determining the best model performance.
-            # if we ignore_test_early_stop, then we don't consider episodes which terminated due to branching
-            if not (self.terminal_state == 'NODE_LIMIT' and self.hparams.get('ignore_test_early_stop', False)):
-                self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
-                self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
-                self.test_stats_buffer['db_auc'].append(db_auc)
-                self.test_stats_buffer['gap_auc'].append(gap_auc)
+        # stats_folder = 'Demonstrations/' if self.demonstration_episode else ''
+        if self.training:
+            self.training_stats_buffer['db_auc'].append(db_auc)
+            self.training_stats_buffer['gap_auc'].append(gap_auc)
+            self.training_stats_buffer['active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
+            self.training_stats_buffer['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
+            self.training_stats_buffer['accuracy'] += accuracy_list
+            self.training_stats_buffer['f1_score'] += f1_score_list
+        stats = {**self.episode_stats,
+                 'db_auc': db_auc,
+                 'gap_auc': gap_auc,
+                 'active_applied_ratio': active_applied_ratio,
+                 'applied_available_ratio': applied_available_ratio,
+                 'accuracy': np.mean(accuracy_list),
+                 'f1_score': np.mean(f1_score_list),
+                 'terminal_state': self.terminal_state}
 
-        # if self.demonstration_episode:  todo verification
-        self.tmp_stats_buffer['Demonstrations/accuracy'] += accuracy_list
-        self.tmp_stats_buffer['Demonstrations/f1_score'] += f1_score_list
-        # store performance for tracking best models, ignoring bad outliers (e.g branching occured)
-        if not self.terminal_state == 'NODE_LIMIT' or self.hparams.get('ignore_test_early_stop', False):
-            self.test_perf_list.append(db_auc if self.dqn_objective == 'db_auc' else gap_auc)
-        return trajectory
+        # # todo remove this and store instead test episode_stats, terminal_state, gap_auc, db_auc, and send to logger as is.
+        # if self.baseline.get('rootonly_stats', None) is not None:
+        #     # this is evaluation round.
+        #     # test_stats_buffer uses for determining the best model performance.
+        #     # if we ignore_test_early_stop, then we don't consider episodes which terminated due to branching
+        #     if not (self.terminal_state == 'NODE_LIMIT' and self.hparams.get('ignore_test_early_stop', False)):
+        #         self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
+        #         self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+        #         self.test_stats_buffer['db_auc'].append(db_auc)
+        #         self.test_stats_buffer['gap_auc'].append(gap_auc)
+        #
+        # # if self.demonstration_episode:  todo verification
+        # # store performance for tracking best models, ignoring bad outliers (e.g branching occured)
+        # if not self.terminal_state == 'NODE_LIMIT' or self.hparams.get('ignore_test_early_stop', False):
+        #     self.test_perf_list.append(db_auc if self.dqn_objective == 'db_auc' else gap_auc)
+        return trajectory, stats
 
     # done
     def _update_episode_stats(self):
@@ -1144,27 +1091,9 @@ class DQNWorker(Sepa):
                     log_dict[self.dataset_name + '/' + k + actor_name] = avg
                     # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
 
-            # sanity check
-            if self.hparams.get('sanity_check', False):
-                n_original_cuts = np.array(self.sanity_check_stats['n_original_cuts'])
-                n_duplicated_cuts = np.array(self.sanity_check_stats['n_duplicated_cuts'])
-                n_weak_cuts = np.array(self.sanity_check_stats['n_weak_cuts'])
-                sanity_check_stats = {'dup_frac': n_duplicated_cuts / n_original_cuts,
-                                      'weak_frac': n_weak_cuts / n_original_cuts}
-                for k, vals in sanity_check_stats.items():
-                    avg = np.mean(vals)
-                    std = np.std(vals)
-                    print('{}: {:.4f} | '.format(k, avg), end='')
-                    log_dict[self.dataset_name + '/' + k + actor_name] = avg
-                    log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
-
-                self.sanity_check_stats['n_original_cuts'] = []
-                self.sanity_check_stats['n_duplicated_cuts'] = []
-                self.sanity_check_stats['n_weak_cuts'] = []
-
         if self.is_worker or self.is_tester:
             # plot normalized dualbound and gap auc
-            for k, vals in self.tmp_stats_buffer.items():
+            for k, vals in self.training_stats_buffer.items():
                 if len(vals) == 0:
                     continue
                 avg = np.mean(vals)
@@ -1172,7 +1101,7 @@ class DQNWorker(Sepa):
                 print('{}: {:.4f} | '.format(k, avg), end='')
                 log_dict[self.dataset_name + '/' + k + actor_name] = avg
                 # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
-                self.tmp_stats_buffer[k] = []
+                self.training_stats_buffer[k] = []
 
         if self.is_learner:
             # log the average loss of the last training session
@@ -1237,8 +1166,8 @@ class DQNWorker(Sepa):
             if row == self.figures['nrows'] - 1 and col == self.figures['ncols'] - 1:
                 dqn_db_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['db_auc'])
                 dqn_gap_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['gap_auc'])
-                dqn_db_auc_avg = np.mean(self.tmp_stats_buffer['db_auc'])
-                dqn_gap_auc_avg = np.mean(self.tmp_stats_buffer['gap_auc'])
+                dqn_db_auc_avg = np.mean(self.training_stats_buffer['db_auc'])
+                dqn_gap_auc_avg = np.mean(self.training_stats_buffer['gap_auc'])
                 db_labels = ['DQN {:.4f}({:.4f})'.format(dqn_db_auc_avg, dqn_db_auc_avg_without_early_stop),
                              'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['db_auc_avg']),
                              '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['db_auc_avg']),
@@ -1384,7 +1313,7 @@ class DQNWorker(Sepa):
         """Save the model if show the best performance on the validation set.
         The performance is the -(dualbound/gap auc),
         according to the DQN objective"""
-        perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
+        perf = -np.mean(self.training_stats_buffer[self.dqn_objective])
         if perf > self.best_perf[self.dataset_name]:
             self.best_perf[self.dataset_name] = perf
             self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
@@ -1456,6 +1385,7 @@ class DQNWorker(Sepa):
         #     dataset['num_instances'] = len(dataset['instances'])
 
         # for the validation and test datasets compute average performance of all baselines:
+        # this should be done in the logger process only
         for dataset_name, dataset in datasets.items():
             if dataset_name[:8] == 'trainset':
                 continue
@@ -1595,75 +1525,87 @@ class DQNWorker(Sepa):
         # gong! run episode
         model.optimize()
 
-        # once episode is done
-        trajectory = self.finish_episode()
-        return trajectory
+        # compute stats and finish episode
+        trajectory, stats = self.finish_episode()
+        return trajectory, stats
 
     # done
-    def evaluate(self, datasets=None, ignore_eval_interval=False, log_directly=True, eval_testset=False):
-        if datasets is None:
-            datasets = self.datasets
+    def evaluate(self):
+        datasets = self.datasets
         # evaluate the model on the validation and test sets
         if self.num_param_updates == 0:
             # wait until the model starts learning
             return None, None
         global_step = self.num_param_updates
-        log_dict = {}
-        # initialize cycle_stats first time
-        if self.hparams.get('record_cycles', False) and self.cycle_stats is None:
-            self.cycle_stats = {dataset_name: {inst_idx: {seed_idx: {}
-                                                          for seed_idx in dataset['scip_seed']}
-                                               for inst_idx in range(dataset['num_instances'])}
-                                for dataset_name, dataset in datasets.items() if 'trainset' not in dataset_name}
+        # log_dict = {}
+        # # initialize cycle_stats first time
+        # if self.hparams.get('record_cycles', False) and self.sepa_stats is None:
+        #     self.sepa_stats = {dataset_name: {inst_idx: {seed_idx: {}
+        #                                                  for seed_idx in dataset['scip_seed']}
+        #                                       for inst_idx in range(dataset['num_instances'])}
+        #                        for dataset_name, dataset in datasets.items() if 'trainset' not in dataset_name}
 
         self.set_eval_mode()
-        for dataset_name, dataset in datasets.items():
-            if 'trainset' in dataset_name or (not eval_testset and 'testset' in dataset_name):
-                continue
-            if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
-                fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
-                self.init_figures(fignames,
-                                  nrows=dataset['num_instances'],
-                                  ncols=len(dataset['scip_seed']),
-                                  col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
-                                  row_labels=[f'inst {inst_idx}' for inst_idx in
-                                              range(dataset['num_instances'])])
-                self.test_stats_dict[dataset_name] = {}
-                for inst_idx, (G, baseline) in enumerate(dataset['instances']):
-                    self.test_stats_dict[dataset_name][inst_idx] = {}
-                    for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
-                        self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
-                        if self.hparams.get('verbose', 0) == 2:
-                            print('##################################################################################')
-                            print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
-                            print('##################################################################################')
-                        self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name,
-                                             scip_seed=scip_seed)
-                        self.add_episode_subplot(inst_idx, seed_idx)
-                        self.test_stats_dict[dataset_name][inst_idx][scip_seed] = {'stats': self.episode_stats,
-                                                                                   'terminal_state': self.terminal_state}
+        test_summary = []
+        for dataset_name, inst_idx, seed_idx in self.eval_instances:
+            dataset = datasets[dataset_name]
+            G, baseline = dataset['instances'][inst_idx]
+            scip_seed = dataset['scip_seed'][seed_idx]
+            self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
+            _, stats = self.execute_episode(G, baseline, dataset['lp_iterations_limit'],
+                                            dataset_name=dataset_name,
+                                            scip_seed=scip_seed)
+            stats['dataset_name'] = dataset_name
+            stats['inst_idx'] = inst_idx
+            stats['seed_idx'] = seed_idx
+            test_summary.append([(k, v) for k, v in stats.items()])
 
-                        # record cycles statistics
-                        if self.hparams.get('record_cycles', False):
-                            cycle_stats = {}
-                            cycle_stats['recorded_cycles'] = self.cut_generator.recorded_cycles
-                            cycle_stats['episode_stats'] = self.episode_stats
-                            cycle_stats['dualbound_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['dualbound'], t_support=self.lp_iterations_limit, reference=self.baseline['optimal_value'])
-                            cycle_stats['gap_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['gap'], t_support=self.lp_iterations_limit, reference=0)  # optimal gap is always 0
-                            self.cycle_stats[dataset_name][inst_idx][scip_seed][global_step] = cycle_stats
-                            self.cycle_stats[dataset_name][inst_idx]['G'] = G
-                            self.cycle_stats[dataset_name][inst_idx]['baseline'] = baseline
-
-                step, logs = self.log_stats(save_best='validset' in dataset_name, plot_figures=True, log_directly=log_directly)
-                log_dict.update(logs)
-
-        # if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
-        #     with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
-        #         pickle.dump(self.cycle_stats, f)
-        #     self.cycle_stats = None
+        # for dataset_name, dataset in datasets.items():
+        #     if 'trainset' in dataset_name or (not eval_testset and 'testset' in dataset_name):
+        #         continue
+        #     if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
+        #         fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
+        #         self.init_figures(fignames,
+        #                           nrows=dataset['num_instances'],
+        #                           ncols=len(dataset['scip_seed']),
+        #                           col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
+        #                           row_labels=[f'inst {inst_idx}' for inst_idx in
+        #                                       range(dataset['num_instances'])])
+        #         self.test_stats_dict[dataset_name] = {}
+        #         for inst_idx, (G, baseline) in enumerate(dataset['instances']):
+        #             self.test_stats_dict[dataset_name][inst_idx] = {}
+        #             for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
+        #                 self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
+        #                 if self.hparams.get('verbose', 0) == 2:
+        #                     print('##################################################################################')
+        #                     print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
+        #                     print('##################################################################################')
+        #                 _, stats = self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
+        #                 self.add_episode_subplot(inst_idx, seed_idx)
+        #                 self.test_stats_dict[dataset_name][inst_idx][scip_seed] = stats
+        #                 # todo - store stats with (dataset_name, inst_idx, seed_idx) for sending to apex
+        #
+        #                 # record cycles statistics
+        #                 if self.hparams.get('record_cycles', False):
+        #                     cycle_stats = {}
+        #                     cycle_stats['recorded_cycles'] = self.cut_generator.recorded_cycles
+        #                     cycle_stats['episode_stats'] = self.episode_stats
+        #                     cycle_stats['dualbound_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['dualbound'], t_support=self.lp_iterations_limit, reference=self.baseline['optimal_value'])
+        #                     cycle_stats['gap_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['gap'], t_support=self.lp_iterations_limit, reference=0)  # optimal gap is always 0
+        #                     self.sepa_stats[dataset_name][inst_idx][scip_seed][global_step] = cycle_stats
+        #                     self.sepa_stats[dataset_name][inst_idx]['G'] = G
+        #                     self.sepa_stats[dataset_name][inst_idx]['baseline'] = baseline
+        #
+        #         step, logs = self.log_stats(save_best='validset' in dataset_name, plot_figures=True, log_directly=log_directly)
+        #         log_dict.update(logs)
+        #
+        # # if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
+        # #     with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
+        # #         pickle.dump(self.cycle_stats, f)
+        # #     self.cycle_stats = None
 
         self.set_training_mode()
-        return step, log_dict
+        return global_step, test_summary
 
     def test(self):
         """ playground for testing """
