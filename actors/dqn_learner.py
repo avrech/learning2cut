@@ -1,4 +1,3 @@
-# distributedRL base class for learner - implements the distributed part
 import time
 from collections import deque
 import pyarrow as pa
@@ -7,16 +6,14 @@ import threading
 from time import time
 import numpy as np
 from utils.data import Transition
-from utils.misc import get_img_from_fig
 import os
-from gnn.models import Qnet, TQnet, TransformerDecoderContext
+from gnn.models import Qnet, TQnet
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
 from torch_scatter import scatter_mean, scatter_max, scatter_add
 from collections import namedtuple
 import matplotlib as mpl
-import pickle
 mpl.rc('figure', max_open_warning=0)
 import wandb
 
@@ -83,14 +80,9 @@ class DQNLearner:
         self.start_time = time()
         self.last_time_sec = self.walltime_offset
 
-        # logging
-        self.is_learner = True
         # file system paths
         # todo - set worker-specific logdir for distributed DQN
         self.run_dir = hparams['run_dir']
-        self.checkpoint_filepath = os.path.join(self.run_dir, 'checkpoint.pt')
-        # self.writer = SummaryWriter(log_dir=os.path.join(self.run_dir, 'tensorboard'))  # todo remove after wandb works
-        self.print_prefix = ''
 
         self.n_step_loss_moving_avg = 0
         self.demonstration_loss_moving_avg = 0
@@ -101,23 +93,16 @@ class DQNLearner:
         # idle time monitor
         self.idle_time_sec = 0
 
-        # # set learner specific logdir
-        # learner_logdir = os.path.join(self.run_dir, 'tensorboard', 'learner')  # todo remove after wandb works
-        # self.writer = SummaryWriter(log_dir=learner_logdir)
-
         # set checkpoint file path for learner and workers
         self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
 
         self.replay_data_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_priorities_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
         self.new_params_queue = deque(maxlen=hparams.get('max_pending_requests', 10)+1)
-        # todo - inherited and recovered in CutDQNAgent
-        #  self.num_param_updates = 0
 
         # number of SGD steps between each workers update
         self.param_sync_interval = hparams.get("param_sync_interval", 50)
         self.print_prefix = '[Learner] '
-
 
         # initialize zmq sockets reusing last run communication config
         print(self.print_prefix, "initializing sockets..")
@@ -159,20 +144,6 @@ class DQNLearner:
             self.print('reusing ports', hparams['com'])
 
         self.initialize_training()
-
-        # # todo wandb
-        # # we must call wandb.init in each process wandb.log is called.
-        # # in distributed_unittest we shouldn't do it however.
-        # # create a config dict for comparing hparams, grouping and other operations on wandb dashboard
-        # wandb_config = hparams.copy()
-        # wandb_config.pop('datasets')
-        # wandb_config.pop('com')
-        # wandb.init(resume='allow',  # hparams['resume'],
-        #            id=hparams['run_id'],
-        #            project=hparams['project'],
-        #            config=wandb_config,
-        #            reinit=True  # for distributed_unittest.py
-        #            )
 
         if run_io:
             self.print('running io in background')
@@ -236,13 +207,10 @@ class DQNLearner:
             self.new_params_queue.append(params_packet)  # thread-safe
 
             # log stats here - to be synchronized with the workers and tester logs.
-            # todo - if self.num_param_updates > 0 and self.num_param_updates % self.hparams.get('log_interval', 100) == 0:
-            cur_time_sec = time.time() - self.start_time + self.walltime_offset
-            info = {'Idle time': '{:.2f}%'.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec))}
-            global_step, log_dict = self.log_stats(info=info, log_directly=False)
-            logs_packet = ('log', 'learner', [('global_step', global_step)] + [(k, v) for k, v in log_dict.items()])
-            logs_packet = pa.serialize(logs_packet).to_buffer()
-            self.learner_2_apex_socket.send(logs_packet)
+            global_step, log_dict = self.log_stats()
+            log_packet = ('log', 'learner', global_step, ([(k, v) for k, v in log_dict.items()], self.params_to_numpy(self.policy_net)))
+            log_packet = pa.serialize(log_packet).to_buffer()
+            self.learner_2_apex_socket.send(log_packet)
             self.save_checkpoint()
 
     def unpack_batch_packet(self, batch_packet):
@@ -664,7 +632,7 @@ class DQNLearner:
         self.policy_net.train()
 
     # done
-    def log_stats(self, global_step=None, info={}, log_directly=False):
+    def log_stats(self):
         """
         Average tmp_stats_buffer values, log to tensorboard dir,
         and reset tmp_stats_buffer for the next round.
@@ -687,13 +655,10 @@ class DQNLearner:
         """
         # dictionary of all metrics to log
         log_dict = {}
-        actor_name = '_' + self.print_prefix.replace('[', '').replace(']', '').replace(' ', '_') if len(self.print_prefix) > 0 else ''
-        # actor_name = self.print_prefix.replace('[', '').replace(']', '').replace(' ', '') + '_'
-        if global_step is None:
-            global_step = self.num_param_updates
+        global_step = self.num_param_updates
 
         print(self.print_prefix, f'Global step: {global_step} | {self.dataset_name}\t|', end='')
-        cur_time_sec = time() - self.start_time + self.walltime_offset
+        cur_time_sec = time.time() - self.start_time + self.walltime_offset
 
         # log the average loss of the last training session
         print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
@@ -703,13 +668,8 @@ class DQNLearner:
         log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
         log_dict['Demonstration_Loss'] = self.demonstration_loss_moving_avg
 
-        if log_directly:
-            # todo wandb modify log dict keys with actor_name, or maybe agging is better?
-            wandb.log(log_dict, step=global_step)
-
         # print the additional info
-        for k, v in info.items():
-            print(k + ': ' + v + ' | ', end='')
+        print('Idle time: {:.2f}% | '.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec)), end='')
 
         # print times
         d = int(np.floor(cur_time_sec/(3600*24)))
@@ -719,8 +679,6 @@ class DQNLearner:
         print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
         print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
         self.last_time_sec = cur_time_sec
-
-        self.test_perf_list = []  # reset for the next testset
 
         return global_step, log_dict
 

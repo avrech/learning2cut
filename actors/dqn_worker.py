@@ -70,7 +70,6 @@ class DQNWorker(Sepa):
             assert hparams.get('tqnet_version', 'v3') == 'v3', 'v1 and v2 are no longer supported. need to adapt to new decoder context'
         self.policy_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get('dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
         self.tqnet_version = hparams.get('tqnet_version', 'v3')
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001), weight_decay=hparams.get('weight_decay', 0.0001))
         # value aggregation method for the target Q values
         if hparams.get('value_aggr', 'mean') == 'max':
             self.value_aggr = scatter_max
@@ -128,7 +127,7 @@ class DQNWorker(Sepa):
         # file system paths
         self.run_dir = hparams['run_dir']
         # training logs
-        self.training_stats_buffer = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
+        self.training_stats = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
         # tmp buffer for holding cutting planes statistics
         self.sepa_stats = None
 
@@ -148,8 +147,8 @@ class DQNWorker(Sepa):
             if 'train' in dataset_name or 'test' in dataset_name:
                 continue
             for inst_idx in range(len(dataset['instances'])):
-                for seed_idx in range(len(dataset['scip_seed'])):
-                    flat_instances.append((dataset_name, inst_idx, seed_idx))
+                for scip_seed in dataset['scip_seed']:
+                    flat_instances.append((dataset_name, inst_idx, scip_seed))
         idx = worker_id-1
         self.eval_instances = []
         while idx < len(flat_instances):
@@ -278,13 +277,12 @@ class DQNWorker(Sepa):
                 # evaluate validation instances, and send all training and test stats to apex
                 global_step, validation_stats = self.evaluate()
                 log_packet = ('log', f'worker_{self.worker_id}', global_step,
-                              [(k, v) for k, v in self.training_stats_buffer.items()],
-                              validation_stats)
+                              ([(k, v) for k, v in self.training_stats.items()], validation_stats))
                 log_packet = pa.serialize(log_packet).to_buffer()
                 self.send_2_apex_socket.send(log_packet)
                 # reset training stats for the next round
-                for k in self.training_stats_buffer.keys():
-                    self.training_stats_buffer[k] = []
+                for k in self.training_stats.keys():
+                    self.training_stats[k] = []
             replay_data = self.collect_data()
             self.send_replay_data(replay_data)
 
@@ -935,20 +933,27 @@ class DQNWorker(Sepa):
         gap_auc = sum(gap_area)
         # stats_folder = 'Demonstrations/' if self.demonstration_episode else ''
         if self.training:
-            self.training_stats_buffer['db_auc'].append(db_auc)
-            self.training_stats_buffer['gap_auc'].append(gap_auc)
-            self.training_stats_buffer['active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
-            self.training_stats_buffer['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
-            self.training_stats_buffer['accuracy'] += accuracy_list
-            self.training_stats_buffer['f1_score'] += f1_score_list
+            self.training_stats['db_auc'].append(db_auc)
+            self.training_stats['gap_auc'].append(gap_auc)
+            self.training_stats['active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
+            self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
+            self.training_stats['accuracy'] += accuracy_list
+            self.training_stats['f1_score'] += f1_score_list
         stats = {**self.episode_stats,
                  'db_auc': db_auc,
+                 'db_auc_improvement': db_auc / self.baseline['rootonly_stats'][self.scip_seed]['db_auc'],
                  'gap_auc': gap_auc,
-                 'active_applied_ratio': active_applied_ratio,
-                 'applied_available_ratio': applied_available_ratio,
+                 'gap_auc_improvement': gap_auc / self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'],
+                 'active_applied_ratio': np.mean(active_applied_ratio),
+                 'applied_available_ratio': np.mean(applied_available_ratio),
                  'accuracy': np.mean(accuracy_list),
                  'f1_score': np.mean(f1_score_list),
-                 'terminal_state': self.terminal_state}
+                 'terminal_state': self.terminal_state,
+                 'true_pos': true_pos,
+                 'true_neg': true_neg,
+                 'false_pos': false_pos,
+                 'false_neg': false_neg,
+                 }
 
         # # todo remove this and store instead test episode_stats, terminal_state, gap_auc, db_auc, and send to logger as is.
         # if self.baseline.get('rootonly_stats', None) is not None:
@@ -1093,7 +1098,7 @@ class DQNWorker(Sepa):
 
         if self.is_worker or self.is_tester:
             # plot normalized dualbound and gap auc
-            for k, vals in self.training_stats_buffer.items():
+            for k, vals in self.training_stats.items():
                 if len(vals) == 0:
                     continue
                 avg = np.mean(vals)
@@ -1101,7 +1106,7 @@ class DQNWorker(Sepa):
                 print('{}: {:.4f} | '.format(k, avg), end='')
                 log_dict[self.dataset_name + '/' + k + actor_name] = avg
                 # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
-                self.training_stats_buffer[k] = []
+                self.training_stats[k] = []
 
         if self.is_learner:
             # log the average loss of the last training session
@@ -1166,8 +1171,8 @@ class DQNWorker(Sepa):
             if row == self.figures['nrows'] - 1 and col == self.figures['ncols'] - 1:
                 dqn_db_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['db_auc'])
                 dqn_gap_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['gap_auc'])
-                dqn_db_auc_avg = np.mean(self.training_stats_buffer['db_auc'])
-                dqn_gap_auc_avg = np.mean(self.training_stats_buffer['gap_auc'])
+                dqn_db_auc_avg = np.mean(self.training_stats['db_auc'])
+                dqn_gap_auc_avg = np.mean(self.training_stats['gap_auc'])
                 db_labels = ['DQN {:.4f}({:.4f})'.format(dqn_db_auc_avg, dqn_db_auc_avg_without_early_stop),
                              'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['db_auc_avg']),
                              '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['db_auc_avg']),
@@ -1313,7 +1318,7 @@ class DQNWorker(Sepa):
         """Save the model if show the best performance on the validation set.
         The performance is the -(dualbound/gap auc),
         according to the DQN objective"""
-        perf = -np.mean(self.training_stats_buffer[self.dqn_objective])
+        perf = -np.mean(self.training_stats[self.dqn_objective])
         if perf > self.best_perf[self.dataset_name]:
             self.best_perf[self.dataset_name] = perf
             self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
@@ -1341,18 +1346,13 @@ class DQNWorker(Sepa):
         print(self.print_prefix, 'Loaded checkpoint from: ', filepath)
 
     # done
-    def load_datasets(self):
-        """
-        Load train/valid/test sets
-        todo - overfit: load only test100[0] as trainset and validset
-        """
-        hparams = self.hparams
-
+    @staticmethod
+    def load_data(hparams):
         # datasets and baselines
         datasets = deepcopy(hparams['datasets'])
 
         # todo - in overfitting sanity check consider only the first instance of the overfitted dataset
-        overfit_dataset_name = self.hparams.get('overfit', False)
+        overfit_dataset_name = hparams.get('overfit', False)
         if overfit_dataset_name in datasets.keys():
             for dataset_name in hparams['datasets'].keys():
                 if dataset_name != overfit_dataset_name:
@@ -1400,8 +1400,10 @@ class DQNWorker(Sepa):
                         tmp_stats = {}
                         for k, v in baseline[bsl][scip_seed].items():
                             if k != 'lp_iterations' and len(v) > 0:
-                                aligned_lp_iterations, aligned_v = truncate(t=baseline[bsl][scip_seed]['lp_iterations'], ft=v,
-                                                                            support=dataset['lp_iterations_limit'], interpolate=type(v[0]) == float)
+                                aligned_lp_iterations, aligned_v = truncate(t=baseline[bsl][scip_seed]['lp_iterations'],
+                                                                            ft=v,
+                                                                            support=dataset['lp_iterations_limit'],
+                                                                            interpolate=type(v[0]) == float)
                                 tmp_stats[k] = aligned_v
                                 tmp_stats['lp_iterations'] = aligned_lp_iterations
                         # override with aligned stats
@@ -1410,8 +1412,11 @@ class DQNWorker(Sepa):
                         dualbound = baseline[bsl][scip_seed]['dualbound']
                         gap = baseline[bsl][scip_seed]['gap']
                         lpiter = baseline[bsl][scip_seed]['lp_iterations']
-                        db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
-                        gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+                        db_auc = sum(
+                            get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'],
+                                                 reference=optimal_value))
+                        gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'],
+                                                           reference=0))
                         baseline[bsl][scip_seed]['db_auc'] = db_auc
                         baseline[bsl][scip_seed]['gap_auc'] = gap_auc
                         db_auc_list.append(db_auc)
@@ -1425,12 +1430,21 @@ class DQNWorker(Sepa):
                                          'db_auc_std': db_auc_std,
                                          'gap_auc_avg': gap_auc_avg,
                                          'gap_auc_std': gap_auc_std}
+        return datasets
 
-        self.datasets = datasets
+    def load_datasets(self):
+        """
+        Load train/valid/test sets
+        todo - overfit: load only test100[0] as trainset and validset
+        """
+        hparams = self.hparams
+        self.datasets = datasets = self.load_data(hparams)
+
         # todo - overfitting sanity check -
         #  change 'testset100' to 'validset100' to enable logging stats collected only for validation sets.
         #  set trainset and validset100
         #  remove all the other datasets from database
+        overfit_dataset_name = hparams.get('overfit', False)
         if overfit_dataset_name:
             self.trainset = deepcopy(self.datasets[overfit_dataset_name])
             self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
@@ -1547,17 +1561,16 @@ class DQNWorker(Sepa):
 
         self.set_eval_mode()
         test_summary = []
-        for dataset_name, inst_idx, seed_idx in self.eval_instances:
+        for dataset_name, inst_idx, scip_seed in self.eval_instances:
             dataset = datasets[dataset_name]
             G, baseline = dataset['instances'][inst_idx]
-            scip_seed = dataset['scip_seed'][seed_idx]
             self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
             _, stats = self.execute_episode(G, baseline, dataset['lp_iterations_limit'],
                                             dataset_name=dataset_name,
                                             scip_seed=scip_seed)
             stats['dataset_name'] = dataset_name
             stats['inst_idx'] = inst_idx
-            stats['seed_idx'] = seed_idx
+            stats['scip_seed'] = scip_seed
             test_summary.append([(k, v) for k, v in stats.items()])
 
         # for dataset_name, dataset in datasets.items():
