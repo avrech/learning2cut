@@ -3,7 +3,8 @@ from time import time
 import networkx as nx
 from pyscipopt import SCIP_RESULT
 import numpy as np
-from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
+from utils.scip_models import maxcut_mccormic_model
+from utils.misc import get_separator_cuts_applied
 from utils.functions import dijkstra
 import operator
 import pickle

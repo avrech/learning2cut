@@ -199,3 +199,4 @@ def truncate(t, ft, support, interpolate=False):
     t[-1] = support
 
     return t, ft
+

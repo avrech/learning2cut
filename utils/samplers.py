@@ -2,7 +2,8 @@ from pyscipopt import  Sepa, Conshdlr, SCIP_RESULT, SCIP_STAGE
 from time import time
 import networkx as nx
 import numpy as np
-from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
+from utils.scip_models import maxcut_mccormic_model
+from utils.misc import get_separator_cuts_applied
 from utils.data import get_gnn_data
 import os
 import torch

@@ -3,7 +3,7 @@ from time import time
 import networkx as nx
 from pyscipopt import SCIP_RESULT
 import numpy as np
-from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
+from utils.misc import get_separator_cuts_applied
 from utils.functions import dijkstra, dijkstra_best_shortest_path
 import operator
 import pickle
@@ -632,6 +632,8 @@ class MccormickCycleSeparator(Sepa):
 
 
 if __name__ == "__main__":
+    # todo this step should be called from another file. e.g from scip_models
+    from utils.scip_models import maxcut_mccormic_model
     import sys
     if '--mixed-debug' in sys.argv:
         import ptvsd

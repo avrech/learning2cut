@@ -14,7 +14,8 @@ and a csv file summarizing the statistics in a table (useful for latex).
 
 """
 from ray import tune
-from utils.scip_models import maxcut_mccormic_model, get_separator_cuts_applied
+from utils.scip_models import maxcut_mccormic_model
+from utils.misc import get_separator_cuts_applied
 from separators.mccormick_cycle_separator import MccormickCycleSeparator
 import pickle
 import os

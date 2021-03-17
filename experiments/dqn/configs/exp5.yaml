@@ -78,8 +78,8 @@ record_cycles: False  # set True to record the generated cycles along test episo
 # Learning parameters
 learner_gpu: True
 worker_gpu: False
-tester_gpu: False
-num_workers: 3
+#tester_gpu: False
+num_workers: 5
 num_learners: 1
 param_update_interval: 10 # 100  # number of learner.sgd_steps between workers policy update
 max_num_updates: 100000  # relevant to PER to increase beta across time

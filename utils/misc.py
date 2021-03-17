@@ -50,3 +50,19 @@ if __name__ == '__main__':
     datadir = '/home/avrech/learning2cut/experiments/dqn/data/maxcut/trainset25/barabasi-albert-n25-m10-weights-normal-seed46'
     test_isomorphism(datadir)
     print('finished')
+
+
+def get_separator_cuts_applied(model, separator_name):
+    # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
+    cycle_cuts_added, cycle_cuts_applied = -2, -2
+    try:
+        tmpfile = '/tmp/tmp_stats.txt'
+        model.writeStatistics(filename=tmpfile)
+        with open(tmpfile, 'r') as f:
+            for line in f.readlines():
+                if separator_name in line:
+                    cycle_cuts_applied = int(line.split()[-2])
+                    cycle_cuts_added = int(line.split()[-3])
+    except:
+        cycle_cuts_added, cycle_cuts_applied = -1, -1
+    return cycle_cuts_added, cycle_cuts_applied

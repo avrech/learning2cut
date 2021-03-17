@@ -3,7 +3,7 @@ from collections import deque
 import pyarrow as pa
 import zmq
 import threading
-from time import time
+import time
 import numpy as np
 from utils.data import Transition
 import os
@@ -77,7 +77,7 @@ class DQNLearner:
         self.num_param_updates = 0
         self.training = True
         self.walltime_offset = 0
-        self.start_time = time()
+        self.start_time = time.time()
         self.last_time_sec = self.walltime_offset
 
         # file system paths
@@ -692,7 +692,7 @@ class DQNLearner:
             'num_sgd_steps_done': self.num_sgd_steps_done,
             'num_param_updates': self.num_param_updates,
             'i_episode': self.i_episode,
-            'walltime_offset': time() - self.start_time + self.walltime_offset,
+            'walltime_offset': time.time() - self.start_time + self.walltime_offset,
             'best_perf': self.best_perf,
             'n_step_loss_moving_avg': self.n_step_loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)

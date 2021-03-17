@@ -95,17 +95,3 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
     return model, x_dict, cycle_sepa
 
 
-def get_separator_cuts_applied(model, separator_name):
-    # TODO: avrech - find a more elegant way to retrive cycle_cuts_applied
-    cycle_cuts_added, cycle_cuts_applied = -2, -2
-    try:
-        tmpfile = '/tmp/tmp_stats.txt'
-        model.writeStatistics(filename=tmpfile)
-        with open(tmpfile, 'r') as f:
-            for line in f.readlines():
-                if separator_name in line:
-                    cycle_cuts_applied = int(line.split()[-2])
-                    cycle_cuts_added = int(line.split()[-3])
-    except:
-        cycle_cuts_added, cycle_cuts_applied = -1, -1
-    return cycle_cuts_added, cycle_cuts_applied

@@ -146,7 +146,7 @@ class DQNWorker(Sepa):
         for dataset_name, dataset in datasets.items():
             if 'train' in dataset_name or 'test' in dataset_name:
                 continue
-            for inst_idx in range(len(dataset['instances'])):
+            for inst_idx in range(dataset['ngraphs']):
                 for scip_seed in dataset['scip_seed']:
                     flat_instances.append((dataset_name, inst_idx, scip_seed))
         idx = worker_id-1
@@ -197,7 +197,7 @@ class DQNWorker(Sepa):
 
     @property
     def actor_name(self):
-        return "tester" if self.is_tester else f"worker_{self.worker_id}"
+        return f"worker_{self.worker_id}"
 
     def synchronize_params(self, new_params_packet):
         """Synchronize worker's policy_net with learner's policy_net params """
@@ -871,7 +871,7 @@ class DQNWorker(Sepa):
                                                tqnet_version=self.tqnet_version
                                                )
 
-                if self.use_per:
+                if True:  # self.use_per:
                     # todo - compute initial priority for PER based on the policy q_values.
                     #        compute the TD error for each action in the current state as we do in sgd_step,
                     #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
@@ -939,21 +939,23 @@ class DQNWorker(Sepa):
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
-        stats = {**self.episode_stats,
-                 'db_auc': db_auc,
-                 'db_auc_improvement': db_auc / self.baseline['rootonly_stats'][self.scip_seed]['db_auc'],
-                 'gap_auc': gap_auc,
-                 'gap_auc_improvement': gap_auc / self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'],
-                 'active_applied_ratio': np.mean(active_applied_ratio),
-                 'applied_available_ratio': np.mean(applied_available_ratio),
-                 'accuracy': np.mean(accuracy_list),
-                 'f1_score': np.mean(f1_score_list),
-                 'terminal_state': self.terminal_state,
-                 'true_pos': true_pos,
-                 'true_neg': true_neg,
-                 'false_pos': false_pos,
-                 'false_neg': false_neg,
-                 }
+            stats = None
+        else:
+            stats = {**self.episode_stats,
+                     'db_auc': db_auc,
+                     'db_auc_improvement': db_auc / self.baseline['rootonly_stats'][self.scip_seed]['db_auc'],
+                     'gap_auc': gap_auc,
+                     'gap_auc_improvement': gap_auc / self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'],
+                     'active_applied_ratio': np.mean(active_applied_ratio),
+                     'applied_available_ratio': np.mean(applied_available_ratio),
+                     'accuracy': np.mean(accuracy_list),
+                     'f1_score': np.mean(f1_score_list),
+                     'terminal_state': self.terminal_state,
+                     'true_pos': true_pos,
+                     'true_neg': true_neg,
+                     'false_pos': false_pos,
+                     'false_neg': false_neg,
+                     }
 
         # # todo remove this and store instead test episode_stats, terminal_state, gap_auc, db_auc, and send to logger as is.
         # if self.baseline.get('rootonly_stats', None) is not None:
