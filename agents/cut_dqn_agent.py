@@ -1623,7 +1623,7 @@ class CutDQNAgent(Sepa):
         """Save the model if show the best performance on the validation set.
         The performance is the -(dualbound/gap auc),
         according to the DQN objective"""
-        perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
+        perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective]) # TODO URGENTLY check if should be perf = +np.mean...
         if perf > self.best_perf[self.dataset_name]:
             self.best_perf[self.dataset_name] = perf
             self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
