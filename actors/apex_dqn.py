@@ -9,7 +9,7 @@ import zmq
 import pyarrow as pa
 import psutil
 import time
-from gnn.models import Qnet, TQnet
+from utils.misc import get_img_from_fig
 from copy import deepcopy
 import torch
 import numpy as np
@@ -324,7 +324,7 @@ class ApeXDQN:
                 self.save_checkpoint()
 
     def finish_step(self, step):
-        print(self.print_prefix, f'Step: {step}\t|', end='')
+        print_msg = f'Step: {step}'
         log_dict = self.logs_history.pop(step)
         stats = self.stats_history.pop(step)
         # average training stats and add to log dict
@@ -384,8 +384,8 @@ class ApeXDQN:
 
                 # update log_dict
                 log_dict.update({f'{dataset_name}/{k}': v for k, v in avg_values.items()})
-                log_dict.update({f'{dataset_name}/{figname}': wandb.Image(figures[figname]['fig']) for figname in figures['fignames']})
-                print('{}: {}_imp={}\t|'.format(dataset_name, self.cfg["dqn_objective"], avg_values[self.cfg["dqn_objective"]+"_improvement"]), end='')
+                log_dict.update({f'{dataset_name}/{figname}': wandb.Image(get_img_from_fig(figures[figname]['fig'], dpi=300), caption=figname) for figname in figures['fignames']})
+                print_msg += '\t| {}: {}_imp={}'.format(dataset_name, self.cfg["dqn_objective"], avg_values[self.cfg["dqn_objective"]+"_improvement"])
 
             # if all validation results are ready, then
             # save model and figures if its performance is the best till now
@@ -397,7 +397,7 @@ class ApeXDQN:
                         figures[figname]['fig'].savefig(os.path.join(self.run_dir, f'best_{self.dataset_name}_{figname}.png'))
                     with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_params.pkl'), 'wb') as f:
                         pickle.dump(stats['params'], f)
-        print('')
+        self.print(print_msg)
         return log_dict
 
     def save_checkpoint(self):
