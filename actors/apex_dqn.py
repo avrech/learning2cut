@@ -384,7 +384,7 @@ class ApeXDQN:
 
                 # update log_dict
                 log_dict.update({f'{dataset_name}/{k}': v for k, v in avg_values.items()})
-                log_dict.update({f'{dataset_name}/{figname}': figures[figname]['fig'] for figname in figures['fignames']})
+                log_dict.update({f'{dataset_name}/{figname}': wandb.Image(figures[figname]['fig']) for figname in figures['fignames']})
                 print('{}: {}_imp={}\t|'.format(dataset_name, self.cfg["dqn_objective"], avg_values[self.cfg["dqn_objective"]+"_improvement"]), end='')
 
             # if all validation results are ready, then
