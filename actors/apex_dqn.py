@@ -312,10 +312,10 @@ class ApeXDQN:
 
             # if all actors finished a certain step, log this step to wandb.
             # wait for late actors up to 10 steps. after that, late packets will be discarded.
-            if len(self.unfinished_steps) > 20:  # todo return to 1000
+            if len(self.unfinished_steps) > 50:  # todo return to 1000
                 self.print('some actor is dead. restart to continue logging.')
                 print(self.step_counter)
-            while self.unfinished_steps and (all([self.unfinished_steps[0] <= cnt for cnt in self.step_counter.values()]) or len(self.unfinished_steps) > 20):
+            while self.unfinished_steps and (all([self.unfinished_steps[0] <= cnt for cnt in self.step_counter.values()]) or len(self.unfinished_steps) > 50):
                 step = self.unfinished_steps.pop(0)
                 # todo - finish step, create figures, average stats and return log_dict
                 log_dict = self.finish_step(step)
