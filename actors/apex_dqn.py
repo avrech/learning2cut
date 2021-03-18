@@ -184,7 +184,7 @@ class ApeXDQN:
 
         # spawn learner
         self.print('spawning learner process')
-        ray_learner = ray.remote(num_gpus=int(self.learner_gpu), num_cpus=2)(DQNLearner)
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(DQNLearner)  # , num_cpus=2
         # instantiate learner and run its io process in a background thread
         self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True, run_setup=True)
         # wait for learner's com config
@@ -460,7 +460,7 @@ class ApeXDQN:
         actor_processes = self.get_actors_running_process(actors)
 
         ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(DQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.learner_gpu), num_cpus=2)(DQNLearner)
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(DQNLearner)  # , num_cpus=2
         ray_replay_server = ray.remote(PrioritizedReplayServer)
         handles = []
         # restart all actors
