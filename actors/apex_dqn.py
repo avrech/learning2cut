@@ -390,6 +390,7 @@ class ApeXDQN:
             # if all validation results are ready, then
             # save model and figures if its performance is the best till now
             if all([len(v) == 30 for v in all_values.values()]):
+                self.print(f'{"#"*50} new results for {dataset_name} {"#"*50}')
                 cur_perf = avg_values[self.cfg['dqn_objective']]
                 if cur_perf > self.best_performance[dataset_name]:
                     self.best_performance[dataset_name] = cur_perf

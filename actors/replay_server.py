@@ -158,17 +158,6 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
                 assert self.collecting_demonstrations
                 self.request_data('demonstration')
 
-            # if self.filling:
-            #     if len(self.storage) + len(new_replay_data_list) < self.capacity:
-            #         self.pbar.update(len(new_replay_data_list))
-            #     else:
-            #         # now filled the capacity.
-            #         # increment the progress bar by the amount left and close
-            #         self.pbar.update(self.capacity - len(self.storage))
-            #         self.pbar.close()
-            #         self.filling = False
-
-            # self.add_data_list(new_replay_data_list)
             if self.filling and self.collecting_demonstrations and self.next_idx >= self.n_demonstrations:
                 # change pbar description
                 self.pbar.set_description('[Replay Server] Filling agent data')
