@@ -73,7 +73,7 @@ parser.add_argument("--worker_gpu", type=str2bool, nargs='?', const=True, defaul
 parser.add_argument("--tester_gpu", type=str2bool, nargs='?', const=True, default=False, help="use gpu on tester side")
 parser.add_argument("--num_workers", type=int, default=3, help="number of Apex workers")
 parser.add_argument("--num_learners", type=int, default=1, help="todo - verify redundancy and remove this arg")
-parser.add_argument("--param_update_interval", type=int, default=100, help="number of gradient steps on learner side between consequent updates of workers' model parameter ")
+parser.add_argument("--param_sync_interval", type=int, default=100, help="number of gradient steps on learner side between consequent updates of workers' model parameter ")
 parser.add_argument("--max_num_updates", type=int, default=100000, help="maximal number of model parameter updates")
 parser.add_argument("--replay_buffer_capacity", type=int, default=100000, help="replay buffer capacity (in transitions)")
 parser.add_argument("--replay_buffer_n_demonstrations", type=int, default=100000, help="how many demonstration transitions to save in replay buffer during training")
