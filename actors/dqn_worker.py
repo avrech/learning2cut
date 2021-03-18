@@ -80,6 +80,7 @@ class DQNWorker(Sepa):
         self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
         self.empty_action_penalty = self.hparams.get('empty_action_penalty', 0)
         self.select_at_least_one_cut = self.hparams.get('select_at_least_one_cut', True)
+        self.use_per = True
 
         # training stuff
         self.num_env_steps_done = 0
@@ -674,7 +675,7 @@ class DQNWorker(Sepa):
             # todo remove printing-  debug
             self.debug_n_early_stop += 1
             self.print(f'discarded early stop {self.debug_n_early_stop}/{self.debug_n_episodes_done}')
-            return []
+            return [], None
 
         assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'NODE_LIMIT', 'EMPTY_ACTION']
         assert not (self.select_at_least_one_cut and self.terminal_state == 'EMPTY_ACTION')
@@ -699,7 +700,7 @@ class DQNWorker(Sepa):
                 # cannot restore the selection order. discarding episode.
                 self.debug_n_tracking_errors += 1
                 self.print(f'discarded tracking error {self.debug_n_tracking_errors}/{self.debug_n_episodes_done} ({self.cur_graph})')
-                return []
+                return [], None
             elif len(selected_cuts_names) == 0 and not self.demonstration_episode:
                 # assert that the number of cuts selected by the agent is the number of cuts applied in the last round
                 assert len(self.episode_stats['ncuts_applied'])-1 == len(self.episode_history)
@@ -739,7 +740,7 @@ class DQNWorker(Sepa):
                     # todo remove printing-  debug
                     self.debug_n_tracking_errors += 1
                     self.print(f'discarded tracking error {self.debug_n_tracking_errors}/{self.debug_n_episodes_done} ({self.cur_graph})')
-                    return []
+                    return [], None
 
             assert self.terminal_state in ['OPTIMAL', 'LP_ITERATIONS_LIMIT_REACHED', 'NODE_LIMIT']
             nvars = self.model.getNVars()
@@ -871,7 +872,7 @@ class DQNWorker(Sepa):
                                                tqnet_version=self.tqnet_version
                                                )
 
-                if True:  # self.use_per:
+                if self.use_per:
                     # todo - compute initial priority for PER based on the policy q_values.
                     #        compute the TD error for each action in the current state as we do in sgd_step,
                     #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
@@ -1028,276 +1029,276 @@ class DQNWorker(Sepa):
         self.training = True
         self.policy_net.train()
 
-    # done
-    def log_stats(self, save_best=False, plot_figures=False, global_step=None, info={}, log_directly=True):
-        """
-        Average tmp_stats_buffer values, log to tensorboard dir,
-        and reset tmp_stats_buffer for the next round.
-        This function should be called periodically during training,
-        and at the end of every validation/test set evaluation
-        save_best should be set to the best model according to the agent performnace on the validation set.
-        If the model has shown its best so far, we save the model parameters and the dualbound/gap curves
-        The global_step in plots is by default the number of policy updates.
-        This global_step measure holds both for single threaded DQN and distributed DQN,
-        where self.num_policy_updates is updated in
-            single threaded DQN - every time optimize_model() is executed
-            distributed DQN - every time the workers' policy is updated
-        Tracking the global_step is essential for "resume".
-        TODO adapt function to run on learner and workers separately.
-            learner - plot loss
-            worker - plot auc etc.
-            test_worker - plot valid/test auc frac and figures
-            in single thread - these are all true.
-            need to separate workers' logdir in the distributed main script
-        """
-        # dictionary of all metrics to log
-        log_dict = {}
-        actor_name = '_' + self.print_prefix.replace('[', '').replace(']', '').replace(' ', '_') if len(self.print_prefix) > 0 else ''
-        # actor_name = self.print_prefix.replace('[', '').replace(']', '').replace(' ', '') + '_'
-        if global_step is None:
-            global_step = self.num_param_updates
+    # # done
+    # def log_stats(self, save_best=False, plot_figures=False, global_step=None, info={}, log_directly=True):
+    #     """
+    #     Average tmp_stats_buffer values, log to tensorboard dir,
+    #     and reset tmp_stats_buffer for the next round.
+    #     This function should be called periodically during training,
+    #     and at the end of every validation/test set evaluation
+    #     save_best should be set to the best model according to the agent performnace on the validation set.
+    #     If the model has shown its best so far, we save the model parameters and the dualbound/gap curves
+    #     The global_step in plots is by default the number of policy updates.
+    #     This global_step measure holds both for single threaded DQN and distributed DQN,
+    #     where self.num_policy_updates is updated in
+    #         single threaded DQN - every time optimize_model() is executed
+    #         distributed DQN - every time the workers' policy is updated
+    #     Tracking the global_step is essential for "resume".
+    #     TODO adapt function to run on learner and workers separately.
+    #         learner - plot loss
+    #         worker - plot auc etc.
+    #         test_worker - plot valid/test auc frac and figures
+    #         in single thread - these are all true.
+    #         need to separate workers' logdir in the distributed main script
+    #     """
+    #     # dictionary of all metrics to log
+    #     log_dict = {}
+    #     actor_name = '_' + self.print_prefix.replace('[', '').replace(']', '').replace(' ', '_') if len(self.print_prefix) > 0 else ''
+    #     # actor_name = self.print_prefix.replace('[', '').replace(']', '').replace(' ', '') + '_'
+    #     if global_step is None:
+    #         global_step = self.num_param_updates
+    #
+    #     print(self.print_prefix, f'Global step: {global_step} | {self.dataset_name}\t|', end='')
+    #     cur_time_sec = time() - self.start_time + self.walltime_offset
+    #
+    #     if self.is_tester:
+    #         if plot_figures:
+    #             self.decorate_figures()  # todo replace with wandb plot line
+    #
+    #         if save_best:
+    #             # todo check if ignoring outliers is a good idea
+    #             # perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])
+    #             perf = np.mean(self.test_perf_list)
+    #             if perf > self.best_perf[self.dataset_name]:
+    #                 self.best_perf[self.dataset_name] = perf
+    #                 self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
+    #                 self.save_figures(filename_suffix=f'best_{self.num_param_updates}')
+    #                 # save full test stats dict
+    #                 with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_test_stats.pkl'), 'wb') as f:
+    #                     pickle.dump(self.test_stats_dict[self.dataset_name], f)
+    #
+    #         # add episode figures (for validation and test sets only)
+    #         if plot_figures:
+    #             for figname in self.figures['fignames']: # todo replace with wandb plot line. in the meanwhile use wandb Image
+    #                 if log_directly:
+    #                     log_dict[figname + '/' + self.dataset_name] = self.figures[figname]['fig']
+    #                 else:
+    #                     # in order to send to apex logger, we should serialize the image as numpy array.
+    #                     # so convert first to numpy array
+    #                     fig_rgb = get_img_from_fig(self.figures[figname]['fig'], dpi=300)
+    #                     # and store with a label 'fig' to decode on the logger side
+    #                     log_dict[figname + '/' + self.dataset_name] = ('fig', fig_rgb)
+    #
+    #         # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
+    #         for k, vals in self.test_stats_buffer.items():
+    #             if len(vals) > 0:
+    #                 avg = np.mean(vals)
+    #                 # std = np.std(vals)
+    #                 print('{}: {:.4f} | '.format(k, avg), end='')
+    #                 self.test_stats_buffer[k] = []
+    #                 log_dict[self.dataset_name + '/' + k + actor_name] = avg
+    #                 # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
+    #
+    #     if self.is_worker or self.is_tester:
+    #         # plot normalized dualbound and gap auc
+    #         for k, vals in self.training_stats.items():
+    #             if len(vals) == 0:
+    #                 continue
+    #             avg = np.mean(vals)
+    #             # std = np.std(vals)
+    #             print('{}: {:.4f} | '.format(k, avg), end='')
+    #             log_dict[self.dataset_name + '/' + k + actor_name] = avg
+    #             # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
+    #             self.training_stats[k] = []
+    #
+    #     if self.is_learner:
+    #         # log the average loss of the last training session
+    #         print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
+    #         print('Demonstration Loss: {:.4f} | '.format(self.demonstration_loss_moving_avg), end='')
+    #         print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
+    #         # todo wandb
+    #         log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
+    #         log_dict['Demonstration_Loss'] = self.demonstration_loss_moving_avg
+    #
+    #     if log_directly:
+    #         # todo wandb modify log dict keys with actor_name, or maybe agging is better?
+    #         wandb.log(log_dict, step=global_step)
+    #
+    #     # print the additional info
+    #     for k, v in info.items():
+    #         print(k + ': ' + v + ' | ', end='')
+    #
+    #     # print times
+    #     d = int(np.floor(cur_time_sec/(3600*24)))
+    #     h = int(np.floor(cur_time_sec/3600) - 24*d)
+    #     m = int(np.floor(cur_time_sec/60) - 60*(24*d + h))
+    #     s = int(cur_time_sec) % 60
+    #     print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
+    #     print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
+    #     self.last_time_sec = cur_time_sec
+    #
+    #     self.test_perf_list = []  # reset for the next testset
+    #
+    #     return global_step, log_dict
 
-        print(self.print_prefix, f'Global step: {global_step} | {self.dataset_name}\t|', end='')
-        cur_time_sec = time() - self.start_time + self.walltime_offset
-
-        if self.is_tester:
-            if plot_figures:
-                self.decorate_figures()  # todo replace with wandb plot line
-
-            if save_best:
-                # todo check if ignoring outliers is a good idea
-                # perf = np.mean(self.tmp_stats_buffer[self.dqn_objective])
-                perf = np.mean(self.test_perf_list)
-                if perf > self.best_perf[self.dataset_name]:
-                    self.best_perf[self.dataset_name] = perf
-                    self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
-                    self.save_figures(filename_suffix=f'best_{self.num_param_updates}')
-                    # save full test stats dict
-                    with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_test_stats.pkl'), 'wb') as f:
-                        pickle.dump(self.test_stats_dict[self.dataset_name], f)
-
-            # add episode figures (for validation and test sets only)
-            if plot_figures:
-                for figname in self.figures['fignames']: # todo replace with wandb plot line. in the meanwhile use wandb Image
-                    if log_directly:
-                        log_dict[figname + '/' + self.dataset_name] = self.figures[figname]['fig']
-                    else:
-                        # in order to send to apex logger, we should serialize the image as numpy array.
-                        # so convert first to numpy array
-                        fig_rgb = get_img_from_fig(self.figures[figname]['fig'], dpi=300)
-                        # and store with a label 'fig' to decode on the logger side
-                        log_dict[figname + '/' + self.dataset_name] = ('fig', fig_rgb)
-
-            # plot dualbound and gap auc improvement over the baseline (for validation and test sets only)
-            for k, vals in self.test_stats_buffer.items():
-                if len(vals) > 0:
-                    avg = np.mean(vals)
-                    # std = np.std(vals)
-                    print('{}: {:.4f} | '.format(k, avg), end='')
-                    self.test_stats_buffer[k] = []
-                    log_dict[self.dataset_name + '/' + k + actor_name] = avg
-                    # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
-
-        if self.is_worker or self.is_tester:
-            # plot normalized dualbound and gap auc
-            for k, vals in self.training_stats.items():
-                if len(vals) == 0:
-                    continue
-                avg = np.mean(vals)
-                # std = np.std(vals)
-                print('{}: {:.4f} | '.format(k, avg), end='')
-                log_dict[self.dataset_name + '/' + k + actor_name] = avg
-                # log_dict[self.dataset_name + '/' + k + '_std' + actor_name] = std
-                self.training_stats[k] = []
-
-        if self.is_learner:
-            # log the average loss of the last training session
-            print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
-            print('Demonstration Loss: {:.4f} | '.format(self.demonstration_loss_moving_avg), end='')
-            print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
-            # todo wandb
-            log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
-            log_dict['Demonstration_Loss'] = self.demonstration_loss_moving_avg
-
-        if log_directly:
-            # todo wandb modify log dict keys with actor_name, or maybe agging is better?
-            wandb.log(log_dict, step=global_step)
-
-        # print the additional info
-        for k, v in info.items():
-            print(k + ': ' + v + ' | ', end='')
-
-        # print times
-        d = int(np.floor(cur_time_sec/(3600*24)))
-        h = int(np.floor(cur_time_sec/3600) - 24*d)
-        m = int(np.floor(cur_time_sec/60) - 60*(24*d + h))
-        s = int(cur_time_sec) % 60
-        print('Iteration Time: {:.1f}[sec]| '.format(cur_time_sec - self.last_time_sec), end='')
-        print('Total Time: {}-{:02d}:{:02d}:{:02d}'.format(d, h, m, s))
-        self.last_time_sec = cur_time_sec
-
-        self.test_perf_list = []  # reset for the next testset
-
-        return global_step, log_dict
-
-    # done
-    def init_figures(self, fignames, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
-        for figname in fignames:
-            fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
-            fig.set_size_inches(w=8, h=10)
-            fig.set_tight_layout(True)
-            self.figures[figname] = {'fig': fig, 'axes': axes}
-        self.figures['nrows'] = nrows
-        self.figures['ncols'] = ncols
-        self.figures['col_labels'] = col_labels
-        self.figures['row_labels'] = row_labels
-        self.figures['fignames'] = fignames
-
-    # done
-    def add_episode_subplot(self, row, col):
-        """
-        plot the last episode curves to subplot in position (row, col)
-        plot dqn agent dualbound/gap curves together with the baseline curves.
-        should be called after each validation/test episode with row=graph_idx, col=seed_idx
-        """
-        if 'Dual_Bound_vs_LP_Iterations' in self.figures.keys():
-            dqn = self.episode_stats
-            bsl_0 = self.baseline['rootonly_stats'][self.scip_seed]
-            bsl_1 = self.baseline['10_random'][self.scip_seed]
-            bsl_2 = self.baseline['10_most_violated'][self.scip_seed]
-            bsl_stats = self.datasets[self.dataset_name]['stats']
-            # bsl_lpiter, bsl_db, bsl_gap = bsl_0['lp_iterations'], bsl_0['dualbound'], bsl_0['gap']
-            # dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
-
-            # set labels for the last subplot
-            if row == self.figures['nrows'] - 1 and col == self.figures['ncols'] - 1:
-                dqn_db_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['db_auc'])
-                dqn_gap_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['gap_auc'])
-                dqn_db_auc_avg = np.mean(self.training_stats['db_auc'])
-                dqn_gap_auc_avg = np.mean(self.training_stats['gap_auc'])
-                db_labels = ['DQN {:.4f}({:.4f})'.format(dqn_db_auc_avg, dqn_db_auc_avg_without_early_stop),
-                             'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['db_auc_avg']),
-                             '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['db_auc_avg']),
-                             '10 MOST VIOLATED {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_most_violated']['db_auc_avg']),
-                             'OPTIMAL'
-                             ]
-                gap_labels = ['DQN {:.4f}({:.4f})'.format(dqn_gap_auc_avg, dqn_gap_auc_avg_without_early_stop),
-                              'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['gap_auc_avg']),
-                              '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['gap_auc_avg']),
-                              '10 MOST VIOLATED {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_most_violated']['gap_auc_avg']),
-                              'OPTIMAL'
-                              ]
-            else:
-                db_labels = [None] * 5
-                gap_labels = [None] * 5
-
-            for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
-                                                                   ['b', 'g', 'y', 'c', 'k'],
-                                                                   [dqn['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
-                                                                   [dqn['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
-                                                                   [dqn['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
-                                                                   ):
-                if lpiter[-1] < self.lp_iterations_limit:
-                    # extend curve to the limit
-                    lpiter = lpiter + [self.lp_iterations_limit]
-                    db = db + db[-1:]
-                    gap = gap + gap[-1:]
-                assert lpiter[-1] == self.lp_iterations_limit
-                # plot dual bound and gap, marking early stops with red borders
-                ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
-                ax.plot(lpiter, db, color, label=db_label)
-                if self.terminal_state == 'NODE_LIMIT':
-                    for spine in ax.spines.values():
-                        spine.set_edgecolor('red')
-                ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
-                ax.plot(lpiter, gap, color, label=gap_label)
-                if self.terminal_state == 'NODE_LIMIT':
-                    for spine in ax.spines.values():
-                        spine.set_edgecolor('red')
-
-            # if dqn_lpiter[-1] < self.lp_iterations_limit:
-            #     # extend curve to the limit
-            #     dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
-            #     dqn_db = dqn_db + dqn_db[-1:]
-            #     dqn_gap = dqn_gap + dqn_gap[-1:]
-            # if bsl_lpiter[-1] < self.lp_iterations_limit:
-            #     # extend curve to the limit
-            #     bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
-            #     bsl_db = bsl_db + bsl_db[-1:]
-            #     bsl_gap = bsl_gap + bsl_gap[-1:]
-            # assert dqn_lpiter[-1] == self.lp_iterations_limit
-            # assert bsl_lpiter[-1] == self.lp_iterations_limit
-            # # plot dual bound
-            # ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
-            # ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
-            # ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
-            # ax.plot([0, self.lp_iterations_limit], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
-            # # plot gap
-            # ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
-            # ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
-            # ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
-            # ax.plot([0, self.lp_iterations_limit], [0, 0], 'k', label='optimal gap')
-
-        # plot imitation performance bars
-        if 'Similarity_to_SCIP' in self.figures.keys():
-            true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
-            for info in self.episode_history:
-                scip_action = info['action_info']['selected_by_scip']
-                agent_action = info['action_info']['selected_by_agent']
-                true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
-                true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
-                false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
-                false_neg += sum(scip_action[agent_action == 0] != agent_action[agent_action == 0])
-            total_ncuts = true_pos + true_neg + false_pos + false_neg
-            rects = []
-            ax = self.figures['Similarity_to_SCIP']['axes'][row, col]
-            rects += ax.bar(-0.3, true_pos / total_ncuts, width=0.2, label='true pos')
-            rects += ax.bar(-0.1, true_neg / total_ncuts, width=0.2, label='true neg')
-            rects += ax.bar(+0.1, false_pos / total_ncuts, width=0.2, label='false pos')
-            rects += ax.bar(+0.3, false_neg / total_ncuts, width=0.2, label='false neg')
-
-            """Attach a text label above each bar in *rects*, displaying its height."""
-            for rect in rects:
-                height = rect.get_height()
-                ax.annotate('{:.2f}'.format(height),
-                            xy=(rect.get_x() + rect.get_width() / 2, height),
-                            xytext=(0, 3),  # 3 points vertical offset
-                            textcoords="offset points",
-                            ha='center', va='bottom')
-            ax.set_xticks([], [])  # disable x ticks
-
-    # done
-    def decorate_figures(self, legend=True, col_labels=True, row_labels=True):
-        """ save figures to png file """
-        # decorate (title, labels etc.)
-        nrows, ncols = self.figures['nrows'], self.figures['ncols']
-        for figname in self.figures['fignames']:
-            if col_labels:
-                # add col labels at the first row only
-                for col in range(ncols):
-                    ax = self.figures[figname]['axes'][0, col]
-                    ax.set_title(self.figures['col_labels'][col])
-            if row_labels:
-                # add row labels at the first col only
-                for row in range(nrows):
-                    ax = self.figures[figname]['axes'][row, 0]
-                    ax.set_ylabel(self.figures['row_labels'][row])
-            if legend:
-                # add legend to the bottom-left subplot only
-                ax = self.figures[figname]['axes'][-1, -1]
-                ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), fancybox=True, shadow=True, ncol=1, borderaxespad=0.)
-
-    # done
-    def save_figures(self, filename_suffix=None):
-        for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
-            # save png
-            fname = f'{self.dataset_name}_{figname}'
-            if filename_suffix is not None:
-                fname = fname + '_' + filename_suffix
-            fname += '.png'
-            fpath = os.path.join(self.run_dir, fname)
-            self.figures[figname]['fig'].savefig(fpath)
-
+    # # done
+    # def init_figures(self, fignames, nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
+    #     for figname in fignames:
+    #         fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
+    #         fig.set_size_inches(w=8, h=10)
+    #         fig.set_tight_layout(True)
+    #         self.figures[figname] = {'fig': fig, 'axes': axes}
+    #     self.figures['nrows'] = nrows
+    #     self.figures['ncols'] = ncols
+    #     self.figures['col_labels'] = col_labels
+    #     self.figures['row_labels'] = row_labels
+    #     self.figures['fignames'] = fignames
+    #
+    # # done
+    # def add_episode_subplot(self, row, col):
+    #     """
+    #     plot the last episode curves to subplot in position (row, col)
+    #     plot dqn agent dualbound/gap curves together with the baseline curves.
+    #     should be called after each validation/test episode with row=graph_idx, col=seed_idx
+    #     """
+    #     if 'Dual_Bound_vs_LP_Iterations' in self.figures.keys():
+    #         dqn = self.episode_stats
+    #         bsl_0 = self.baseline['rootonly_stats'][self.scip_seed]
+    #         bsl_1 = self.baseline['10_random'][self.scip_seed]
+    #         bsl_2 = self.baseline['10_most_violated'][self.scip_seed]
+    #         bsl_stats = self.datasets[self.dataset_name]['stats']
+    #         # bsl_lpiter, bsl_db, bsl_gap = bsl_0['lp_iterations'], bsl_0['dualbound'], bsl_0['gap']
+    #         # dqn_lpiter, dqn_db, dqn_gap = self.episode_stats['lp_iterations'], self.episode_stats['dualbound'], self.episode_stats['gap']
+    #
+    #         # set labels for the last subplot
+    #         if row == self.figures['nrows'] - 1 and col == self.figures['ncols'] - 1:
+    #             dqn_db_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['db_auc'])
+    #             dqn_gap_auc_avg_without_early_stop = np.mean(self.test_stats_buffer['gap_auc'])
+    #             dqn_db_auc_avg = np.mean(self.training_stats['db_auc'])
+    #             dqn_gap_auc_avg = np.mean(self.training_stats['gap_auc'])
+    #             db_labels = ['DQN {:.4f}({:.4f})'.format(dqn_db_auc_avg, dqn_db_auc_avg_without_early_stop),
+    #                          'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['db_auc_avg']),
+    #                          '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['db_auc_avg']),
+    #                          '10 MOST VIOLATED {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_most_violated']['db_auc_avg']),
+    #                          'OPTIMAL'
+    #                          ]
+    #             gap_labels = ['DQN {:.4f}({:.4f})'.format(dqn_gap_auc_avg, dqn_gap_auc_avg_without_early_stop),
+    #                           'SCIP {:.4f}'.format(self.datasets[self.dataset_name]['stats']['rootonly_stats']['gap_auc_avg']),
+    #                           '10 RANDOM {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_random']['gap_auc_avg']),
+    #                           '10 MOST VIOLATED {:.4f}'.format(self.datasets[self.dataset_name]['stats']['10_most_violated']['gap_auc_avg']),
+    #                           'OPTIMAL'
+    #                           ]
+    #         else:
+    #             db_labels = [None] * 5
+    #             gap_labels = [None] * 5
+    #
+    #         for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
+    #                                                                ['b', 'g', 'y', 'c', 'k'],
+    #                                                                [dqn['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
+    #                                                                [dqn['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
+    #                                                                [dqn['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
+    #                                                                ):
+    #             if lpiter[-1] < self.lp_iterations_limit:
+    #                 # extend curve to the limit
+    #                 lpiter = lpiter + [self.lp_iterations_limit]
+    #                 db = db + db[-1:]
+    #                 gap = gap + gap[-1:]
+    #             assert lpiter[-1] == self.lp_iterations_limit
+    #             # plot dual bound and gap, marking early stops with red borders
+    #             ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+    #             ax.plot(lpiter, db, color, label=db_label)
+    #             if self.terminal_state == 'NODE_LIMIT':
+    #                 for spine in ax.spines.values():
+    #                     spine.set_edgecolor('red')
+    #             ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+    #             ax.plot(lpiter, gap, color, label=gap_label)
+    #             if self.terminal_state == 'NODE_LIMIT':
+    #                 for spine in ax.spines.values():
+    #                     spine.set_edgecolor('red')
+    #
+    #         # if dqn_lpiter[-1] < self.lp_iterations_limit:
+    #         #     # extend curve to the limit
+    #         #     dqn_lpiter = dqn_lpiter + [self.lp_iterations_limit]
+    #         #     dqn_db = dqn_db + dqn_db[-1:]
+    #         #     dqn_gap = dqn_gap + dqn_gap[-1:]
+    #         # if bsl_lpiter[-1] < self.lp_iterations_limit:
+    #         #     # extend curve to the limit
+    #         #     bsl_lpiter = bsl_lpiter + [self.lp_iterations_limit]
+    #         #     bsl_db = bsl_db + bsl_db[-1:]
+    #         #     bsl_gap = bsl_gap + bsl_gap[-1:]
+    #         # assert dqn_lpiter[-1] == self.lp_iterations_limit
+    #         # assert bsl_lpiter[-1] == self.lp_iterations_limit
+    #         # # plot dual bound
+    #         # ax = self.figures['Dual_Bound_vs_LP_Iterations']['axes'][row, col]
+    #         # ax.plot(dqn_lpiter, dqn_db, 'b', label='DQN')
+    #         # ax.plot(bsl_lpiter, bsl_db, 'r', label='SCIP default')
+    #         # ax.plot([0, self.lp_iterations_limit], [self.baseline['optimal_value']]*2, 'k', label='optimal value')
+    #         # # plot gap
+    #         # ax = self.figures['Gap_vs_LP_Iterations']['axes'][row, col]
+    #         # ax.plot(dqn_lpiter, dqn_gap, 'b', label='DQN')
+    #         # ax.plot(bsl_lpiter, bsl_gap, 'r', label='SCIP default')
+    #         # ax.plot([0, self.lp_iterations_limit], [0, 0], 'k', label='optimal gap')
+    #
+    #     # plot imitation performance bars
+    #     if 'Similarity_to_SCIP' in self.figures.keys():
+    #         true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
+    #         for info in self.episode_history:
+    #             scip_action = info['action_info']['selected_by_scip']
+    #             agent_action = info['action_info']['selected_by_agent']
+    #             true_pos += sum(scip_action[scip_action == 1] == agent_action[scip_action == 1])
+    #             true_neg += sum(scip_action[scip_action == 0] == agent_action[scip_action == 0])
+    #             false_pos += sum(scip_action[agent_action == 1] != agent_action[agent_action == 1])
+    #             false_neg += sum(scip_action[agent_action == 0] != agent_action[agent_action == 0])
+    #         total_ncuts = true_pos + true_neg + false_pos + false_neg
+    #         rects = []
+    #         ax = self.figures['Similarity_to_SCIP']['axes'][row, col]
+    #         rects += ax.bar(-0.3, true_pos / total_ncuts, width=0.2, label='true pos')
+    #         rects += ax.bar(-0.1, true_neg / total_ncuts, width=0.2, label='true neg')
+    #         rects += ax.bar(+0.1, false_pos / total_ncuts, width=0.2, label='false pos')
+    #         rects += ax.bar(+0.3, false_neg / total_ncuts, width=0.2, label='false neg')
+    #
+    #         """Attach a text label above each bar in *rects*, displaying its height."""
+    #         for rect in rects:
+    #             height = rect.get_height()
+    #             ax.annotate('{:.2f}'.format(height),
+    #                         xy=(rect.get_x() + rect.get_width() / 2, height),
+    #                         xytext=(0, 3),  # 3 points vertical offset
+    #                         textcoords="offset points",
+    #                         ha='center', va='bottom')
+    #         ax.set_xticks([], [])  # disable x ticks
+    #
+    # # done
+    # def decorate_figures(self, legend=True, col_labels=True, row_labels=True):
+    #     """ save figures to png file """
+    #     # decorate (title, labels etc.)
+    #     nrows, ncols = self.figures['nrows'], self.figures['ncols']
+    #     for figname in self.figures['fignames']:
+    #         if col_labels:
+    #             # add col labels at the first row only
+    #             for col in range(ncols):
+    #                 ax = self.figures[figname]['axes'][0, col]
+    #                 ax.set_title(self.figures['col_labels'][col])
+    #         if row_labels:
+    #             # add row labels at the first col only
+    #             for row in range(nrows):
+    #                 ax = self.figures[figname]['axes'][row, 0]
+    #                 ax.set_ylabel(self.figures['row_labels'][row])
+    #         if legend:
+    #             # add legend to the bottom-left subplot only
+    #             ax = self.figures[figname]['axes'][-1, -1]
+    #             ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), fancybox=True, shadow=True, ncol=1, borderaxespad=0.)
+    #
+    # # done
+    # def save_figures(self, filename_suffix=None):
+    #     for figname in ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations']:
+    #         # save png
+    #         fname = f'{self.dataset_name}_{figname}'
+    #         if filename_suffix is not None:
+    #             fname = fname + '_' + filename_suffix
+    #         fname += '.png'
+    #         fpath = os.path.join(self.run_dir, fname)
+    #         self.figures[figname]['fig'].savefig(fpath)
+    #
     # # done
     # def save_checkpoint(self, filepath=None):
     #     torch.save({
@@ -1314,17 +1315,17 @@ class DQNWorker(Sepa):
     #     }, filepath if filepath is not None else self.checkpoint_filepath)
     #     if self.hparams.get('verbose', 1) > 1:
     #         print(self.print_prefix, 'Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
-
-    # done
-    def _save_if_best(self):
-        """Save the model if show the best performance on the validation set.
-        The performance is the -(dualbound/gap auc),
-        according to the DQN objective"""
-        perf = -np.mean(self.training_stats[self.dqn_objective])
-        if perf > self.best_perf[self.dataset_name]:
-            self.best_perf[self.dataset_name] = perf
-            self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
-
+    #
+    # # done
+    # def _save_if_best(self):
+    #     """Save the model if show the best performance on the validation set.
+    #     The performance is the -(dualbound/gap auc),
+    #     according to the DQN objective"""
+    #     perf = -np.mean(self.training_stats[self.dqn_objective])
+    #     if perf > self.best_perf[self.dataset_name]:
+    #         self.best_perf[self.dataset_name] = perf
+    #         self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
+    #
     # done
     def load_checkpoint(self, filepath=None):
         if filepath is None:
@@ -1339,10 +1340,9 @@ class DQNWorker(Sepa):
         self.num_env_steps_done = checkpoint['num_env_steps_done']
         self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
         self.num_param_updates = checkpoint['num_param_updates']
-        self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
-        self.best_perf = checkpoint['best_perf']
-        self.n_step_loss_moving_avg = checkpoint['n_step_loss_moving_avg']
+        # self.best_perf = checkpoint['best_perf']
+        # self.n_step_loss_moving_avg = checkpoint['n_step_loss_moving_avg']
         self.policy_net.to(self.device)
         # self.target_net.to(self.device)
         print(self.print_prefix, 'Loaded checkpoint from: ', filepath)
@@ -1467,9 +1467,9 @@ class DQNWorker(Sepa):
         self.set_training_mode()
         if self.hparams.get('resume', False):
             self.load_checkpoint()
-            # initialize prioritized replay buffer internal counters, to continue beta from the point it was
-            if self.use_per:
-                self.memory.num_sgd_steps_done = self.num_sgd_steps_done
+            # # initialize prioritized replay buffer internal counters, to continue beta from the point it was
+            # if self.use_per:
+            #     self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
     def on_nodebranched_event(self):
         # self.print('BRANCHING EVENT')
@@ -1547,6 +1547,7 @@ class DQNWorker(Sepa):
 
     # done
     def evaluate(self):
+        start_time = time()
         datasets = self.datasets
         # evaluate the model on the validation and test sets
         if self.num_param_updates == 0:
@@ -1563,7 +1564,9 @@ class DQNWorker(Sepa):
 
         self.set_eval_mode()
         test_summary = []
+        avg_times = {k: [] for k in set([tup[0] for tup in self.eval_instances])}
         for dataset_name, inst_idx, scip_seed in self.eval_instances:
+            t0 = time()
             dataset = datasets[dataset_name]
             G, baseline = dataset['instances'][inst_idx]
             self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
@@ -1574,52 +1577,12 @@ class DQNWorker(Sepa):
             stats['inst_idx'] = inst_idx
             stats['scip_seed'] = scip_seed
             test_summary.append([(k, v) for k, v in stats.items()])
-
-        # for dataset_name, dataset in datasets.items():
-        #     if 'trainset' in dataset_name or (not eval_testset and 'testset' in dataset_name):
-        #         continue
-        #     if ignore_eval_interval or global_step % dataset['eval_interval'] == 0:
-        #         fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
-        #         self.init_figures(fignames,
-        #                           nrows=dataset['num_instances'],
-        #                           ncols=len(dataset['scip_seed']),
-        #                           col_labels=[f'Seed={seed}' for seed in dataset['scip_seed']],
-        #                           row_labels=[f'inst {inst_idx}' for inst_idx in
-        #                                       range(dataset['num_instances'])])
-        #         self.test_stats_dict[dataset_name] = {}
-        #         for inst_idx, (G, baseline) in enumerate(dataset['instances']):
-        #             self.test_stats_dict[dataset_name][inst_idx] = {}
-        #             for seed_idx, scip_seed in enumerate(dataset['scip_seed']):
-        #                 self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
-        #                 if self.hparams.get('verbose', 0) == 2:
-        #                     print('##################################################################################')
-        #                     print(f'dataset: {dataset_name}, inst: {inst_idx}, seed: {scip_seed}')
-        #                     print('##################################################################################')
-        #                 _, stats = self.execute_episode(G, baseline, dataset['lp_iterations_limit'], dataset_name=dataset_name, scip_seed=scip_seed)
-        #                 self.add_episode_subplot(inst_idx, seed_idx)
-        #                 self.test_stats_dict[dataset_name][inst_idx][scip_seed] = stats
-        #                 # todo - store stats with (dataset_name, inst_idx, seed_idx) for sending to apex
-        #
-        #                 # record cycles statistics
-        #                 if self.hparams.get('record_cycles', False):
-        #                     cycle_stats = {}
-        #                     cycle_stats['recorded_cycles'] = self.cut_generator.recorded_cycles
-        #                     cycle_stats['episode_stats'] = self.episode_stats
-        #                     cycle_stats['dualbound_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['dualbound'], t_support=self.lp_iterations_limit, reference=self.baseline['optimal_value'])
-        #                     cycle_stats['gap_area'] = get_normalized_areas(t=self.episode_stats['lp_iterations'], ft=self.episode_stats['gap'], t_support=self.lp_iterations_limit, reference=0)  # optimal gap is always 0
-        #                     self.sepa_stats[dataset_name][inst_idx][scip_seed][global_step] = cycle_stats
-        #                     self.sepa_stats[dataset_name][inst_idx]['G'] = G
-        #                     self.sepa_stats[dataset_name][inst_idx]['baseline'] = baseline
-        #
-        #         step, logs = self.log_stats(save_best='validset' in dataset_name, plot_figures=True, log_directly=log_directly)
-        #         log_dict.update(logs)
-        #
-        # # if len(list(self.cycle_stats['validset_20_30'][0].values())[0]) >= 2:
-        # #     with open(os.path.join(self.logdir, f'global_step-{global_step}_last_100_evaluations_cycle_stats.pkl'), 'wb') as f:
-        # #         pickle.dump(self.cycle_stats, f)
-        # #     self.cycle_stats = None
+            avg_times[dataset_name].append(time()-t0)
 
         self.set_training_mode()
+        avg_times = {k: np.mean(v) for k, v in avg_times.items()}
+
+        self.print(f'Eval no. {global_step}\t| Total time: {time()-start_time}\t| Time/Instance: {avg_times}')
         return global_step, test_summary
 
     def test(self):

@@ -93,7 +93,7 @@ class ApeXDQN:
             'validation': {dataset_name: {inst_idx: {} for inst_idx in range(len(dataset['instances']))} for dataset_name, dataset in self.datasets.items() if 'valid' in dataset_name}}
         self.best_performance = {dataset_name: -1 for dataset_name in self.datasets.keys() if 'valid' in dataset_name}
         self.checkpoint_filepath = os.path.join(self.cfg['run_dir'], 'apex_checkpoint.pt')
-
+        self.print_prefix = '[Apex] '
         # reuse communication setting
         if cfg['restart']:
             assert len(self.get_ray_running_actors()) > 0, 'no running actors exist. run without --restart'
@@ -332,7 +332,7 @@ class ApeXDQN:
             log_dict[f'training/{k}'] = np.mean(values)
 
         # process validation results
-        for dataset_name, dataset_stats in stats['validation'].values():
+        for dataset_name, dataset_stats in stats['validation'].items():
             dataset = self.datasets[dataset_name]
             # todo:
             #  init figures
@@ -356,8 +356,8 @@ class ApeXDQN:
             }
             db_auc_without_early_stops = []
             gap_auc_without_early_stops = []
-            for inst_stats in enumerate(dataset_stats.values()):
-                for seed_stats in enumerate(inst_stats.values()):
+            for inst_stats in dataset_stats.values():
+                for seed_stats in inst_stats.values():
                     # add stats to average values
                     for k, v_list in all_values.items():
                         v_list.append(seed_stats[k])
@@ -365,32 +365,37 @@ class ApeXDQN:
                         db_auc_without_early_stops.append(seed_stats['db_auc'])
                         gap_auc_without_early_stops.append(seed_stats['gap_auc'])
 
-            # compute averages
-            all_values['db_auc_without_early_stops'] = db_auc_without_early_stops
-            all_values['gap_auc_without_early_stops'] = gap_auc_without_early_stops
-            avg_values = {k: np.mean(v) for k, v in all_values.items()}
-            # add plots
-            col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
-            row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
-            figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
-            for (inst_idx, inst_stats), (G, baseline) in enumerate(zip(dataset_stats.items(), dataset['instances'])):
-                for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
-                    add_subplot(figures, inst_idx, seed_idx, seed_stats, baseline, scip_seed, dataset, avg_values)
-            finish_figures(figures)
+            # if there are validation results, then compute averages and plot curves
+            if all([len(v) > 0 for v in all_values.values()]):
+                # compute averages
+                avg_values = {k: np.mean(v) for k, v in all_values.items()}
+                avg_values['db_auc_without_early_stops'] = np.mean(db_auc_without_early_stops)
+                avg_values['gap_auc_without_early_stops'] = np.mean(gap_auc_without_early_stops)
 
-            # update log_dict
-            log_dict.update({f'{dataset_name}/{k}': v for k, v in avg_values.items()})
-            log_dict.update({f'{dataset_name}/{figname}': figures[figname]['fig'] for figname in figures['fignames']})
+                # add plots
+                col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
+                row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
+                figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
+                for (inst_idx, inst_stats), (G, baseline) in zip(dataset_stats.items(), dataset['instances']):
+                    for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
+                        add_subplot(figures, inst_idx, seed_idx, seed_stats, baseline, scip_seed, dataset, avg_values)
+                finish_figures(figures)
 
+                # update log_dict
+                log_dict.update({f'{dataset_name}/{k}': v for k, v in avg_values.items()})
+                log_dict.update({f'{dataset_name}/{figname}': figures[figname]['fig'] for figname in figures['fignames']})
+                print('{}: {}_imp={}\t|'.format(dataset_name, self.cfg["dqn_objective"], avg_values[self.cfg["dqn_objective"]+"_improvement"]), end='')
+
+            # if all validation results are ready, then
             # save model and figures if its performance is the best till now
-            cur_perf = avg_values[self.cfg['dqn_objective']]
-            if cur_perf > self.best_performance[dataset_name]:
-                self.best_performance[dataset_name] = cur_perf
-                for figname in figures['fignames']:
-                    figures[figname]['fig'].savefig(os.path.join(self.run_dir, f'best_{self.dataset_name}_{figname}.png'))
-                with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_params.pkl'), 'wb') as f:
-                    pickle.dump(stats['params'], f)
-            print('{}: {}_imp={}\t|'.format(dataset_name, self.cfg["dqn_objective"], avg_values[self.cfg["dqn_objective"]+"_improvement"]), end='')
+            if all([len(v) == 30 for v in all_values.values()]):
+                cur_perf = avg_values[self.cfg['dqn_objective']]
+                if cur_perf > self.best_performance[dataset_name]:
+                    self.best_performance[dataset_name] = cur_perf
+                    for figname in figures['fignames']:
+                        figures[figname]['fig'].savefig(os.path.join(self.run_dir, f'best_{self.dataset_name}_{figname}.png'))
+                    with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_params.pkl'), 'wb') as f:
+                        pickle.dump(stats['params'], f)
         print('')
         return log_dict
 
@@ -402,11 +407,14 @@ class ApeXDQN:
         }, self.checkpoint_filepath)
 
     def load_checkpoint(self):
-        checkpoint = torch.load(self.checkpoint_filepath)
-        self.step_counter = checkpoint['step_counter']
-        self.last_logging_step = checkpoint['last_logging_step']
-        self.best_performance = checkpoint['best_performance']
-        self.print('loaded checkpoint from ', self.checkpoint_filepath)
+        try:
+            checkpoint = torch.load(self.checkpoint_filepath)
+            self.step_counter = checkpoint['step_counter']
+            self.last_logging_step = checkpoint['last_logging_step']
+            self.best_performance = checkpoint['best_performance']
+            self.print('loaded checkpoint from ', self.checkpoint_filepath)
+        except:
+            self.print('did not find checkpoint file. starting from scratch')
 
     def get_actors_running_process(self, actors=None):
         actors = actors if actors is not None else list(self.actors.keys()) + ['apex']
@@ -550,7 +558,7 @@ class ApeXDQN:
         self.train()
 
     def print(self, expr):
-        print('[Apex] ', expr)
+        print(self.print_prefix, expr)
 
 
 def init_figures(nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
@@ -602,8 +610,8 @@ def add_subplot(figures, row, col, dqn_stats, baseline, scip_seed, dataset, avg_
 
     for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
                                                            ['b', 'g', 'y', 'c', 'k'],
-                                                           [dqn_stats['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
-                                                           [dqn_stats['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
+                                                           [dqn_stats['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, lp_iterations_limit]],
+                                                           [dqn_stats['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [baseline['optimal_value']]*2],
                                                            [dqn_stats['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
                                                            ):
         if lpiter[-1] < lp_iterations_limit:

@@ -70,6 +70,7 @@ class DQNLearner:
         self.nstep_learning = hparams.get('nstep_learning', 1)
         self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
         self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
+        self.use_per = True
 
         # training stuff
         self.num_env_steps_done = 0
@@ -657,7 +658,7 @@ class DQNLearner:
         log_dict = {}
         global_step = self.num_param_updates
 
-        print(self.print_prefix, f'Global step: {global_step} | {self.dataset_name}\t|', end='')
+        print(self.print_prefix, f'Global step: {global_step} | ', end='')
         cur_time_sec = time.time() - self.start_time + self.walltime_offset
 
         # log the average loss of the last training session
@@ -691,23 +692,11 @@ class DQNLearner:
             'num_env_steps_done': self.num_env_steps_done,
             'num_sgd_steps_done': self.num_sgd_steps_done,
             'num_param_updates': self.num_param_updates,
-            'i_episode': self.i_episode,
             'walltime_offset': time.time() - self.start_time + self.walltime_offset,
-            'best_perf': self.best_perf,
             'n_step_loss_moving_avg': self.n_step_loss_moving_avg,
         }, filepath if filepath is not None else self.checkpoint_filepath)
         if self.hparams.get('verbose', 1) > 1:
             print(self.print_prefix, 'Saved checkpoint to: ', filepath if filepath is not None else self.checkpoint_filepath)
-
-    # done
-    def _save_if_best(self):
-        """Save the model if show the best performance on the validation set.
-        The performance is the -(dualbound/gap auc),
-        according to the DQN objective"""
-        perf = -np.mean(self.tmp_stats_buffer[self.dqn_objective])
-        if perf > self.best_perf[self.dataset_name]:
-            self.best_perf[self.dataset_name] = perf
-            self.save_checkpoint(filepath=os.path.join(self.run_dir, f'best_{self.dataset_name}_checkpoint.pt'))
 
     # done
     def load_checkpoint(self, filepath=None):
@@ -723,9 +712,7 @@ class DQNLearner:
         self.num_env_steps_done = checkpoint['num_env_steps_done']
         self.num_sgd_steps_done = checkpoint['num_sgd_steps_done']
         self.num_param_updates = checkpoint['num_param_updates']
-        self.i_episode = checkpoint['i_episode']
         self.walltime_offset = checkpoint['walltime_offset']
-        self.best_perf = checkpoint['best_perf']
         self.n_step_loss_moving_avg = checkpoint['n_step_loss_moving_avg']
         self.policy_net.to(self.device)
         self.target_net.to(self.device)
