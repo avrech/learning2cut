@@ -394,8 +394,8 @@ class ApeXDQN:
                 if cur_perf > self.best_performance[dataset_name]:
                     self.best_performance[dataset_name] = cur_perf
                     for figname in figures['fignames']:
-                        figures[figname]['fig'].savefig(os.path.join(self.run_dir, f'best_{self.dataset_name}_{figname}.png'))
-                    with open(os.path.join(self.run_dir, f'best_{self.dataset_name}_params.pkl'), 'wb') as f:
+                        figures[figname]['fig'].savefig(os.path.join(self.cfg['run_dir'], f'best_{self.dataset_name}_{figname}.png'))
+                    with open(os.path.join(self.cfg['run_dir'], f'best_{self.dataset_name}_params.pkl'), 'wb') as f:
                         pickle.dump(stats['params'], f)
         self.print(print_msg)
         return log_dict
