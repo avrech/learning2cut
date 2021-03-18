@@ -329,7 +329,8 @@ class ApeXDQN:
         stats = self.stats_history.pop(step)
         # average training stats and add to log dict
         for k, values in stats['training'].items():
-            log_dict[f'training/{k}'] = np.mean(values)
+            if len(values) > 0:
+                log_dict[f'training/{k}'] = np.mean(values)
 
         # process validation results
         for dataset_name, dataset_stats in stats['validation'].items():
