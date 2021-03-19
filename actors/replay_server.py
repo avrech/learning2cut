@@ -17,6 +17,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         self.collecting_demonstrations = len(self.storage) < self.n_demonstrations
         self.pbar = tqdm(total=self.capacity, desc='[Replay Server] Filling {} data'.format('demonstration' if self.collecting_demonstrations else 'agent'))
         self.filling = True
+        self.refilling_round = 0
         self.print_prefix = '[ReplayServer] '
         # initialize zmq sockets
         print(self.print_prefix, "initializing sockets...")
@@ -144,11 +145,25 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             new_replay_data_list = self.unpack_replay_data(new_replay_data_packet)
             # cur_len = len(self.pbar.desc)
             n_added = self.add_data_list(new_replay_data_list)
+            if self.refilling_round > 0:
+                if self.pbar.n < self.next_idx:
+                    self.pbar.update(n_added)
+                else:
+                    self.pbar.update(self.capacity - self.pbar.n)
+                    self.pbar.close()
+                    self.refilling_round += 1
+                    self.pbar = tqdm(total=self.capacity,
+                                     desc=f'[Replay Server] Refilling agent data round no. {self.refilling_round}')
+                    self.pbar.update(self.next_idx)
+                    
             if self.filling:
                 if len(self.storage) == self.capacity:
                     self.pbar.update(self.capacity - self.pbar.n)
                     self.pbar.close()
                     self.filling = False
+                    self.refilling_round = 2
+                    self.pbar = tqdm(total=self.capacity, desc=f'[Replay Server] Refilling agent data round no. {self.refilling_round}')
+                    self.pbar.update(self.next_idx)
                 else:
                     self.pbar.update(n_added)
 
@@ -161,6 +176,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
             if self.filling and self.collecting_demonstrations and self.next_idx >= self.n_demonstrations:
                 # change pbar description
                 self.pbar.set_description('[Replay Server] Filling agent data')
+
 
     def request_data(self, data_type):
         assert data_type in ['agent', 'demonstration']
