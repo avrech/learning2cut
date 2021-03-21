@@ -3,8 +3,8 @@ import networkx as nx
 import pickle
 import os
 import numpy as np
-from utils.scip_models import maxcut_mccormic_model
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
+from utils.scip_models import maxcut_mccormic_model, MccormickCycleSeparator
+
 
 def generate_data(sweep_config, data_dir, solve_maxcut=False, time_limit=60):
     """

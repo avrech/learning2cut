@@ -6,9 +6,8 @@ Store optimal_dualbound as baseline
 Store average of: lp_iterations, optimal_dualbound, initial_dualbound, initial_gap
 Each graph is stored with its baseline in graph_<worker_id>_<idx>.pkl
 """
-
-from utils.scip_models import maxcut_mccormic_model
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
+import utils.scip_models
+from utils.scip_models import maxcut_mccormic_model, MccormickCycleSeparator
 import pickle
 import os
 import numpy as np
@@ -151,12 +150,12 @@ def solve_graphs(worker_config):
                     'lp_iterations_limit': dataset_config['lp_iterations_limit']
                 }
                 # solve with B&C and the default cut selection
-                bnc_model, x, y = maxcut_mccormic_model(G, use_general_cuts=False)
-                bnc_sepa = MccormickCycleSeparator(G=G, x=x, y=y, hparams=sepa_hparams)
-                bnc_model.includeSepa(bnc_sepa, "MLCycles",
-                                  "Generate cycle inequalities for MaxCut using McCormic variables exchange",
-                                  priority=1000000,
-                                  freq=1)
+                bnc_model, x, bnc_sepa = maxcut_mccormic_model(G, use_general_cuts=True, hparams=sepa_hparams)
+                # bnc_sepa = MccormickCycleSeparator(G=G, x=x, y=y, hparams=sepa_hparams)
+                # bnc_model.includeSepa(bnc_sepa, "MLCycles",
+                #                   "Generate cycle inequalities for MaxCut using McCormic variables exchange",
+                #                   priority=1000000,
+                #                   freq=1)
                 # set arbitrary random seed only for reproducibility and debug - doesn't matter for results
                 bnc_seed = 72
                 bnc_model.setBoolParam('randomization/permutevars', True)
@@ -167,6 +166,8 @@ def solve_graphs(worker_config):
                 bnc_model.optimize()
                 bnc_sepa.finish_experiment()
 
+                # solve also for the default baseline for having training AUC.
+                # solve for three baselines 10-random, 10-most-violated, and default.
                 if save_all_stats:
                     # for evaluation we need SCIP default cut selection stats.
                     # so now solve without branching, limiting the LP iterations to sufficiently large number
@@ -174,14 +175,7 @@ def solve_graphs(worker_config):
                     # solve for all scip seeds provided, and store each seed stats separately
                     rootonly_stats = {}
                     for scip_seed in dataset_config['scip_seed']:
-                        rootonly_model, rootonly_x, rootonly_y = maxcut_mccormic_model(G, use_general_cuts=False)
-                        rootonly_sepa = MccormickCycleSeparator(G=G, x=rootonly_x, y=rootonly_y, hparams=sepa_hparams)
-                        rootonly_model.includeSepa(
-                            rootonly_sepa, "MLCycles",
-                            "Generate cycle inequalities for MaxCut using McCormic variables exchange",
-                            priority=1000000,
-                            freq=1
-                        )
+                        rootonly_model, rootonly_x, rootonly_sepa = maxcut_mccormic_model(G, use_general_cuts=False, hparams=sepa_hparams)
                         rootonly_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
                         rootonly_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
                         # rootonly_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
@@ -193,8 +187,8 @@ def solve_graphs(worker_config):
                         rootonly_model.hideOutput(quiet=quiet)
                         rootonly_model.optimize()
                         rootonly_sepa.finish_experiment()
-                        assert rootonly_sepa.stats['lp_iterations'][-1] <= dataset_config['lp_iterations_limit']
-                        rootonly_stats[scip_seed] = rootonly_sepa.stats
+                        assert utils.scip_models.stats['lp_iterations'][-1] <= dataset_config['lp_iterations_limit']
+                        rootonly_stats[scip_seed] = utils.scip_models.stats
 
                 # summarize results for G
                 # set warning for sub-optimality
@@ -211,7 +205,7 @@ def solve_graphs(worker_config):
                 for i in G.nodes:
                     x_values[i] = bnc_model.getSolVal(sol, x[i])
                 for e in G.edges:
-                    y_values[e] = bnc_model.getSolVal(sol, y[e])
+                    y_values[e] = bnc_model.getSolVal(sol, x[e])
 
                 cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
                 nx.set_edge_attributes(G, cut, name='cut')
@@ -226,7 +220,7 @@ def solve_graphs(worker_config):
 
                 # store extensive stats needed for evaluation
                 if save_all_stats:
-                    baseline['bnc_stats'] = {bnc_seed: bnc_sepa.stats}
+                    baseline['bnc_stats'] = {bnc_seed: utils.scip_models.stats}
                     baseline['rootonly_stats'] = rootonly_stats
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, baseline), f)

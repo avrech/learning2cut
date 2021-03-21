@@ -17,9 +17,8 @@ and the dualbound, lp_iterations and other statistics are collected.
 The metric optimized is the dualbound integral w.r.t the number of lp iterations at each round.
 """
 from ray import tune
-from utils.scip_models import maxcut_mccormic_model
+from utils.scip_models import maxcut_mccormic_model, MccormickCycleSeparator
 from utils.misc import get_separator_cuts_applied
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
 from utils.samplers import SepaSampler
 import pickle
 import os

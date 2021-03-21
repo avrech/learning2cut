@@ -3,8 +3,7 @@ import networkx as nx
 import pickle
 import os
 import numpy as np
-from utils.scip_models import maxcut_mccormic_model
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
+from utils.scip_models import maxcut_mccormic_model, MccormickCycleSeparator
 from ray import tune
 from ray.tune import track
 from itertools import product

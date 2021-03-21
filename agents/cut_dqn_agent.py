@@ -2,6 +2,8 @@ from sklearn.metrics import f1_score
 from pyscipopt import Sepa, SCIP_RESULT, SCIP_STAGE
 from time import time
 import numpy as np
+
+import utils.scip_models
 from utils.data import Transition
 from utils.misc import get_img_from_fig
 from utils.event_hdlrs import DebugEvents, BranchingEventHdlr
@@ -19,9 +21,8 @@ from utils.functions import get_normalized_areas, truncate
 from collections import namedtuple
 import matplotlib as mpl
 import pickle
-from utils.scip_models import maxcut_mccormic_model
+from utils.scip_models import maxcut_mccormic_model, MccormickCycleSeparator
 from utils.buffer import ReplayBuffer, PrioritizedReplayBuffer
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
 from copy import deepcopy
 mpl.rc('figure', max_open_warning=0)
 import matplotlib.pyplot as plt
@@ -343,7 +344,7 @@ class CutDQNAgent(Sepa):
                     #        NOTE - with self.select_at_least_one_cut=True this shouldn't happen
                     # force SCIP to "discard" all the available cuts by flushing the separation storage
                     self.model.clearCuts()
-                    if self.hparams.get('verbose', 0) == 2:
+                    if utils.scip_models.hparams.get('verbose', 0) == 2:
                         self.print('discarded all cuts')
                     self.terminal_state = 'EMPTY_ACTION'
                     self._update_episode_stats()

@@ -6,8 +6,7 @@ and solves each instance with 2 simple baselines:
 Stores those baselines in dataset as '10_random' and '10_most_violated'.
 """
 
-from utils.scip_models import maxcut_mccormic_model
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
+from utils.scip_models import maxcut_mccormic_model, MccormickCycleSeparator
 import pickle
 import os
 import numpy as np

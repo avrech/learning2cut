@@ -14,7 +14,7 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 from utils.maxcut import maxcut_mccormic_model
-from separators.mccormick_cycle_separator import MccormickCycleSeparator
+from utils.scip_models import MccormickCycleSeparator
 
 
 def collect_data(hparams):
