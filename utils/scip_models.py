@@ -1,7 +1,7 @@
 import operator
 import pickle
 from time import time
-
+import torch
 import networkx as nx
 import numpy as np
 from pyscipopt import quicksum
@@ -726,6 +726,169 @@ class MccormickCycleSeparator(Sepa):
             print('to:')
             print(newparams)
 
+
+class BaselineSepa(Sepa):
+    def __init__(self,
+                 hparams
+                 ):
+        """
+        Sample scip.Model state every time self.sepaexeclp is invoked.
+        Store the generated data object in
+        """
+        super(BaselineSepa, self).__init__()
+        self.name = 'Baseline Separator'
+        self.hparams = hparams
+        self.criterion = hparams.get('criterion', 'default')
+        # instance specific data needed to be reset every episode
+        # todo unifiy x and y to x only (common for all combinatorial problems)
+        self.G = None
+        self.x = None
+        self.stats = {
+            'ncuts': [],
+            'ncuts_applied': [],
+            'solving_time': [],
+            'processed_nodes': [],
+            'gap': [],
+            'lp_rounds': [],
+            'lp_iterations': [],
+            'dualbound': []
+        }
+        self.stats_updated = False
+        self.node_limit_reached = False
+        self.terminal_state = False
+        self.lp_iterations_limit = hparams.get('lp_iterations_limit', -1)
+        self.terminal_state = False
+        self.node_limit_reached = False
+        self.print_prefix = '[Baseline Sepa]'
+
+    # done
+    def sepaexeclp(self):
+        # finish with the previous step:
+        self.update_stats()
+
+        # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
+        # we dont want to run any further dqn steps, and therefore we return immediately.
+        if self.terminal_state:
+            # discard all the cuts in the separation storage and return
+            self.model.clearCuts()
+            result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+        elif self.lp_iterations_limit == -1 or self.model.getNLPIterations() < self.lp_iterations_limit:
+            result = self.separate_baseline()
+
+        else:
+            # stop optimization (implicitly), and don't add any more cuts
+            if self.hparams.get('verbose', 0) == 2:
+                self.print('LP_ITERATIONS_LIMIT reached. DIDNOTRUN!')
+            self.terminal_state = 'LP_ITERATIONS_LIMIT_REACHED'
+            # clear cuts and terminate
+            self.model.clearCuts()
+            result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+        return result
+
+    # done
+    def separate_baseline(self):
+        """
+        Baselines:
+        default - do nothing
+        10_random - force 10 random cuts and discard the rest
+        10_most_violated - force the 10 most efficacious cuts and discard the rest
+        """
+        # get the current state, a dictionary of available cuts (keyed by their names,
+        # and query statistics related to the previous action (cut activeness etc.)
+        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True,
+                                                        query=self.prev_action)
+
+        # if there are available cuts, select action and continue to the next state
+        if available_cuts['ncuts'] > 0:
+            # prob what scip cut selection algorithm would do in this state
+            if self.criterion == 'default':
+                # use SCIP's cut selection (don't do anything)
+                result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+            elif self.criterion == '10_random':
+                # apply the action
+                random_idxes = torch.randperm(available_cuts['ncuts'])[:10].numpy()
+                selected = np.zeros((available_cuts['ncuts'],))
+                selected[random_idxes] = 1
+                # force SCIP to take the selected cuts and discard the others
+                self.model.forceCuts(selected)
+                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+                # in order to prevent it from adding more or less cuts
+                self.model.setIntParam('separating/maxcuts', int(sum(selected)))
+                self.model.setIntParam('separating/maxcutsroot', int(sum(selected)))
+                # continue to the next state
+                result = {"result": SCIP_RESULT.SEPARATED}
+
+            elif self.criterion == '10_most_violated':
+                # available_cuts['selected_by_scip'] = np.array(
+                #     [cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
+                info = self.model.getState(state_format='dict')
+                efficacy = info['cut']['efficacy']
+                most_efficacious = reversed(np.argsort(efficacy))[:10]
+                selected = np.zeros((available_cuts['ncuts'],))
+                selected[most_efficacious] = 1
+                # force SCIP to take the selected cuts and discard the others
+                self.model.forceCuts(selected)
+                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+                # in order to prevent it from adding more or less cuts
+                self.model.setIntParam('separating/maxcuts', int(sum(selected)))
+                self.model.setIntParam('separating/maxcutsroot', int(sum(selected)))
+                result = {"result": SCIP_RESULT.SEPARATED}
+            self.stats_updated = False  # mark false to record relevant stats after this action will make effect
+
+        elif available_cuts['ncuts'] == 0:
+            result = {"result": SCIP_RESULT.DIDNOTFIND}
+
+        return result
+
+    # done
+    def update_stats(self):
+        """ Collect statistics related to the action taken at the previous round.
+        This function is assumed to be called in the consequent separation round
+        after the action was taken.
+        A corner case is when choosing "EMPTY_ACTION" (shouldn't happen if we force selecting at least one cut)
+        then the function is called immediately, and we need to add 1 to the number of lp_rounds.
+        """
+        if self.stats_updated:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
+            return
+        # todo verify recording initial state stats before taking any action
+        self.stats['ncuts'].append(0 if self.prev_action is None else self.prev_action['ncuts'])
+        self.stats['ncuts_applied'].append(self.model.getNCutsApplied())
+        self.stats['solving_time'].append(self.model.getSolvingTime())
+        self.stats['processed_nodes'].append(self.model.getNNodes())
+        self.stats['gap'].append(self.model.getGap())
+        self.stats['lp_iterations'].append(self.model.getNLPIterations())
+        self.stats['dualbound'].append(self.model.getDualbound())
+        # todo - we always store the stats referring to the previous lp round action, so we need to subtract 1 from the
+        #  the current LP round counter
+        if self.terminal_state and self.terminal_state == 'EMPTY_ACTION':
+            self.stats['lp_rounds'].append(self.model.getNLPs() + 1)  # todo - check if needed to add 1 when EMPTY_ACTION
+        else:
+            self.stats['lp_rounds'].append(self.model.getNLPs())
+        self.truncate_to_lp_iterations_limit()
+        self.stats_updated = True
+
+    def truncate_to_lp_iterations_limit(self):
+        # enforce the lp_iterations_limit on the last two records
+        lp_iterations_limit = self.lp_iterations_limit
+        if lp_iterations_limit > 0 and self.stats['lp_iterations'][-1] > lp_iterations_limit:
+            # interpolate the dualbound and gap at the limit
+            assert self.stats['lp_iterations'][-2] < lp_iterations_limit
+            t = self.stats['lp_iterations'][-2:]
+            for k in ['dualbound', 'gap']:
+                ft = self.stats[k][-2:]
+                # compute ft slope in the last interval [t[-2], t[-1]]
+                slope = (ft[-1] - ft[-2]) / (t[-1] - t[-2])
+                # compute the linear interpolation of ft at the limit
+                interpolated_ft = ft[-2] + slope * (lp_iterations_limit - t[-2])
+                self.stats[k][-1] = interpolated_ft
+            # finally truncate the lp_iterations to the limit
+            self.stats['lp_iterations'][-1] = lp_iterations_limit
+
+    def print(self, expr):
+        print(self.print_prefix, expr)
 
 
 
