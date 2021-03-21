@@ -10,9 +10,73 @@ from collections import OrderedDict
 
 from pyscipopt import Sepa, SCIP_RESULT, SCIP_STAGE
 
-# from separators.mccormick_cycle_separator import x, y
 from utils.functions import dijkstra_best_shortest_path
 from utils.misc import get_separator_cuts_applied
+
+
+def mvc_model(G, model_name='MVC Model',
+              use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
+              use_random_branching=True, use_cycles=True, hparams={}):
+    r"""
+        Returns Minimum Vertex Cover model defined by G(V,E)
+
+        MVC:
+
+        :math:`min_{x} \ \sum_i x_i`
+        subject to:
+            .. math::
+                x_i \in \{0,1\}
+
+                x_i + x_j \geq 1 \ \ \ \forall (i,j) in E
+
+        :param G (nx.Graph): Undirected graph with node attributes 'c'
+        :param model_name (str): SCIP model name
+        :param use_presolve (bool): Enable presolving
+        :param use_heuristics (bool): Enable heuristics
+        :param use_cuts (bool): Enable default cuts
+        :param use_propagation (bool): Enable propagation
+        :return: pyscipopt.Model
+    """
+    V = G.nodes
+    E = G.edges
+    c = nx.get_node_attributes(G, 'c')
+    if len(c) == 0:
+        c = {i: 1 for i in V}
+
+    # create SCIP model:
+    model = scip.Model(model_name)
+    x = OrderedDict([(i, model.addVar(name=f'{i}', obj=c[i], vtype='B')) for i in V])
+
+    """ McCormic Inequalities """
+    for ij in E:
+        i, j = ij
+        model.addCons(1 <= (x[i] + x[j]), name=f'cover{ij}')
+
+    model.setMinimize()
+    model.setBoolParam("misc/allowdualreds", 0)
+
+    # turn off propagation
+    if not use_propagation:
+        model.setIntParam("propagating/maxrounds", 0)
+        model.setIntParam("propagating/maxroundsroot", 0)
+    # turn off some cuts
+    if not use_general_cuts:
+        model.setIntParam("separating/strongcg/freq", -1)
+        model.setIntParam("separating/gomory/freq", -1)
+        model.setIntParam("separating/aggregation/freq", -1)
+        model.setIntParam("separating/mcf/freq", -1)
+        model.setIntParam("separating/closecuts/freq", -1)
+        model.setIntParam("separating/clique/freq", -1)
+        model.setIntParam("separating/zerohalf/freq", -1)
+    if not use_presolve:
+        model.setPresolve(scip.SCIP_PARAMSETTING.OFF)
+        model.disablePropagation()
+    if not use_heuristics:
+        model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
+    if use_random_branching:
+        model.setIntParam('branching/random/priority', 999999)
+
+    return model, x
 
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
@@ -728,9 +792,7 @@ class MccormickCycleSeparator(Sepa):
 
 
 class BaselineSepa(Sepa):
-    def __init__(self,
-                 hparams
-                 ):
+    def __init__(self, hparams={}):
         """
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
