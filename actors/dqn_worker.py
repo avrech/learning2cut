@@ -127,6 +127,7 @@ class DQNWorker(Sepa):
         self.num_demonstrations_done = 0
         # file system paths
         self.run_dir = hparams['run_dir']
+        self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
         # training logs
         self.training_stats = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
         # tmp buffer for holding cutting planes statistics
@@ -137,8 +138,8 @@ class DQNWorker(Sepa):
         self.debug_n_early_stop = 0
         self.debug_n_episodes_done = 0
 
-        # initialize (set seed and load checkpoint)
-        self.initialize_training()
+        # # initialize (set seed and load checkpoint)
+        # self.initialize_training()
 
         # assign the validation instances according to worker_id and num_workers:
         # flatten all instances to a list of tuples of (dataset_name, inst_idx, seed_idx)
@@ -159,7 +160,6 @@ class DQNWorker(Sepa):
         # distributed system stuff
         self.worker_id = worker_id
         self.generate_demonstration_data = False
-        self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
         self.print_prefix = f'[Worker {self.worker_id}] '
         # initialize zmq sockets
         # use socket.connect() instead of .bind() because workers are the least stable part in the system
@@ -951,6 +951,8 @@ class DQNWorker(Sepa):
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
                      'f1_score': np.mean(f1_score_list),
+                     'solving_time': self.episode_stats['solving_time'][-1],
+                     'lp_iterations': self.episode_stats['lp_iterations'][-1],
                      'terminal_state': self.terminal_state,
                      'true_pos': true_pos,
                      'true_neg': true_neg,

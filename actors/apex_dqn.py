@@ -354,6 +354,8 @@ class ApeXDQN:
                 'applied_available_ratio': [],
                 'accuracy': [],
                 'f1_score': [],
+                'solving_time': [],
+                'lp_iterations': [],
             }
             db_auc_without_early_stops = []
             gap_auc_without_early_stops = []
