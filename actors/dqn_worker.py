@@ -379,6 +379,7 @@ class DQNWorker(Sepa):
         if self.terminal_state:
             # discard all the cuts in the separation storage and return
             self.model.clearCuts()
+            self.model.interruptSolve()
             result = {"result": SCIP_RESULT.DIDNOTRUN}
 
         elif self.model.getNLPIterations() < self.lp_iterations_limit:
@@ -393,6 +394,7 @@ class DQNWorker(Sepa):
             self.model.getState(query=self.prev_action)
             # clear cuts and terminate
             self.model.clearCuts()
+            self.model.interruptSolve()
             result = {"result": SCIP_RESULT.DIDNOTRUN}
 
         # todo - what retcode should be returned here?
@@ -480,6 +482,7 @@ class DQNWorker(Sepa):
                         self.print('discarded all cuts')
                     self.terminal_state = 'EMPTY_ACTION'
                     self._update_episode_stats()
+                    self.model.interruptSolve()
                     result = {"result": SCIP_RESULT.DIDNOTFIND}
 
                 # SCIP will execute the action,
