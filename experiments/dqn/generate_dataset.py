@@ -243,7 +243,7 @@ if __name__ == '__main__':
     import yaml
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--datadir', type=str, default='data/maxcut',
+    parser.add_argument('--datadir', type=str, default='data',
                         help='path to generate/read data')
     parser.add_argument('--configfile', type=str, default='configs/maxcut_data_config.yaml',
                         help='path to config file')
