@@ -105,7 +105,7 @@ if __name__ == '__main__':
                         help='path to save results')
     parser.add_argument('--datadir', type=str, default='data/maxcut',
                         help='path to generate/read data')
-    parser.add_argument('--data_config', type=str, default='configs/data_config.yaml',
+    parser.add_argument('--data_config', type=str, default='configs/maxcut_data_config.yaml',
                         help='general experiment settings')
     parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml',
                         help='general experiment settings')

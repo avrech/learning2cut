@@ -6,7 +6,7 @@ Store optimal_dualbound as baseline
 Store average of: lp_iterations, optimal_dualbound, initial_dualbound, initial_gap
 Each graph is stored with its baseline in graph_<worker_id>_<idx>.pkl
 """
-from utils.scip_models import mvc_model, maxcut_mccormic_model, BaselineSepa
+from utils.scip_models import mvc_model, maxcut_mccormic_model, CSBaselineSepa
 import pickle
 import os
 import numpy as np
@@ -139,7 +139,8 @@ def solve_graphs(worker_config):
                     continue
 
             # if dataset_config['baseline_solver'] == 'scip':
-            problems = ['MAXCUT-GP', 'MAXCUT-GP-CYCLES', 'MVC']
+            # todo set problem type in config, and define graph sizes appropriately.
+            problems = ['MAXCUT-GP', 'MAXCUT-GP-CYCLES']
             info = {}
             for problem in problems:
                 # solve with B&C and the default cut selection
@@ -154,7 +155,7 @@ def solve_graphs(worker_config):
                 bnc_model.setIntParam('randomization/randomseedshift', bnc_seed)
                 bnc_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
                 bnc_model.hideOutput(quiet=quiet)
-                bnc_sepa = BaselineSepa()
+                bnc_sepa = CSBaselineSepa()
                 bnc_model.includeSepa(bnc_sepa, 'BSL', 'collect stats', priority=-10000000, freq=1)
                 bnc_model.optimize()
                 bnc_sepa.update_stats()
@@ -183,7 +184,7 @@ def solve_graphs(worker_config):
                         rootonly_model.setIntParam('randomization/permutationseed', scip_seed)
                         rootonly_model.setIntParam('randomization/randomseedshift', scip_seed)
                         rootonly_model.hideOutput(quiet=quiet)
-                        bsl_sepa = BaselineSepa(hparams={
+                        bsl_sepa = CSBaselineSepa(hparams={
                             'lp_iterations_limit': dataset_config['lp_iterations_limit'],
                             'criterion': bsl,
                         })
@@ -266,7 +267,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--datadir', type=str, default='data/maxcut',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='configs/data_config.yaml',
+    parser.add_argument('--configfile', type=str, default='configs/maxcut_data_config.yaml',
                         help='path to config file')
     parser.add_argument('--workerid', type=int, default=0,
                         help='worker id')

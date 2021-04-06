@@ -100,7 +100,7 @@ parser.add_argument("--project", type=str, default='learning2cut', help='wandb p
 parser.add_argument("--tags", type=str, nargs='+', default=[], help='wandb tags')
 parser.add_argument('--rootdir', type=str, default='results', help='path to save results')
 parser.add_argument('--datadir', type=str, default='data/maxcut', help='path to generate/read data')
-parser.add_argument('--data_config', type=str, default='configs/data_config.yaml', help='general experiment settings')
+parser.add_argument('--data_config', type=str, default='configs/maxcut_data_config.yaml', help='general experiment settings')
 parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml', help='general experiment settings')
 parser.add_argument('--gpu-id', type=int, default=None, help='gpu id to use')
 parser.add_argument('--use-gpu', type=str2bool, nargs='?', const=True, default=False, help='use gpu if available')

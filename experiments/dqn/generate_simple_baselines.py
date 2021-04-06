@@ -118,7 +118,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--datadir', type=str, default='data/maxcut',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='configs/data_config.yaml',
+    parser.add_argument('--configfile', type=str, default='configs/maxcut_data_config.yaml',
                         help='path to config file')
     # parser.add_argument('--workerid', type=int, default=0,
     #                     help='worker id')
