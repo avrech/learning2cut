@@ -6,7 +6,7 @@ datasets:
     lp_iterations_limit: 2000
     ngraphs: 10000
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -22,7 +22,7 @@ datasets:
     scip_seed: [52, 176, 223]
     ngraphs: 10
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -38,7 +38,7 @@ datasets:
     scip_seed: [52, 176, 223]
     ngraphs: 10
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -54,7 +54,7 @@ datasets:
     scip_seed: [52, 176, 223]
     ngraphs: 10
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -70,7 +70,7 @@ datasets:
     scip_seed: [52, 176, 223]
     ngraphs: 10
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -86,7 +86,7 @@ datasets:
     scip_seed: [52, 176, 223]
     ngraphs: 10
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -102,7 +102,7 @@ datasets:
     scip_seed: [52, 176, 223]
     ngraphs: 10
     barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:

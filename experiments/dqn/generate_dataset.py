@@ -6,7 +6,7 @@ Store optimal_dualbound as baseline
 Store average of: lp_iterations, optimal_dualbound, initial_dualbound, initial_gap
 Each graph is stored with its baseline in graph_<worker_id>_<idx>.pkl
 """
-from utils.scip_models import mvc_model, maxcut_mccormic_model, CSBaselineSepa
+from utils.scip_models import mvc_model, maxcut_mccormic_model, CSBaselineSepa, CSResetSepa
 import pickle
 import os
 import numpy as np
@@ -23,11 +23,12 @@ def generate_graphs(configs):
     """
     all_graphs = {i: [] for i in range(101)}
     edge_match_fn = lambda e1, e2: e1['weight'] == e2['weight']
+    node_match_fn = lambda v1, v2: v1['c'] == v2['c']
+
     total_generated = 0
     unique_generated = 0
     for worker_config in configs:
         nworkers = worker_config['nworkers']
-        workerid = worker_config['workerid']
         workerid = worker_config['workerid']
         datadir = worker_config['datadir']
         for dataset_config in worker_config['datasets'].values():
@@ -73,13 +74,19 @@ def generate_graphs(configs):
                         total_generated += 1
                         if weights == 'ones':
                             w = 1
+                            c = 1
                         elif weights == 'uniform01':
                             w = {e: np.random.uniform() for e in G.edges}
+                            c = {v: np.random.uniform() for v in G.nodes}
                         elif weights == 'normal':
                             w = {e: np.random.normal() for e in G.edges}
+                            c = {v: np.random.normal() for v in G.nodes}
                         nx.set_edge_attributes(G, w, name='weight')
+                        nx.set_node_attributes(G, c, name='c')
                         for G2 in all_graphs[n]:
-                            if nx.is_isomorphic(G, G2, edge_match=edge_match_fn):
+                            if problem == 'MAXCUT' and nx.is_isomorphic(G, G2, edge_match=edge_match_fn):
+                                continue
+                            if problem == 'MVC' and nx.is_isomorphic(G, G2, node_match=node_match_fn):
                                 continue
 
                         # add unique graph to dataset
@@ -100,6 +107,7 @@ def solve_graphs(worker_config):
     nworkers = worker_config['nworkers']
     workerid = worker_config['workerid']
     datadir = worker_config['datadir']
+    problem = worker_config['problem']
     quiet = worker_config.get('quiet', False)
     for dataset_config in worker_config['datasets'].values():
 
@@ -126,7 +134,7 @@ def solve_graphs(worker_config):
         weights = dataset_config["weights"]
         seed = dataset_config["seed"]
         np.random.seed(seed)
-        dataset_dir = os.path.join(datadir,
+        dataset_dir = os.path.join(datadir, problem,
                                    dataset_config['dataset_name'],
                                    f"barabasi-albert-nmin{nmin}-nmax{nmax}-m{m}-weights-{weights}-seed{seed}")
 
@@ -140,124 +148,94 @@ def solve_graphs(worker_config):
 
             # if dataset_config['baseline_solver'] == 'scip':
             # todo set problem type in config, and define graph sizes appropriately.
-            problems = ['MAXCUT-GP', 'MAXCUT-GP-CYCLES']
-            info = {}
-            for problem in problems:
-                # solve with B&C and the default cut selection
-                if 'MAXCUT' in problem:
-                    bnc_model, x, _ = maxcut_mccormic_model(G, use_general_cuts=True, use_cycles='CYCLES' in problem)
-                elif problem == 'MVC':
-                    bnc_model, x = mvc_model(G, use_general_cuts=True)
-                    # set arbitrary random seed only for reproducibility and debug - doesn't matter for results
-                bnc_seed = 72
-                bnc_model.setBoolParam('randomization/permutevars', True)
-                bnc_model.setIntParam('randomization/permutationseed', bnc_seed)
-                bnc_model.setIntParam('randomization/randomseedshift', bnc_seed)
-                bnc_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
-                bnc_model.hideOutput(quiet=quiet)
-                bnc_sepa = CSBaselineSepa()
-                bnc_model.includeSepa(bnc_sepa, 'BSL', 'collect stats', priority=-10000000, freq=1)
-                bnc_model.optimize()
-                bnc_sepa.update_stats()
+            # solve with B&C and the default cut selection
+            if problem == 'MAXCUT':
+                bnc_model, x, _ = maxcut_mccormic_model(G, allow_restarts=True)
+            elif problem == 'MVC':
+                bnc_model, x = mvc_model(G, allow_restarts=True)
+                # set arbitrary random seed only for reproducibility and debug - doesn't matter for results
+            bnc_seed = 72
+            bnc_model.setBoolParam('randomization/permutevars', True)
+            bnc_model.setIntParam('randomization/permutationseed', bnc_seed)
+            bnc_model.setIntParam('randomization/randomseedshift', bnc_seed)
+            bnc_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
+            bnc_model.hideOutput(quiet=quiet)
+            bnc_sepa = CSBaselineSepa()
+            bnc_model.includeSepa(bnc_sepa, '#CS_baseline', 'collect stats', priority=-10000000, freq=1)
+            bnc_model.optimize()
+            bnc_sepa.update_stats()
 
-                # solve according to all baselines
-                # solve also for the default baseline for having training AUC.
-                # solve for three baselines 10-random, 10-most-violated, and default.
+            # solve according to all baselines
+            # solve also for the default baseline for having training AUC.
+            # solve for three baselines 15-random, 15-most-violated, and default.
+            # solve for all scip seeds provided, and store each seed stats separately
+            baselines = ['default', '15_random', '15_most_violated']
+            baseline_stats = {k: {} for k in baselines}
+            for bsl in baselines:
+                if bsl != 'default' and not save_all_stats:
+                    continue
 
-                # for evaluation we need SCIP default cut selection stats.
-                # so now solve without branching, limiting the LP iterations to sufficiently large number
-                # such that the solver will reach the plateau
-                # solve for all scip seeds provided, and store each seed stats separately
-                baselines = ['default', '10_random', '10_most_violated']
-                baseline_stats = {k: {} for k in baselines}
-                for bsl in baselines:
-                    if bsl != 'default' and not save_all_stats:
-                        continue
+                for scip_seed in dataset_config['scip_seed']:
+                    bsl_model, _, _ = maxcut_mccormic_model(G)
+                    bsl_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
+                    bsl_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+                    bsl_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+                    # set up randomization
+                    bsl_model.setBoolParam('randomization/permutevars', True)
+                    bsl_model.setIntParam('randomization/permutationseed', scip_seed)
+                    bsl_model.setIntParam('randomization/randomseedshift', scip_seed)
+                    bsl_model.hideOutput(quiet=quiet)
+                    hparams = {
+                        'lp_iterations_limit': dataset_config['lp_iterations_limit'],
+                        'criterion': bsl,
+                        'reset_maxcuts': 1000000,
+                        'reset_maxcutsroot': 1000000
+                    }
+                    bsl_sepa = CSBaselineSepa(hparams=hparams)
+                    bsl_model.includeSepa(bsl_sepa, f'#CS_{bsl}', f'enforce cut selection: {bsl}', priority=-1000000, freq=1)
+                    reset_sepa = CSResetSepa(hparams=hparams)
+                    bsl_model.includeSepa(reset_sepa, '#CS_reset', 'reset maxcutsroot', priority=9999999, freq=1)
+                    bsl_model.optimize()
+                    bsl_sepa.update_stats()
+                    assert bsl_sepa.stats['lp_iterations'][-1] <= dataset_config['lp_iterations_limit']
+                    # compute some stats
+                    db, gap, lp_iter = bsl_sepa.stats['dualbound'], bsl_sepa.stats['gap'], bsl_sepa.stats['lp_iterations']
+                    db_auc = sum(get_normalized_areas(t=lp_iter, ft=db, t_support=dataset_config['lp_iterations_limit'], reference=bnc_model.getObjVal()))
+                    gap_auc = sum(get_normalized_areas(t=lp_iter, ft=gap, t_support=dataset_config['lp_iterations_limit'], reference=0))
+                    stats = {'db_auc': db_auc, 'gap_auc': gap_auc}
+                    if save_all_stats:
+                        stats.update(bsl_sepa.stats)
+                    baseline_stats[bsl][scip_seed] = stats
 
-                    for scip_seed in dataset_config['scip_seed']:
-                        rootonly_model, _, _ = maxcut_mccormic_model(G, use_general_cuts=False)
-                        rootonly_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
-                        rootonly_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
-                        rootonly_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
-                        # set up randomization
-                        rootonly_model.setBoolParam('randomization/permutevars', True)
-                        rootonly_model.setIntParam('randomization/permutationseed', scip_seed)
-                        rootonly_model.setIntParam('randomization/randomseedshift', scip_seed)
-                        rootonly_model.hideOutput(quiet=quiet)
-                        bsl_sepa = CSBaselineSepa(hparams={
-                            'lp_iterations_limit': dataset_config['lp_iterations_limit'],
-                            'criterion': bsl,
-                        })
-                        rootonly_model.includeSepa(bsl_sepa, 'BSL', f'enforce cut selection: {bsl}', priority=-1000000, freq=1)
-                        rootonly_model.optimize()
-                        bsl_sepa.update_stats()
-                        assert bsl_sepa.stats['lp_iterations'][-1] <= dataset_config['lp_iterations_limit']
-                        # compute some stats
-                        db, gap, lp_iter = bsl_sepa.stats['dualbound'], bsl_sepa.stats['gap'], bsl_sepa.stats['lp_iterations']
-                        db_auc = sum(get_normalized_areas(t=lp_iter, ft=db, t_support=dataset_config['lp_iterations_limit'], reference=bnc_model.getObjVal()))
-                        gap_auc = sum(get_normalized_areas(t=lp_iter, ft=gap, t_support=dataset_config['lp_iterations_limit'], reference=0))
-                        stats = {'db_auc': db_auc, 'gap_auc': gap_auc}
-                        if save_all_stats:
-                            stats.update(bsl_sepa.stats)
-                        baseline_stats[bsl][scip_seed] = stats
+            # summarize results for G
+            # set warning for sub-optimality
+            if bnc_model.getGap() > 0:
+                print('WARNING: {} not solved to optimality!'.format(filepath))
+                is_optimal = False
+            else:
+                is_optimal = True
 
-                # summarize results for G
-                # set warning for sub-optimality
-                if bnc_model.getGap() > 0:
-                    print('WARNING: {} not solved to optimality!'.format(filepath))
-                    is_optimal = False
-                else:
-                    is_optimal = True
+            # store the best solution found in G
+            # we are interested in the node variables only (both for maxcut and mvc)
+            x_values = {}
+            sol = bnc_model.getBestSol()
+            for i in G.nodes:
+                x_values[i] = bnc_model.getSolVal(sol, x[i])
+            nx.set_node_attributes(G, x_values, name='x')
 
-                # store the best solution found in G
-                x_values = {}
-                # y_values = {}
-                sol = bnc_model.getBestSol()
-                for i in G.nodes:
-                    x_values[i] = bnc_model.getSolVal(sol, x[i])
-                # for e in G.edges:
-                #     y_values[e] = bnc_model.getSolVal(sol, x[e])
+            # store elementary stats needed for training
+            info = {'optimal_value': bnc_model.getObjVal(),
+                    'is_optimal': is_optimal,
+                    'lp_iterations_limit': dataset_config['lp_iterations_limit'],
+                    'baselines': baseline_stats}
 
-                # cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
-                # nx.set_edge_attributes(G, cut, name='cut')
-                # nx.set_edge_attributes(G, y_values, name='y')
-                nx.set_node_attributes(G, x_values, name='x')
-
-                # store elementary stats needed for training
-                info[problem] = {'optimal_value': bnc_model.getObjVal(),
-                                 'is_optimal': is_optimal,
-                                 'lp_iterations_limit': dataset_config['lp_iterations_limit'],
-                                 'baselines': baseline_stats}
-
-                # store extensive stats needed for evaluation
-                if save_all_stats:
-                    info['problem']['baselines']['bnc'] = {bnc_seed: bnc_sepa.stats}
+            # store extensive stats needed for evaluation
+            if save_all_stats:
+                info['baselines']['bnc'] = {bnc_seed: bnc_sepa.stats}
 
             with open(filepath, 'wb') as f:
                 pickle.dump((G, info), f)
                 print('saved instance to ', filepath)
-
-            # if dataset_config['baseline_solver'] == 'gurobi':
-            #     from utils.gurobi_models import maxcut_mccormic_model as gurobi_model
-            #     bnc_model, x, y = gurobi_model(G)
-            #     bnc_model.optimize()
-            #     x_values = {}
-            #     y_values = {}
-            #
-            #     for i in G.nodes:
-            #         x_values[i] = x[i].X
-            #     for e in G.edges:
-            #         y_values[e] = y[e].X
-            #
-            #     cut = {(i, j): int(x_values[i] != x_values[j]) for (i, j) in G.edges}
-            #     nx.set_edge_attributes(G, cut, name='cut')
-            #     nx.set_edge_attributes(G, y_values, name='y')
-            #     nx.set_node_attributes(G, x_values, name='x')
-            #     info = {'optimal_value': bnc_model.getObjective().getValue()}
-            #     with open(filepath, 'wb') as f:
-            #         pickle.dump((G, info), f)
-            if not quiet:
-                print('saved graph to ', filepath)
 
 
 if __name__ == '__main__':
@@ -290,7 +268,7 @@ if __name__ == '__main__':
     #         dataset_config[k] = v
     for workerid in range(args.nworkers):
         cfg = deepcopy(vars(args))
-        cfg['datasets'] = config['datasets']
+        cfg.update(config)
         cfg['workerid'] = workerid
         configs.append(cfg)
 

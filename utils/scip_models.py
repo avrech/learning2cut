@@ -122,7 +122,7 @@ def mvc_model(G, model_name='MVC Model',
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
                           use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
-                          use_random_branching=True, use_cycles=True, hparams={}):
+                          use_random_branching=True, use_cycles=True, hparams={}, allow_restarts=False):
     r"""
     Returns MAXCUT model of G assuming edge attributes named 'weight', denoted by `w`.
 
@@ -204,6 +204,8 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
         model.includeSepa(cycle_sepa, 'MLCycles',
                           "Generate cycle inequalities for the MaxCut McCormick formulation",
                           priority=1000000, freq=1)
+    if not allow_restarts:
+        model.setIntParam('presolving/maxrestarts', 0)
     # unify x and y to a single dictionary
     x_dict = {**x, **y}
 
