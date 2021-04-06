@@ -49,7 +49,7 @@ def set_aggresive_separation(model):
 
 def mvc_model(G, model_name='MVC Model',
               use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
-              use_random_branching=True, use_cut_pool=True):
+              use_random_branching=True, use_cut_pool=True, allow_restarts=False):
     r"""
         Returns Minimum Vertex Cover model defined by G(V,E)
 
@@ -115,6 +115,8 @@ def mvc_model(G, model_name='MVC Model',
     if not use_cut_pool:
         model.setIntParam('separating/poolfreq', -1)
         # model.setBoolParam('separating/cgmip/usecutpool', False)
+    if not allow_restarts:
+        model.setIntParam('presolving/maxrestarts', 0)
     return model, x
 
 
@@ -958,6 +960,11 @@ class CSBaselineSepa(Sepa):
 
         return result
 
+    def assert_behavior(self):
+        if self.criterion != 'default':
+            assert self.model.getParam('separating/maxcuts') == self.hparams.get('reset_maxcuts', 100)
+            assert self.model.getParam('separating/maxcutsroot') == self.hparams.get('reset_maxcutsroot', 2000)
+
     # done
     def update_stats(self):
         """ Collect statistics related to the action taken at the previous round.
@@ -1007,15 +1014,15 @@ class CSBaselineSepa(Sepa):
 
 
 class CSResetSepa(Sepa):
-    def __init__(self, maxcuts=100000, maxcutsroot=100000):
+    def __init__(self, hparams={'reset_maxcuts': 100, 'reset_maxcutsroot': 2000}):
         """
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
         """
         super(CSResetSepa, self).__init__()
         self.name = 'Reset Separator'
-        self.maxcuts = maxcuts
-        self.maxcutsroot = maxcutsroot
+        self.maxcuts = hparams['reset_maxcuts']
+        self.maxcutsroot = hparams['reset_maxcutsroot']
 
     def sepaexeclp(self):
         # reset maxncuts and maxncutsroot for the next cut selection round
