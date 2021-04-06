@@ -25,18 +25,18 @@ if False:
 with open('mvc-variability-graphs.pkl', 'rb') as f:
     graphs = pickle.load(f)
 seeds = [46, 72, 101]
-lp_iterations_limit = 1000
+lp_iterations_limit = 2000
 
-if False:
+if True:
     cut_aggr_results = {k: {size: [] for size in graph_sizes} for k in ['default', 'aggressive']}
     for cut_aggressivness in ['aggressive', 'default']:
         for size, glist in graphs.items():
             # if size == 100:
             #     continue
             for G in tqdm(glist, desc=f'solving size={size} policy={cut_aggressivness}'):
-                model, _ = mvc_model(G, use_general_cuts=True, use_cut_pool=True)
+                model, _ = mvc_model(G, use_general_cuts=True, use_cut_pool=True, use_random_branching=False)
                 # model.hideOutput(True)
-                # sepa = BaselineSepa(hparams={'lp_iterations_limit': -1})
+                # sepa = CSBaselineSepa(hparams={'lp_iterations_limit': -1})
                 # model.includeSepa(sepa, '#CS_baseline', 'do-nothing', priority=-100000000, freq=1)
 
                 model.optimize()
@@ -45,10 +45,9 @@ if False:
 
                 for seed in seeds:
                     model, x = mvc_model(G, use_general_cuts=True, use_cut_pool=True)
-                    sepa = BaselineSepa(hparams={'lp_iterations_limit': lp_iterations_limit})
+                    sepa = CSBaselineSepa(hparams={'lp_iterations_limit': lp_iterations_limit})
                     model.includeSepa(sepa, '#CS_baseline', 'do-nothing', priority=-100000000, freq=1)
                     model.setBoolParam("misc/allowdualreds", 0)
-
                     if cut_aggressivness == 'aggressive':
                         set_aggresive_separation(model)  # todo debug
                     model.setLongintParam('limits/nodes', 1)  # solve only at the root node
@@ -57,7 +56,7 @@ if False:
                     model.setBoolParam('randomization/permutevars', True)
                     model.setIntParam('randomization/permutationseed', seed)
                     model.setIntParam('randomization/randomseedshift', seed)
-                    # model.hideOutput(True)
+                    model.hideOutput(True)
                     model.optimize()
                     sepa.update_stats()
                     stats = sepa.stats
@@ -78,10 +77,10 @@ if False:
 
                     cut_aggr_results[cut_aggressivness][size].append(stats)
 
-    with open('mvc-variability-results.pkl', 'wb') as f:
+    with open(f'mvc-variability-results-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
         pickle.dump(cut_aggr_results, f)
 
-with open('mvc-variability-results.pkl', 'rb') as f:
+with open(f'mvc-variability-results-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
     cut_aggr_results = pickle.load(f)
 
 # validate correctness of records:
@@ -114,7 +113,7 @@ for size in graph_sizes:
     dfs[size] = df
     df.to_csv(f'mvc-variability-{size}.csv')
 
-with open('mvc-variability-dfs.pkl', 'wb') as f:
+with open(f'mvc-variability-dfs-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
 print('########## test baselines with aggressive cuts ##########')
@@ -124,14 +123,18 @@ if False:
         for size, glist in graphs.items():
             if size == 100:
                 continue
+            hparams = {'lp_iterations_limit': lp_iterations_limit,
+                       'criterion': baseline,
+                       'reset_maxcuts': 100000,
+                       'reset_maxcutsroot': 100000}
             for idx, G in enumerate(tqdm(glist, desc=f'solving size={size} baseline={baseline}')):
                 optval = cut_aggr_results['aggressive'][size][idx*3]['optval']
 
                 for seed in seeds:
                     model, x = mvc_model(G)
-                    sepa = CSBaselineSepa(hparams={'lp_iterations_limit': lp_iterations_limit, 'criterion': baseline})
+                    sepa = CSBaselineSepa(hparams=hparams)
                     model.includeSepa(sepa, '#CS_baseline', f'enforce baseline {baseline}', priority=-100000000, freq=1)
-                    reset_sepa = CSResetSepa()
+                    reset_sepa = CSResetSepa(hparams=hparams)
                     model.includeSepa(reset_sepa, '#CS_reset', f'reset maxcuts params', priority=99999999, freq=1)
                     model.setBoolParam("misc/allowdualreds", 0)
                     set_aggresive_separation(model)  # todo debug
@@ -161,10 +164,10 @@ if False:
                     baselines_results[baseline][size].append(stats)
 
     baselines_results['default'] = cut_aggr_results['aggressive']
-    with open('mvc-variability-baselines-results.pkl', 'wb') as f:
+    with open(f'mvc-variability-baselines-results-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
         pickle.dump(baselines_results, f)
 
-with open('mvc-variability-baselines-results.pkl', 'rb') as f:
+with open(f'mvc-variability-baselines-results-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
     baselines_results = pickle.load(f)
 baselines_results['default'] = cut_aggr_results['aggressive']
 # validate correctness of records:
@@ -197,7 +200,7 @@ for size in [150, 200]:
     dfs[size] = df
     df.to_csv(f'mvc-variability-baselines-{size}.csv')
 
-with open('mvc-variability-baselines-df.pkl', 'wb') as f:
+with open(f'mvc-variability-baselines-df-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
 
@@ -257,5 +260,5 @@ if True:
     plt.tight_layout()
     fig.savefig('test-aggressive-baselines-db-gap-time.png')
 
-    # todo - add graphs of all instances to wandb and generate smoothed graph. 
+    # todo - add graphs of all instances to wandb and generate smoothed graph.
 print('finish')
