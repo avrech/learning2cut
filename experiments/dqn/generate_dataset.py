@@ -15,18 +15,30 @@ from tqdm import tqdm
 from ray import tune
 from copy import deepcopy
 from utils.functions import get_normalized_areas
+def random_ba_graphs(ngraphs, nmin, nmax, m, weights):
+    graphs = []
+    for _ in tqdm(range(ngraphs), desc='generating graphs'):
+        n = np.random.randint(nmin, nmax)
+        G = nx.barabasi_albert_graph(n, m)
+        if weights == 'ones':
+            w = 1.0
+            c = 1.0
+        elif weights == 'uniform01':
+            w = {e: np.random.uniform() for e in G.edges}
+            c = {v: np.random.uniform() for v in G.nodes}
+        elif weights == 'normal':
+            w = {e: np.random.normal() for e in G.edges}
+            c = {v: np.random.normal() for v in G.nodes}
+        nx.set_edge_attributes(G, w, name='weight')
+        nx.set_node_attributes(G, c, name='c')
+        graphs.append(G)
+    return graphs
 
 
 def generate_graphs(configs):
     """
     Generate graphs and ensures no isomorphism
     """
-    all_graphs = {i: [] for i in range(101)}
-    edge_match_fn = lambda e1, e2: e1['weight'] == e2['weight']
-    node_match_fn = lambda v1, v2: v1['c'] == v2['c']
-
-    total_generated = 0
-    unique_generated = 0
     for worker_config in configs:
         problem = worker_config['problem']
         nworkers = worker_config['nworkers']
@@ -54,51 +66,19 @@ def generate_graphs(configs):
             seed = dataset_config["seed"]
             np.random.seed(seed)
 
-            dataset_dir = os.path.join(datadir,
+            dataset_dir = os.path.join(datadir, problem,
                                        dataset_config['dataset_name'],
                                        f"barabasi-albert-nmin{nmin}-nmax{nmax}-m{m}-weights-{weights}-seed{seed}")
             if not os.path.isdir(dataset_dir):
                 os.makedirs(dataset_dir)
-
-            for graph_idx in tqdm(range(worker_ngraphs), desc=f'Worker {workerid}: generating graphs...'):
+            worker_graphs = random_ba_graphs(worker_ngraphs, nmin, nmax, m, weights)
+            for graph_idx, G in tqdm(enumerate(worker_graphs), desc=f'Worker {workerid}: saving graphs...'):
                 filepath = os.path.join(dataset_dir, f"graph_{workerid}_{graph_idx}.pkl")
                 if os.path.exists(filepath):
-                    with open(filepath, 'rb') as f:
-                        G, baseline = pickle.load(f)
-                    all_graphs[len(G.nodes)].append(G)
-
+                    continue
                 else:
-                    # generate random graph
-                    while True:
-                        n = np.random.randint(nmin, nmax)
-                        G = nx.barabasi_albert_graph(n, m) # , seed=seed
-                        total_generated += 1
-                        if weights == 'ones':
-                            w = 1
-                            c = 1
-                        elif weights == 'uniform01':
-                            w = {e: np.random.uniform() for e in G.edges}
-                            c = {v: np.random.uniform() for v in G.nodes}
-                        elif weights == 'normal':
-                            w = {e: np.random.normal() for e in G.edges}
-                            c = {v: np.random.normal() for v in G.nodes}
-                        nx.set_edge_attributes(G, w, name='weight')
-                        nx.set_node_attributes(G, c, name='c')
-                        for G2 in all_graphs[n]:
-                            if problem == 'MAXCUT' and nx.is_isomorphic(G, G2, edge_match=edge_match_fn):
-                                continue
-                            if problem == 'MVC' and nx.is_isomorphic(G, G2, node_match=node_match_fn):
-                                continue
-
-                        # add unique graph to dataset
-                        unique_generated += 1
-                        all_graphs[n].append(G)
-                        with open(filepath, 'wb') as f:
-                            pickle.dump((G, None), f)
-                        break
-
-    print('Total graphs generated: ', total_generated)
-    print('Unique graphs generated: ', unique_generated)
+                    with open(filepath, 'wb') as f:
+                        pickle.dump((G, None), f)
 
 
 def solve_graphs(worker_config):
