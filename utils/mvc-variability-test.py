@@ -27,7 +27,7 @@ with open('mvc-variability-graphs.pkl', 'rb') as f:
 seeds = [46, 72, 101]
 lp_iterations_limit = 2000
 
-if True:
+if False:
     cut_aggr_results = {k: {size: [] for size in graph_sizes} for k in ['default', 'aggressive']}
     for cut_aggressivness in ['aggressive', 'default']:
         for size, glist in graphs.items():
@@ -117,7 +117,7 @@ with open(f'mvc-variability-dfs-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
 print('########## test baselines with aggressive cuts ##########')
-if False:
+if True:
     baselines_results = {k: {size: [] for size in graph_sizes if size > 100} for k in ['15_random', '15_most_violated']}
     for baseline in ['15_most_violated', '15_random']:
         for size, glist in graphs.items():

@@ -28,6 +28,7 @@ def generate_graphs(configs):
     total_generated = 0
     unique_generated = 0
     for worker_config in configs:
+        problem = worker_config['problem']
         nworkers = worker_config['nworkers']
         workerid = worker_config['workerid']
         datadir = worker_config['datadir']
