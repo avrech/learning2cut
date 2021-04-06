@@ -1,4 +1,4 @@
-from utils.scip_models import mvc_model, BaselineSepa, set_aggresive_separation
+from utils.scip_models import mvc_model, CSBaselineSepa, set_aggresive_separation, CSResetSepa
 import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,27 +24,32 @@ if False:
 
 with open('mvc-variability-graphs.pkl', 'rb') as f:
     graphs = pickle.load(f)
+seeds = [46, 72, 101]
+lp_iterations_limit = 1000
 
-if True:
-    results = {k: {size: [] for size in graph_sizes} for k in ['default', 'aggressive']}
-    seeds = [46, 72, 101]
-    lp_iterations_limit = 1000
-    for policy in ['default', 'aggressive']:
+if False:
+    cut_aggr_results = {k: {size: [] for size in graph_sizes} for k in ['default', 'aggressive']}
+    for cut_aggressivness in ['aggressive', 'default']:
         for size, glist in graphs.items():
-            for G in tqdm(glist, desc=f'solving size={size} policy={policy}'):
-                model, x = mvc_model(G, use_general_cuts=True)
-                model.hideOutput(True)
+            # if size == 100:
+            #     continue
+            for G in tqdm(glist, desc=f'solving size={size} policy={cut_aggressivness}'):
+                model, _ = mvc_model(G, use_general_cuts=True, use_cut_pool=True)
+                # model.hideOutput(True)
+                # sepa = BaselineSepa(hparams={'lp_iterations_limit': -1})
+                # model.includeSepa(sepa, '#CS_baseline', 'do-nothing', priority=-100000000, freq=1)
+
                 model.optimize()
                 optval = model.getObjVal()
                 assert model.getGap() == 0
 
                 for seed in seeds:
-                    model, x = mvc_model(G, use_general_cuts=True)
+                    model, x = mvc_model(G, use_general_cuts=True, use_cut_pool=True)
                     sepa = BaselineSepa(hparams={'lp_iterations_limit': lp_iterations_limit})
-                    model.includeSepa(sepa, 'BSL', 'do-nothing', priority=-100000000, freq=1)
+                    model.includeSepa(sepa, '#CS_baseline', 'do-nothing', priority=-100000000, freq=1)
                     model.setBoolParam("misc/allowdualreds", 0)
 
-                    if policy == 'aggressive':
+                    if cut_aggressivness == 'aggressive':
                         set_aggresive_separation(model)  # todo debug
                     model.setLongintParam('limits/nodes', 1)  # solve only at the root node
                     model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
@@ -52,113 +57,205 @@ if True:
                     model.setBoolParam('randomization/permutevars', True)
                     model.setIntParam('randomization/permutationseed', seed)
                     model.setIntParam('randomization/randomseedshift', seed)
-                    model.hideOutput(True)
+                    # model.hideOutput(True)
                     model.optimize()
                     sepa.update_stats()
                     stats = sepa.stats
                     db, gap, lpiter = stats['dualbound'], stats['gap'], stats['lp_iterations']
                     ncuts, napplied_cumsum = np.array(stats['ncuts'][1:]), np.array(stats['ncuts_applied'])
-                    db_auc = get_normalized_areas(t=lpiter, ft=db, t_support=lp_iterations_limit, reference=optval)
-                    gap_auc = get_normalized_areas(t=lpiter, ft=gap, t_support=lp_iterations_limit, reference=0)
-                    napplied = napplied_cumsum[1:] - napplied_cumsum[:-1]
-                    applied_avail = napplied / ncuts
+                    db_auc = sum(get_normalized_areas(t=lpiter, ft=db, t_support=lp_iterations_limit, reference=optval))
+                    gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=lp_iterations_limit, reference=0))
+                    napplied_round = napplied_cumsum[1:] - napplied_cumsum[:-1]
+                    applied_avail = napplied_round / ncuts
                     stats['db_auc'] = db_auc
                     stats['gap_auc'] = gap_auc
                     stats['optval'] = optval
-                    stats['napplied'] = np.mean(napplied)
+                    stats['napplied/round'] = np.mean(napplied_round)
                     stats['applied/avail'] = np.mean(applied_avail)
-                    stats['napplied_std'] = np.std(napplied)
+                    stats['napplied_std'] = np.std(napplied_round)
                     stats['applied/avail_std'] = np.std(applied_avail)
 
 
-                    results[policy][size].append(stats)
+                    cut_aggr_results[cut_aggressivness][size].append(stats)
 
     with open('mvc-variability-results.pkl', 'wb') as f:
-        pickle.dump(results, f)
+        pickle.dump(cut_aggr_results, f)
 
 with open('mvc-variability-results.pkl', 'rb') as f:
-    results = pickle.load(f)
+    cut_aggr_results = pickle.load(f)
 
+# validate correctness of records:
+
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', None)
 dfs = {}
 for size in graph_sizes:
     summary = {}
-    columns = ['db_auc', 'gap_auc', 'gap', 'time', 'rounds', 'total ncuts', 'total applied', 'applied/avail']
-    for policy in ['default', 'aggressive']:
-        db_auc_list = np.array([s['db_auc'] for s in results[policy][size]])
-        gap_auc_list = np.array([s['gap_auc'] for s in results[policy][size]])
-        gap = np.array([s['gap'][-1] for s in results[policy][size]])
-        time = np.array([s['solving_time'][-1] for s in results[policy][size]])
-        ncuts = np.array([sum(s['ncuts']) for s in results[policy][size]])
-        napplied = np.array([s['napplied'] for s in results[policy][size]])
-        applied_avail = np.array([s['applied/avail'] for s in results[policy][size]])
-        napplied_std = np.array([s['napplied_std'] for s in results[policy][size]])
-        applied_avail_std = np.array([s['applied/avail_std'] for s in results[policy][size]])
-        nrounds = np.array([s['lp_rounds'][-1] for s in results[policy][size]])
-        summary[policy] = ['{:.4f} ({:.4f})'.format(arr.mean(), arr.std()) for arr in [db_auc_list, gap_auc_list, gap, time, nrounds, ncuts]]
-        summary[policy] += ['{:.4f} ({:.4f})'.format(napplied.mean(), napplied_std.mean())]
-        summary[policy] += ['{:.4f} ({:.4f})'.format(applied_avail.mean(), applied_avail_std.mean())]
+    columns = ['db_auc', 'gap_auc', 'gap', 'time', 'rounds', 'total ncuts', 'napplied/round', 'applied/avail']
+    for cut_aggressivness in ['default', 'aggressive']:
+        db_auc_list = np.array([s['db_auc'] for s in cut_aggr_results[cut_aggressivness][size]])
+        gap_auc_list = np.array([s['gap_auc'] for s in cut_aggr_results[cut_aggressivness][size]])
+        gap = np.array([s['gap'][-1] for s in cut_aggr_results[cut_aggressivness][size]])
+        time = np.array([s['solving_time'][-1] for s in cut_aggr_results[cut_aggressivness][size]])
+        ncuts = np.array([sum(s['ncuts']) for s in cut_aggr_results[cut_aggressivness][size]])
+        napplied_round = np.array([s['napplied/round'] for s in cut_aggr_results[cut_aggressivness][size]])
+        applied_avail = np.array([s['applied/avail'] for s in cut_aggr_results[cut_aggressivness][size]])
+        napplied_std = np.array([s['napplied_std'] for s in cut_aggr_results[cut_aggressivness][size]])
+        applied_avail_std = np.array([s['applied/avail_std'] for s in cut_aggr_results[cut_aggressivness][size]])
+        nrounds = np.array([s['lp_rounds'][-1] for s in cut_aggr_results[cut_aggressivness][size]])
+        summary[cut_aggressivness] = ['{:.4f}{}{:.4f}'.format(arr.mean(), u"\u00B1", arr.std()) for arr in [db_auc_list, gap_auc_list, gap, time, nrounds, ncuts]]
+        summary[cut_aggressivness] += ['{:.4f}{}{:.4f}'.format(napplied_round.mean(), u"\u00B1", napplied_std.mean())]
+        summary[cut_aggressivness] += ['{:.4f}{}{:.4f}'.format(applied_avail.mean(), u"\u00B1", applied_avail_std.mean())]
     df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
-    print('#'*30 + f' SIZE {size} ' + '#'*30)
+    print('#'*70 + f' SIZE {size} ' + '#'*70)
     print(df)
     dfs[size] = df
+    df.to_csv(f'mvc-variability-{size}.csv')
 
 with open('mvc-variability-dfs.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
-
-
-
+print('########## test baselines with aggressive cuts ##########')
 if False:
-    G = nx.barabasi_albert_graph(n=150, m=10, seed=223)
-    nx.set_node_attributes(G, {i: np.random.random() for i in G.nodes}, 'c')
+    baselines_results = {k: {size: [] for size in graph_sizes if size > 100} for k in ['15_random', '15_most_violated']}
+    for baseline in ['15_most_violated', '15_random']:
+        for size, glist in graphs.items():
+            if size == 100:
+                continue
+            for idx, G in enumerate(tqdm(glist, desc=f'solving size={size} baseline={baseline}')):
+                optval = cut_aggr_results['aggressive'][size][idx*3]['optval']
+
+                for seed in seeds:
+                    model, x = mvc_model(G)
+                    sepa = CSBaselineSepa(hparams={'lp_iterations_limit': lp_iterations_limit, 'criterion': baseline})
+                    model.includeSepa(sepa, '#CS_baseline', f'enforce baseline {baseline}', priority=-100000000, freq=1)
+                    reset_sepa = CSResetSepa()
+                    model.includeSepa(reset_sepa, '#CS_reset', f'reset maxcuts params', priority=99999999, freq=1)
+                    model.setBoolParam("misc/allowdualreds", 0)
+                    set_aggresive_separation(model)  # todo debug
+                    model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+                    model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+                    model.setIntParam('branching/random/priority', 10000000)
+                    model.setBoolParam('randomization/permutevars', True)
+                    model.setIntParam('randomization/permutationseed', seed)
+                    model.setIntParam('randomization/randomseedshift', seed)
+                    # model.hideOutput(True)
+                    model.optimize()
+                    sepa.update_stats()
+                    stats = sepa.stats
+                    db, gap, lpiter = stats['dualbound'], stats['gap'], stats['lp_iterations']
+                    ncuts, napplied_cumsum = np.array(stats['ncuts'][1:]), np.array(stats['ncuts_applied'])
+                    db_auc = sum(get_normalized_areas(t=lpiter, ft=db, t_support=lp_iterations_limit, reference=optval))
+                    gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=lp_iterations_limit, reference=0))
+                    napplied_round = napplied_cumsum[1:] - napplied_cumsum[:-1]
+                    applied_avail = napplied_round / ncuts
+                    stats['db_auc'] = db_auc
+                    stats['gap_auc'] = gap_auc
+                    stats['optval'] = optval
+                    stats['napplied/round'] = np.mean(napplied_round)
+                    stats['applied/avail'] = np.mean(applied_avail)
+                    stats['napplied_std'] = np.std(napplied_round)
+                    stats['applied/avail_std'] = np.std(applied_avail)
+                    baselines_results[baseline][size].append(stats)
+
+    baselines_results['default'] = cut_aggr_results['aggressive']
+    with open('mvc-variability-baselines-results.pkl', 'wb') as f:
+        pickle.dump(baselines_results, f)
+
+with open('mvc-variability-baselines-results.pkl', 'rb') as f:
+    baselines_results = pickle.load(f)
+baselines_results['default'] = cut_aggr_results['aggressive']
+# validate correctness of records:
+
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', None)
+pd.set_option('display.max_colwidth', None)
+dfs = {}
+for size in [150, 200]:
+    summary = {}
+    columns = ['db_auc', 'gap_auc', 'gap', 'time', 'rounds', 'total ncuts', 'napplied/round', 'applied/avail']
+    for baseline in ['default', '15_random', '15_most_violated']:
+        db_auc_list = np.array([s['db_auc'] for s in baselines_results[baseline][size]])
+        gap_auc_list = np.array([s['gap_auc'] for s in baselines_results[baseline][size]])
+        gap = np.array([s['gap'][-1] for s in baselines_results[baseline][size]])
+        time = np.array([s['solving_time'][-1] for s in baselines_results[baseline][size]])
+        ncuts = np.array([sum(s['ncuts']) for s in baselines_results[baseline][size]])
+        napplied_round = np.array([s['napplied/round'] for s in baselines_results[baseline][size]])
+        applied_avail = np.array([s['applied/avail'] for s in baselines_results[baseline][size]])
+        napplied_std = np.array([s['napplied_std'] for s in baselines_results[baseline][size]])
+        applied_avail_std = np.array([s['applied/avail_std'] for s in baselines_results[baseline][size]])
+        nrounds = np.array([s['lp_rounds'][-1] for s in baselines_results[baseline][size]])
+        summary[baseline] = ['{:.4f}{}{:.4f}'.format(arr.mean(), u"\u00B1", arr.std()) for arr in [db_auc_list, gap_auc_list, gap, time, nrounds, ncuts]]
+        summary[baseline] += ['{:.4f}{}{:.4f}'.format(napplied_round.mean(), u"\u00B1", napplied_std.mean())]
+        summary[baseline] += ['{:.4f}{}{:.4f}'.format(applied_avail.mean(), u"\u00B1", applied_avail_std.mean())]
+    df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
+    print('#'*70 + f' SIZE {size} ' + '#'*70)
+    print(df)
+    dfs[size] = df
+    df.to_csv(f'mvc-variability-baselines-{size}.csv')
+
+with open('mvc-variability-baselines-df.pkl', 'wb') as f:
+    pickle.dump(dfs, f)
+
+
+
+if True:
+    G = graphs[200][0]
     fig, axes = plt.subplots(2, 2)
 
-    for aggresive in [True, False]:
-        model, x = mvc_model(G, use_general_cuts=True)
-        sepa = BaselineSepa(hparams={'lp_iterations_limit': 1500})
-        model.includeSepa(sepa, 'BSL', 'do-nothing', priority=-100000000, freq=1)
-        model.setBoolParam("misc/allowdualreds", 0)
-
-        if aggresive:
-            set_aggresive_separation(model)  # todo debug
-        model.setLongintParam('limits/nodes', 1)  # solve only at the root node
-        model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
-        model.setIntParam('branching/random/priority', 10000000)  # add cuts forever
-
-        model.setBoolParam('randomization/permutevars', True)
-        model.setIntParam('randomization/permutationseed', 223)
-        model.setIntParam('randomization/randomseedshift', 223)
-
-        model.optimize()
-
-        sepa.update_stats()
-        # plt.figure()
-        # nx.spring_layout(G)
-        # nx.draw(G, labels={i: model.getVal(x[i]) for i in G.nodes}, with_labels=True, node_color=['gray' if model.getVal(x[i]) == 0 else 'blue' for i in G.nodes])
-        # plt.savefig('test-sol.png')
-        axes[0,0].plot(sepa.stats['lp_iterations'], sepa.stats['dualbound'], label='aggressive' if aggresive else 'default')
-        axes[0,1].plot(sepa.stats['lp_iterations'], sepa.stats['gap'], label='aggressive' if aggresive else 'default')
-        axes[1,0].plot(sepa.stats['lp_iterations'], sepa.stats['solving_time'], label='aggressive' if aggresive else 'default')
-        axes[1,1].plot(sepa.stats['solving_time'], sepa.stats['gap'], label='aggressive' if aggresive else 'default')
+    for bsl in ['default', '15_random', '15_most_violated']:
+        # model, x = mvc_model(G, use_general_cuts=True)
+        # sepa = BaselineSepa(hparams={'lp_iterations_limit': 1500})
+        # model.includeSepa(sepa, '#CS_baseline', 'do-nothing', priority=-100000000, freq=1)
+        # model.setBoolParam("misc/allowdualreds", 0)
+        #
+        # if aggresive:
+        #     set_aggresive_separation(model)  # todo debug
+        # model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+        # model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+        # model.setIntParam('branching/random/priority', 10000000)  # add cuts forever
+        #
+        # model.setBoolParam('randomization/permutevars', True)
+        # model.setIntParam('randomization/permutationseed', 223)
+        # model.setIntParam('randomization/randomseedshift', 223)
+        #
+        # model.optimize()
+        #
+        # sepa.update_stats()
+        # # plt.figure()
+        # # nx.spring_layout(G)
+        # # nx.draw(G, labels={i: model.getVal(x[i]) for i in G.nodes}, with_labels=True, node_color=['gray' if model.getVal(x[i]) == 0 else 'blue' for i in G.nodes])
+        # # plt.savefig('test-sol.png')
+        color = {'default': 'b', '15_random': 'g', '15_most_violated': 'r'}.get(bsl)
+        stats = baselines_results[bsl][200][0]
+        axes[0,0].plot(stats['lp_iterations'], stats['dualbound'], color, label=bsl)
+        axes[0,1].plot(stats['lp_iterations'], stats['gap'], color, label=bsl)
+        axes[1,0].plot(stats['lp_iterations'], stats['solving_time'], color, label=bsl)
+        axes[1,1].plot(stats['solving_time'], stats['gap'], color, label=bsl)
 
     # axes[0, 0].set_title('default')
     # axes[2, 0].set_xlabel('lp iter')
     # axes[2, 1].set_xlabel('lp iter')
     # axes[0, 1].set_title('aggressive')
-    axes[0,0].set_title('db')
-    axes[0,1].set_title('gap')
-    axes[1,0].set_title('time')
-    axes[1,1].set_title('gap')
+    axes[0,0].set_ylabel('db')
+    axes[0,1].set_ylabel('gap')
+    axes[1,0].set_ylabel('time')
+    axes[1,1].set_ylabel('gap')
     axes[0,0].set_xlabel('lp iterations')
     axes[0,1].set_xlabel('lp iterations')
     axes[1,0].set_xlabel('lp iterations')
     axes[1,1].set_xlabel('time')
-    axes[0,0].legend()
-    axes[1,0].legend()
-    axes[1,0].legend()
-    axes[1,1].legend()
+    axes[0, 0].set_title('db vs. lp iterations')
+    axes[0, 1].set_title('gap vs. lp iterations')
+    axes[1, 0].set_title('time vs. lp iterations')
+    axes[1, 1].set_title('gap vs. time')
+    axes[0,1].legend()
 
     plt.tight_layout()
-    fig.savefig('test-aggressive-db-gap-time.png')
+    fig.savefig('test-aggressive-baselines-db-gap-time.png')
 
+    # todo - add graphs of all instances to wandb and generate smoothed graph. 
 print('finish')

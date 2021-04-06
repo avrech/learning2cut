@@ -14,9 +14,42 @@ from utils.functions import dijkstra_best_shortest_path
 from utils.misc import get_separator_cuts_applied
 
 
+def set_aggresive_separation(model):
+    """ set SCIP separating parameters so that separators are called every round,
+     and increase the limit of cuts per round """
+    # model.setIntParam("separating/strongcg/freq", -1)
+    # model.setIntParam("separating/gomory/freq", -1)
+    # model.setIntParam("separating/aggregation/freq", -1)
+    # model.setIntParam("separating/mcf/freq", -1)
+    # model.setIntParam("separating/closecuts/freq", -1)
+
+    # model.setIntParam("separating/zerohalf/freq", -1)
+    # for sepa in ['clique', 'closecuts', 'flowcover', 'cmir', 'gomory', 'strongcg', 'zerohalf', 'mcf', 'aggregation']:
+    # the following cuts are disabled by default: cgmip, closecuts, convexproj, eccuts, gauge, oddcycle, rapidlearning,
+    # todo what is maxbounddist? (maximal relative distance from current node's dual bound to primal bound compared to best node's dual bound for applying separator <disjunctive> (0.0: only on current best node, 1.0: on all nodes)
+    model.setIntParam("separating/clique/maxsepacuts", 100)  # 10
+    model.setIntParam("separating/clique/freq", 1)  # 0
+    model.setIntParam("separating/flowcover/freq", 1)  # 10
+    model.setIntParam("separating/cmir/freq", 1)  # 10
+    model.setIntParam("separating/aggregation/freq", 1)  # 10
+    model.setIntParam("separating/gomory/freq", 1)  # 10
+    model.setIntParam("separating/gomory/maxroundsroot", -1)  # 10
+    model.setIntParam("separating/strongcg/freq", -1)  # 10  # todo this separator makes problems with null rows
+    model.setIntParam("separating/strongcg/maxroundsroot", -1)  # 20
+    model.setIntParam("separating/strongcg/maxrounds", -1)  # 5
+    model.setIntParam("separating/zerohalf/freq", 1)  # 10
+    model.setIntParam("separating/zerohalf/maxroundsroot", -1)  # 20
+    model.setIntParam("separating/zerohalf/maxrounds", -1)  # 5
+
+    # todo - what is it?
+    # minimal integrality violation of a basis variable in order to try Gomory cut
+    # [type: real, advanced: FALSE, range: [0.0001,0.5], default: 0.01]
+    # separating / gomory / away = 0.01
+
+
 def mvc_model(G, model_name='MVC Model',
               use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
-              use_random_branching=True, use_cycles=True, hparams={}):
+              use_random_branching=True, use_cut_pool=True):
     r"""
         Returns Minimum Vertex Cover model defined by G(V,E)
 
@@ -45,7 +78,11 @@ def mvc_model(G, model_name='MVC Model',
 
     # create SCIP model:
     model = scip.Model(model_name)
-    x = OrderedDict([(i, model.addVar(name=f'{i}', obj=c[i], vtype='B')) for i in V])
+    # x = OrderedDict([(i, model.addVar(name=f'{i}', obj=c[i], vtype='B')) for i in V])
+    # x = {i: model.addVar(name=f'{i}', obj=c[i], vtype='B') for i in V}
+    x = {}
+    for i in V:
+        x[i] = model.addVar(name=f'{i}', obj=c[i], vtype='B')
 
     """ McCormic Inequalities """
     for ij in E:
@@ -60,12 +97,12 @@ def mvc_model(G, model_name='MVC Model',
         model.setIntParam("propagating/maxrounds", 0)
         model.setIntParam("propagating/maxroundsroot", 0)
     # turn off some cuts
+    model.setIntParam("separating/strongcg/freq", -1)
+    model.setIntParam("separating/aggregation/freq", -1)
+    model.setIntParam("separating/mcf/freq", -1)
+    model.setIntParam("separating/closecuts/freq", -1)
     if not use_general_cuts:
-        model.setIntParam("separating/strongcg/freq", -1)
         model.setIntParam("separating/gomory/freq", -1)
-        model.setIntParam("separating/aggregation/freq", -1)
-        model.setIntParam("separating/mcf/freq", -1)
-        model.setIntParam("separating/closecuts/freq", -1)
         model.setIntParam("separating/clique/freq", -1)
         model.setIntParam("separating/zerohalf/freq", -1)
     if not use_presolve:
@@ -75,7 +112,9 @@ def mvc_model(G, model_name='MVC Model',
         model.setHeuristics(scip.SCIP_PARAMSETTING.OFF)
     if use_random_branching:
         model.setIntParam('branching/random/priority', 999999)
-
+    if not use_cut_pool:
+        model.setIntParam('separating/poolfreq', -1)
+        # model.setBoolParam('separating/cgmip/usecutpool', False)
     return model, x
 
 
@@ -791,16 +830,20 @@ class MccormickCycleSeparator(Sepa):
             print(newparams)
 
 
-class BaselineSepa(Sepa):
+class CSBaselineSepa(Sepa):
     def __init__(self, hparams={}):
         """
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
         """
-        super(BaselineSepa, self).__init__()
+        super(CSBaselineSepa, self).__init__()
         self.name = 'Baseline Separator'
         self.hparams = hparams
         self.criterion = hparams.get('criterion', 'default')
+        self.add_k = 0
+        if self.criterion != 'default':
+            self.add_k = int(self.criterion.split('_')[0])
+            assert self.criterion.endswith('random') or self.criterion.endswith('most_violated')
         # instance specific data needed to be reset every episode
         # todo unifiy x and y to x only (common for all combinatorial problems)
         self.G = None
@@ -822,6 +865,7 @@ class BaselineSepa(Sepa):
         self.terminal_state = False
         self.node_limit_reached = False
         self.print_prefix = '[Baseline Sepa]'
+        self.prev_ncuts = 0
 
     # done
     def sepaexeclp(self):
@@ -833,7 +877,10 @@ class BaselineSepa(Sepa):
         if self.terminal_state:
             # discard all the cuts in the separation storage and return
             self.model.clearCuts()
-            result = {"result": SCIP_RESULT.DIDNOTRUN}
+            # self.model.setIntParam('separating/maxcuts', 0)
+            # self.model.setIntParam('separating/maxcutsroot', 0)
+            self.model.interruptSolve()
+            result = {"result": SCIP_RESULT.DIDNOTFIND}
 
         elif self.lp_iterations_limit == -1 or self.model.getNLPIterations() < self.lp_iterations_limit:
             result = self.separate_baseline()
@@ -845,7 +892,10 @@ class BaselineSepa(Sepa):
             self.terminal_state = 'LP_ITERATIONS_LIMIT_REACHED'
             # clear cuts and terminate
             self.model.clearCuts()
-            result = {"result": SCIP_RESULT.DIDNOTRUN}
+            # self.model.setIntParam('separating/maxcuts', 0)
+            # self.model.setIntParam('separating/maxcutsroot', 0)
+            self.model.interruptSolve()
+            result = {"result": SCIP_RESULT.DIDNOTFIND}
 
         return result
 
@@ -859,19 +909,21 @@ class BaselineSepa(Sepa):
         """
         # get the current state, a dictionary of available cuts (keyed by their names,
         # and query statistics related to the previous action (cut activeness etc.)
-        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True,
-                                                        query=self.prev_action)
-
+        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True)
+        # self.print(f'debug - model.getNCcuts={self.model.getNCuts()}, ncuts={available_cuts["ncuts"]}, NLP{self.model.getNLPs()}')
         # if there are available cuts, select action and continue to the next state
+        # print(list(available_cuts['cuts'].keys()))
+        assert self.model.getNCuts() == len(available_cuts['cuts']), "cuts duplicated with same name"
+        # print('n pool cuts ', self.model.getNPoolCuts())
         if available_cuts['ncuts'] > 0:
             # prob what scip cut selection algorithm would do in this state
             if self.criterion == 'default':
                 # use SCIP's cut selection (don't do anything)
                 result = {"result": SCIP_RESULT.DIDNOTRUN}
 
-            elif self.criterion == '10_random':
+            elif self.criterion.endswith('random'):
                 # apply the action
-                random_idxes = torch.randperm(available_cuts['ncuts'])[:10].numpy()
+                random_idxes = torch.randperm(available_cuts['ncuts'])[:self.add_k].numpy()
                 selected = np.zeros((available_cuts['ncuts'],))
                 selected[random_idxes] = 1
                 # force SCIP to take the selected cuts and discard the others
@@ -883,12 +935,12 @@ class BaselineSepa(Sepa):
                 # continue to the next state
                 result = {"result": SCIP_RESULT.SEPARATED}
 
-            elif self.criterion == '10_most_violated':
+            elif self.criterion.endswith('most_violated'):
                 # available_cuts['selected_by_scip'] = np.array(
                 #     [cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
                 info = self.model.getState(state_format='dict')
                 efficacy = info['cut']['efficacy']
-                most_efficacious = reversed(np.argsort(efficacy))[:10]
+                most_efficacious = list(reversed(np.argsort(efficacy)))[:self.add_k]
                 selected = np.zeros((available_cuts['ncuts'],))
                 selected[most_efficacious] = 1
                 # force SCIP to take the selected cuts and discard the others
@@ -899,6 +951,7 @@ class BaselineSepa(Sepa):
                 self.model.setIntParam('separating/maxcutsroot', int(sum(selected)))
                 result = {"result": SCIP_RESULT.SEPARATED}
             self.stats_updated = False  # mark false to record relevant stats after this action will make effect
+            self.prev_ncuts = available_cuts['ncuts']
 
         elif available_cuts['ncuts'] == 0:
             result = {"result": SCIP_RESULT.DIDNOTFIND}
@@ -916,7 +969,7 @@ class BaselineSepa(Sepa):
         if self.stats_updated:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
             return
         # todo verify recording initial state stats before taking any action
-        self.stats['ncuts'].append(0 if self.prev_action is None else self.prev_action['ncuts'])
+        self.stats['ncuts'].append(self.prev_ncuts)
         self.stats['ncuts_applied'].append(self.model.getNCutsApplied())
         self.stats['solving_time'].append(self.model.getSolvingTime())
         self.stats['processed_nodes'].append(self.model.getNNodes())
@@ -952,6 +1005,26 @@ class BaselineSepa(Sepa):
     def print(self, expr):
         print(self.print_prefix, expr)
 
+
+class CSResetSepa(Sepa):
+    def __init__(self, maxcuts=100000, maxcutsroot=100000):
+        """
+        Sample scip.Model state every time self.sepaexeclp is invoked.
+        Store the generated data object in
+        """
+        super(CSResetSepa, self).__init__()
+        self.name = 'Reset Separator'
+        self.maxcuts = maxcuts
+        self.maxcutsroot = maxcutsroot
+
+    def sepaexeclp(self):
+        # reset maxncuts and maxncutsroot for the next cut selection round
+        self.model.setIntParam('separating/maxcuts', self.maxcuts)
+        self.model.setIntParam('separating/maxcutsroot', self.maxcutsroot)
+        return {"result": SCIP_RESULT.DIDNOTRUN}
+
+    def print(self, expr):
+        print(self.print_prefix, expr)
 
 
 if __name__ == "__main__":
@@ -1004,10 +1077,10 @@ if __name__ == "__main__":
     # model.setRealParam('separating/intsupportfac', 0.1)
     # model.setIntParam('separating/maxrounds', -1)
     # model.setIntParam('separating/maxroundsroot', 10)
-    model.setIntParam('separating/maxcuts', 20)
-    model.setIntParam('separating/maxcutsroot', 100)
+    # model.setIntParam('separating/maxcuts', 20)
+    # model.setIntParam('separating/maxcutsroot', 100)
     model.setIntParam('separating/maxstallroundsroot', -1)
-    model.setIntParam('separating/maxroundsroot', 2100)
+    # model.setIntParam('separating/maxroundsroot', 2100)
     model.setRealParam('limits/time', 300)
     model.setLongintParam('limits/nodes', 1)
     model.optimize()
