@@ -131,3 +131,7 @@ dmypy.json
 # avrech
 *.txt
 *data/*
+*.png
+*.pkl
+*.csv
+*.mp4

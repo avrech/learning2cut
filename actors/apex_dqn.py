@@ -379,9 +379,9 @@ class ApeXDQN:
                 col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
                 row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
                 figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
-                for (inst_idx, inst_stats), (G, baseline) in zip(dataset_stats.items(), dataset['instances']):
+                for (inst_idx, inst_stats), (G, inst_info) in zip(dataset_stats.items(), dataset['instances']):
                     for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
-                        add_subplot(figures, inst_idx, seed_idx, seed_stats, baseline, scip_seed, dataset, avg_values)
+                        add_subplot(figures, inst_idx, seed_idx, seed_stats, inst_info, scip_seed, dataset, avg_values)
                 finish_figures(figures)
 
                 # update log_dict
@@ -391,6 +391,7 @@ class ApeXDQN:
 
             # if all validation results are ready, then
             # save model and figures if its performance is the best till now
+            # 30 is because of each validset contains 10 graphs solved for 3 seeds
             if all([len(v) == 30 for v in all_values.values()]):
                 self.print(f'{"#"*50} new results for {dataset_name} {"#"*50}')
                 cur_perf = avg_values[self.cfg['dqn_objective']]
@@ -581,7 +582,7 @@ def init_figures(nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_
     return figures
 
 
-def add_subplot(figures, row, col, dqn_stats, baseline, scip_seed, dataset, avg_values=None):
+def add_subplot(figures, row, col, dqn_stats, inst_info, scip_seed, dataset, avg_values=None):
     """
     plot the last episode curves to subplot in position (row, col)
     plot dqn agent dualbound/gap curves together with the baseline curves.
@@ -590,22 +591,22 @@ def add_subplot(figures, row, col, dqn_stats, baseline, scip_seed, dataset, avg_
     dataset_stats = dataset['stats']
     lp_iterations_limit = dataset['lp_iterations_limit']
     # dqn_stats = self.episode_stats
-    bsl_0 = baseline['rootonly_stats'][scip_seed]
-    bsl_1 = baseline['10_random'][scip_seed]
-    bsl_2 = baseline['10_most_violated'][scip_seed]
+    bsl_0 = inst_info['baselines']['default'][scip_seed]
+    bsl_1 = inst_info['baselines']['15_random'][scip_seed]
+    bsl_2 = inst_info['baselines']['15_most_violated'][scip_seed]
 
     # set labels for the last subplot
     if avg_values is not None:
         db_labels = ['DQN {:.4f}({:.4f})'.format(avg_values['db_auc'], avg_values['db_auc_without_early_stops']),
-                     'SCIP {:.4f}'.format(dataset_stats['rootonly_stats']['db_auc_avg']),
-                     '10 RANDOM {:.4f}'.format(dataset_stats['10_random']['db_auc_avg']),
-                     '10 MOST VIOLATED {:.4f}'.format(dataset_stats['10_most_violated']['db_auc_avg']),
+                     'SCIP {:.4f}'.format(dataset_stats['default']['db_auc_avg']),
+                     '15 RANDOM {:.4f}'.format(dataset_stats['15_random']['db_auc_avg']),
+                     '15 MOST VIOLATED {:.4f}'.format(dataset_stats['15_most_violated']['db_auc_avg']),
                      'OPTIMAL'
                      ]
         gap_labels = ['DQN {:.4f}({:.4f})'.format(avg_values['gap_auc'], avg_values['gap_auc_without_early_stops']),
-                      'SCIP {:.4f}'.format(dataset_stats['rootonly_stats']['gap_auc_avg']),
-                      '10 RANDOM {:.4f}'.format(dataset_stats['10_random']['gap_auc_avg']),
-                      '10 MOST VIOLATED {:.4f}'.format(dataset_stats['10_most_violated']['gap_auc_avg']),
+                      'SCIP {:.4f}'.format(dataset_stats['default']['gap_auc_avg']),
+                      '10 RANDOM {:.4f}'.format(dataset_stats['15_random']['gap_auc_avg']),
+                      '10 MOST VIOLATED {:.4f}'.format(dataset_stats['15_most_violated']['gap_auc_avg']),
                       'OPTIMAL'
                       ]
     else:
@@ -615,7 +616,7 @@ def add_subplot(figures, row, col, dqn_stats, baseline, scip_seed, dataset, avg_
     for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
                                                            ['b', 'g', 'y', 'c', 'k'],
                                                            [dqn_stats['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, lp_iterations_limit]],
-                                                           [dqn_stats['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [baseline['optimal_value']]*2],
+                                                           [dqn_stats['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [inst_info['optimal_value']] * 2],
                                                            [dqn_stats['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
                                                            ):
         if lpiter[-1] < lp_iterations_limit:

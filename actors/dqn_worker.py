@@ -22,7 +22,7 @@ from utils.functions import get_normalized_areas, truncate
 from collections import namedtuple
 import matplotlib as mpl
 import pickle
-from utils.scip_models import maxcut_mccormic_model
+from utils.scip_models import maxcut_mccormic_model, mvc_model, set_aggresive_separation, CSResetSepa
 from copy import deepcopy
 mpl.rc('figure', max_open_warning=0)
 import matplotlib.pyplot as plt
@@ -102,7 +102,7 @@ class DQNWorker(Sepa):
         # todo unifiy x and y to x only (common for all combinatorial problems)
         self.G = None
         self.x = None
-        self.baseline = None
+        self.instance_info = None
         self.scip_seed = None
         self.action = None
         self.prev_action = None
@@ -119,7 +119,6 @@ class DQNWorker(Sepa):
             'dualbound': []
         }
         self.stats_updated = False
-        self.node_limit_reached = False
         self.cut_generator = None
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
         self.lp_iterations_limit = -1
@@ -311,10 +310,10 @@ class DQNWorker(Sepa):
         while len(local_buffer) < self.hparams.get('local_buffer_size'):
             # sample graph randomly
             graph_idx = self.graph_indices[(self.i_episode + 1) % len(self.graph_indices)]
-            G, baseline = trainset['instances'][graph_idx]
+            G, instance_info = trainset['instances'][graph_idx]
 
             # execute episodes, collect experience and append to local_buffer
-            trajectory, _ = self.execute_episode(G, baseline, trainset['lp_iterations_limit'],
+            trajectory, _ = self.execute_episode(G, instance_info, trainset['lp_iterations_limit'],
                                                  dataset_name=trainset['dataset_name'],
                                                  demonstration_episode=self.generate_demonstration_data)
 
@@ -337,11 +336,11 @@ class DQNWorker(Sepa):
         return replay_data_packet
 
     # done
-    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, baseline=None, dataset_name='trainset25', scip_seed=None, demonstration_episode=False):
+    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, instance_info=None, dataset_name='trainset25', scip_seed=None, demonstration_episode=False):
         self.G = G
         self.x = x
         # self.y = y
-        self.baseline = baseline
+        self.instance_info = instance_info
         self.scip_seed = scip_seed
         self.action = None
         self.prev_action = None
@@ -363,7 +362,6 @@ class DQNWorker(Sepa):
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
         self.demonstration_episode = demonstration_episode
-        self.node_limit_reached = False
 
     # done
     def sepaexeclp(self):
@@ -660,7 +658,6 @@ class DQNWorker(Sepa):
                 self.truncate_to_lp_iterations_limit()
             else:
                 self.terminal_state = 'NODE_LIMIT'
-                self.node_limit_reached = True
         else:
         # elif self.terminal_state and self.model.getGap() > 0:
         #     self.terminal_state = 'DIDNOTFIND'
@@ -671,7 +668,6 @@ class DQNWorker(Sepa):
             #  In training we discard the episode to avoid extremely bad rewards.
             #  In testing we process it as is.
             assert self.model.getStatus() == 'nodelimit'
-            self.node_limit_reached = True  # todo - why event handler doesn't catch all branching events?
             self.terminal_state = 'NODE_LIMIT'
 
         # discard episodes which terminated early without optimal solution, to avoid extremely bad rewards.
@@ -802,7 +798,7 @@ class DQNWorker(Sepa):
             print(self.episode_history)
 
         # todo - consider squaring the dualbound/gap before computing the AUC.
-        dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.baseline['optimal_value'])
+        dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.instance_info['optimal_value'])
         gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
         if self.dqn_objective == 'db_auc':
             objective_area = dualbound_area
@@ -954,9 +950,9 @@ class DQNWorker(Sepa):
         else:
             stats = {**self.episode_stats,
                      'db_auc': db_auc,
-                     'db_auc_improvement': db_auc / self.baseline['rootonly_stats'][self.scip_seed]['db_auc'],
+                     'db_auc_improvement': db_auc / self.instance_info['baselines']['default'][self.scip_seed]['db_auc'],
                      'gap_auc': gap_auc,
-                     'gap_auc_improvement': gap_auc / self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'],
+                     'gap_auc_improvement': gap_auc / self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'],
                      'active_applied_ratio': np.mean(active_applied_ratio),
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
@@ -976,8 +972,8 @@ class DQNWorker(Sepa):
         #     # test_stats_buffer uses for determining the best model performance.
         #     # if we ignore_test_early_stop, then we don't consider episodes which terminated due to branching
         #     if not (self.terminal_state == 'NODE_LIMIT' and self.hparams.get('ignore_test_early_stop', False)):
-        #         self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['rootonly_stats'][self.scip_seed]['db_auc'])
-        #         self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['rootonly_stats'][self.scip_seed]['gap_auc'])
+        #         self.test_stats_buffer[stats_folder + 'db_auc_imp'].append(db_auc/self.baseline['baselines']['default'][self.scip_seed]['db_auc'])
+        #         self.test_stats_buffer[stats_folder + 'gap_auc_imp'].append(gap_auc/self.baseline['baselines']['default'][self.scip_seed]['gap_auc'])
         #         self.test_stats_buffer['db_auc'].append(db_auc)
         #         self.test_stats_buffer['gap_auc'].append(gap_auc)
         #
@@ -1175,7 +1171,7 @@ class DQNWorker(Sepa):
     #     """
     #     if 'Dual_Bound_vs_LP_Iterations' in self.figures.keys():
     #         dqn = self.episode_stats
-    #         bsl_0 = self.baseline['rootonly_stats'][self.scip_seed]
+    #         bsl_0 = self.baseline['baselines']['default'][self.scip_seed]
     #         bsl_1 = self.baseline['10_random'][self.scip_seed]
     #         bsl_2 = self.baseline['10_most_violated'][self.scip_seed]
     #         bsl_stats = self.datasets[self.dataset_name]['stats']
@@ -1373,7 +1369,7 @@ class DQNWorker(Sepa):
                     datasets.pop(dataset_name)
 
         # load maxcut instances:
-        with open(os.path.join(hparams['datadir'], 'instances.pkl'), 'rb') as f:
+        with open(os.path.join(hparams['datadir'], hparams['problem'], 'data.pkl'), 'rb') as f:
             instances = pickle.load(f)
         for dataset_name, dataset in datasets.items():
             dataset.update(instances[dataset_name])
@@ -1404,7 +1400,7 @@ class DQNWorker(Sepa):
             if dataset_name[:8] == 'trainset':
                 continue
             dataset['stats'] = {}
-            for bsl in ['rootonly_stats', '10_random', '10_most_violated']:
+            for bsl in ['default', '15_random', '15_most_violated']:
                 db_auc_list = []
                 gap_auc_list = []
                 for (_, baseline) in dataset['instances']:
@@ -1412,27 +1408,24 @@ class DQNWorker(Sepa):
                     for scip_seed in dataset['scip_seed']:
                         # align curves to lp_iterations_limit
                         tmp_stats = {}
-                        for k, v in baseline[bsl][scip_seed].items():
-                            if k != 'lp_iterations' and len(v) > 0:
-                                aligned_lp_iterations, aligned_v = truncate(t=baseline[bsl][scip_seed]['lp_iterations'],
+                        for k, v in baseline['baselines'][bsl][scip_seed].items():
+                            if k not in ['lp_iterations', 'db_auc', 'gap_auc'] and len(v) > 0:
+                                aligned_lp_iterations, aligned_v = truncate(t=baseline['baselines'][bsl][scip_seed]['lp_iterations'],
                                                                             ft=v,
                                                                             support=dataset['lp_iterations_limit'],
                                                                             interpolate=type(v[0]) == float)
                                 tmp_stats[k] = aligned_v
                                 tmp_stats['lp_iterations'] = aligned_lp_iterations
                         # override with aligned stats
-                        baseline[bsl][scip_seed] = tmp_stats
+                        baseline['baselines'][bsl][scip_seed] = tmp_stats
 
-                        dualbound = baseline[bsl][scip_seed]['dualbound']
-                        gap = baseline[bsl][scip_seed]['gap']
-                        lpiter = baseline[bsl][scip_seed]['lp_iterations']
-                        db_auc = sum(
-                            get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'],
-                                                 reference=optimal_value))
-                        gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'],
-                                                           reference=0))
-                        baseline[bsl][scip_seed]['db_auc'] = db_auc
-                        baseline[bsl][scip_seed]['gap_auc'] = gap_auc
+                        dualbound = baseline['baselines'][bsl][scip_seed]['dualbound']
+                        gap = baseline['baselines'][bsl][scip_seed]['gap']
+                        lpiter = baseline['baselines'][bsl][scip_seed]['lp_iterations']
+                        db_auc = sum(get_normalized_areas(t=lpiter, ft=dualbound, t_support=dataset['lp_iterations_limit'], reference=optimal_value))
+                        gap_auc = sum(get_normalized_areas(t=lpiter, ft=gap, t_support=dataset['lp_iterations_limit'], reference=0))
+                        baseline['baselines'][bsl][scip_seed]['db_auc'] = db_auc
+                        baseline['baselines'][bsl][scip_seed]['gap_auc'] = gap_auc
                         db_auc_list.append(db_auc)
                         gap_auc_list.append(gap_auc)
                 # compute stats for the whole dataset
@@ -1462,7 +1455,7 @@ class DQNWorker(Sepa):
         if overfit_dataset_name:
             self.trainset = deepcopy(self.datasets[overfit_dataset_name])
             self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
-            self.trainset['instances'][0][1].pop('rootonly_stats')
+            # todo update to new struct: self.trainset['instances'][0][1].pop('rootonly_stats')
         else:
             self.trainset = self.datasets['trainset_20_30']
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
@@ -1483,51 +1476,33 @@ class DQNWorker(Sepa):
             # if self.use_per:
             #     self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
-    def on_nodebranched_event(self):
-        # self.print('BRANCHING EVENT')
-        self.node_limit_reached = True
-
-    def on_lpsolved_event(self):
-        # todo verification
-        # self.print('LPSOLVED EVENT')
-        # if self.prev_action is not None and self.prev_action.get('normalized_slack', None) is None and self.model.getStage() == SCIP_STAGE.SOLVING:
-        #     self.model.getState(query=self.prev_action)
-        # self._update_episode_stats()
-        # pass
-        # todo - for some reason we get at some point
-        # ): /home/avrech/scipoptsuite-6.0.2-avrech/scip/src/scip/lp.c:3899: SCIPcolGetRedcost: Assertion `lp->validsollp == stat->lpcount' failed.
-        pass
-
     # done
-    def execute_episode(self, G, baseline, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
+    def execute_episode(self, G, instance_info, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
         # fix training scip_seed for debug purpose
         if self.training and self.hparams.get('fix_training_scip_seed'):
             scip_seed = self.hparams['fix_training_scip_seed']
 
         # create a SCIP model for G, and disable default cuts
         hparams = self.hparams
-        model, x, cut_generator = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', False), hparams=hparams)
+        if hparams['problem'] == 'MAXCUT':
+            model, x, cut_generator = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', True), hparams=hparams)
+        elif hparams['problem'] == 'MVC':
+            model, x = mvc_model(G)
+            cut_generator = None
+        if hparams['aggressive_separation']:
+            set_aggresive_separation(model)
 
-        # # include cycle inequalities separator with high priority
-        # cycle_sepa = MccormickCycleSeparator(G=G, x=x, y=y, name='MLCycles', hparams=hparams)
-        # model.includeSepa(cycle_sepa, 'MLCycles',
-        #                   "Generate cycle inequalities for the MaxCut McCormick formulation",
-        #                   priority=1000000, freq=1)
-
-        # # include branching event handler
-        branching_event = BranchingEventHdlr(on_nodebranched_event=self.on_nodebranched_event,
-                                             on_lpsolved_event=self.on_lpsolved_event)
-        model.includeEventhdlr(branching_event, "BranchingEventhdlr", "Catches NODEBRANCHED event")
 
         # reset new episode
-        self.init_episode(G, x, lp_iterations_limit, cut_generator=cut_generator, baseline=baseline,
+        self.init_episode(G, x, lp_iterations_limit, cut_generator=cut_generator, instance_info=instance_info,
                           dataset_name=dataset_name, scip_seed=scip_seed,
                           demonstration_episode=demonstration_episode)
 
         # include self, setting lower priority than the cycle inequalities separator
-        model.includeSepa(self, 'DQN', 'Cut selection agent',
-                          priority=-100000000, freq=1)
-
+        model.includeSepa(self, '#CS_DQN', 'Cut selection agent', priority=-100000000, freq=1)
+        # include reset separator for restting maxcutsroot every round
+        reset_sepa = CSResetSepa(hparams)
+        model.includeSepa(reset_sepa, '#CS_reset', 'reset maxcutsroot', priority=99999999, freq=1)
         # set some model parameters, to avoid early branching.
         # termination condition is either optimality or lp_iterations_limit.
         # since there is no way to limit lp_iterations explicitly,
@@ -1580,9 +1555,9 @@ class DQNWorker(Sepa):
         for dataset_name, inst_idx, scip_seed in self.eval_instances:
             t0 = time()
             dataset = datasets[dataset_name]
-            G, baseline = dataset['instances'][inst_idx]
+            G, instance_info = dataset['instances'][inst_idx]
             self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
-            _, stats = self.execute_episode(G, baseline, dataset['lp_iterations_limit'],
+            _, stats = self.execute_episode(G, instance_info, dataset['lp_iterations_limit'],
                                             dataset_name=dataset_name,
                                             scip_seed=scip_seed)
             stats['dataset_name'] = dataset_name

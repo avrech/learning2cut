@@ -117,7 +117,7 @@ with open(f'mvc-variability-dfs-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
 print('########## test baselines with aggressive cuts ##########')
-if True:
+if False:
     baselines_results = {k: {size: [] for size in graph_sizes if size > 100} for k in ['15_random', '15_most_violated']}
     for baseline in ['15_most_violated', '15_random']:
         for size, glist in graphs.items():
@@ -203,8 +203,6 @@ for size in [150, 200]:
 with open(f'mvc-variability-baselines-df-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
-
-
 if True:
     G = graphs[200][0]
     fig, axes = plt.subplots(2, 2)
@@ -258,7 +256,7 @@ if True:
     axes[0,1].legend()
 
     plt.tight_layout()
-    fig.savefig('test-aggressive-baselines-db-gap-time.png')
+    fig.savefig(f'test-aggressive-baselines-lpiter{lp_iterations_limit}.png')
 
     # todo - add graphs of all instances to wandb and generate smoothed graph.
 print('finish')
