@@ -12,9 +12,11 @@ import os
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
-from ray import tune
+# from ray import tune
 from copy import deepcopy
 from utils.functions import get_normalized_areas
+import ray
+
 def random_ba_graphs(ngraphs, nmin, nmax, m, weights):
     graphs = []
     for _ in tqdm(range(ngraphs), desc='generating graphs'):
@@ -218,6 +220,10 @@ def solve_graphs(worker_config):
                 pickle.dump((G, info), f)
                 print('saved instance to ', filepath)
 
+@ray.remote
+def run_worker(config):
+    solve_graphs(config)
+
 
 if __name__ == '__main__':
     import argparse
@@ -264,16 +270,21 @@ if __name__ == '__main__':
             print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
 
     elif args.mp == 'ray':
-        from ray.tune import track
-        track.init(experiment_dir=args.datadir)
-        tune_configs = tune.grid_search(configs)
-        analysis = tune.run(solve_graphs,
-                            config=tune_configs,
-                            resources_per_trial={'cpu': 1, 'gpu': 0},
-                            local_dir=args.datadir,
-                            trial_name_creator=None,
-                            max_failures=1  # TODO learn how to recover from checkpoints
-                            )
+        # from ray.tune import track
+        # track.init(experiment_dir=args.datadir)
+        # tune_configs = tune.grid_search(configs)
+        # analysis = tune.run(solve_graphs,
+        #                     config=tune_configs,
+        #                     resources_per_trial={'cpu': 1, 'gpu': 0},
+        #                     local_dir=args.datadir,
+        #                     trial_name_creator=None,
+        #                     max_failures=1  # TODO learn how to recover from checkpoints
+        #                     )
+        ray.init()
+        for cfg in configs:
+            run_worker.remote(cfg)
+
+
     else:
         # process sequentially without threading
         for cfg in configs:

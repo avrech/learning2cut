@@ -21,7 +21,7 @@
 #source $HOME/venv/bin/activate\n')
 
 # generate dataset
-srun python generate_dataset.py --configfile configs/mvc_data_config.yaml --datadir $SCRATCH/dqn/data --mp ray --nworkers 32
+srun python generate_dataset.py --configfile configs/mvc_data_config.yaml --datadir $SCRATCH/dqn/data --mp ray --nworkers 31
 
 
 
