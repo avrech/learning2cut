@@ -220,6 +220,7 @@ def solve_graphs(worker_config):
                 pickle.dump((G, info), f)
                 print('saved instance to ', filepath)
 
+
 @ray.remote
 def run_worker(config):
     solve_graphs(config)
@@ -281,8 +282,7 @@ if __name__ == '__main__':
         #                     max_failures=1  # TODO learn how to recover from checkpoints
         #                     )
         ray.init()
-        for cfg in configs:
-            run_worker.remote(cfg)
+        ray.get([run_worker.remote(cfg) for cfg in configs])
 
 
     else:
