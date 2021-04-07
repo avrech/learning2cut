@@ -157,8 +157,9 @@ def solve_graphs(worker_config):
             for bsl in baselines:
                 if bsl != 'default' and not save_all_stats:
                     continue
-
-                for scip_seed in dataset_config['scip_seed']:
+                # solve graphs for all seeds.
+                # for training graphs solve only once for seed=223
+                for scip_seed in dataset_config.get('scip_seed', [223]):
                     bsl_model, _, _ = maxcut_mccormic_model(G)
                     bsl_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
                     bsl_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
