@@ -248,7 +248,7 @@ if __name__ == '__main__':
 
     # read data config
     with open(args.configfile) as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+        data_config = yaml.load(f, Loader=yaml.FullLoader)
 
     # product the dataset configs and worker ids.
     configs = []
@@ -257,38 +257,67 @@ if __name__ == '__main__':
     #         dataset_config[k] = v
     for workerid in range(args.nworkers):
         cfg = deepcopy(vars(args))
-        cfg.update(config)
+        cfg.update(data_config)
         cfg['workerid'] = workerid
         configs.append(cfg)
 
-    # first generate all graphs in the main thread and ensure no isomorphism
-    generate_graphs(configs)
+    # # first generate all graphs in the main thread and ensure no isomorphism
+    # generate_graphs(configs)
+    #
+    # if args.mp == 'mp':
+    #     from multiprocessing import Pool
+    #     with Pool() as p:
+    #         res = p.map_async(solve_graphs, configs)
+    #         res.wait()
+    #         print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
+    #
+    # elif args.mp == 'ray':
+    #     # from ray.tune import track
+    #     # track.init(experiment_dir=args.datadir)
+    #     # tune_configs = tune.grid_search(configs)
+    #     # analysis = tune.run(solve_graphs,
+    #     #                     config=tune_configs,
+    #     #                     resources_per_trial={'cpu': 1, 'gpu': 0},
+    #     #                     local_dir=args.datadir,
+    #     #                     trial_name_creator=None,
+    #     #                     max_failures=1  # TODO learn how to recover from checkpoints
+    #     #                     )
+    #     ray.init()
+    #     ray.get([run_worker.remote(cfg) for cfg in configs])
+    #
+    #
+    # else:
+    #     # process sequentially without threading
+    #     for cfg in configs:
+    #         solve_graphs(cfg)
 
-    if args.mp == 'mp':
-        from multiprocessing import Pool
-        with Pool() as p:
-            res = p.map_async(solve_graphs, configs)
-            res.wait()
-            print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
+    # post processing - collect all graphs and save to a single file
+    datasets = data_config['datasets']
+    data = {k: {'instances': []} for k in datasets.keys()}
+    for dataset_name, dataset in datasets.items():
+        dataset['datadir'] = os.path.join(
+            args.datadir, data_config['problem'], dataset['dataset_name'],
+            f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{dataset['seed']}")
 
-    elif args.mp == 'ray':
-        # from ray.tune import track
-        # track.init(experiment_dir=args.datadir)
-        # tune_configs = tune.grid_search(configs)
-        # analysis = tune.run(solve_graphs,
-        #                     config=tune_configs,
-        #                     resources_per_trial={'cpu': 1, 'gpu': 0},
-        #                     local_dir=args.datadir,
-        #                     trial_name_creator=None,
-        #                     max_failures=1  # TODO learn how to recover from checkpoints
-        #                     )
-        ray.init()
-        ray.get([run_worker.remote(cfg) for cfg in configs])
+        # read all graphs with their baselines from disk
+        for filename in tqdm(os.listdir(dataset['datadir']), desc=f'Loading {dataset_name}'):
+            with open(os.path.join(dataset['datadir'], filename), 'rb') as f:
+                G, info = pickle.load(f)
+                if info['is_optimal']:
+                    data[dataset_name]['instances'].append((G, info))
+                else:
+                    print(filename, ' is not solved to optimality')
+                assert info['is_optimal'] or 'train' in dataset_name, 'validation/test instance not solved to optimality'
+        data[dataset_name]['num_instances'] = len(data[dataset_name]['instances'])
 
-
-    else:
-        # process sequentially without threading
-        for cfg in configs:
-            solve_graphs(cfg)
+    print('--------------------------')
+    print('total number of instances:')
+    print('--------------------------')
+    for k, v in data.items():
+        print(k, ':\t', v['num_instances'])
+    # save the data
+    with open(os.path.join(args.datadir, data_config['problem'], 'data.pkl'), 'wb') as f:
+        pickle.dump(data, f)
+    print('saved all data to ', os.path.join(args.datadir, data_config['problem'], 'data.pkl'))
     print('finished')
 
