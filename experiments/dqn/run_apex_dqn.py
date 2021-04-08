@@ -60,7 +60,8 @@ if __name__ == '__main__':
                         help='kill all running actors or a specified lise of actors in the currently running ray server')
                         # todo support multiple ray servers running in parallel. how to link to the correct one.
     parser.add_argument('--ray_init_sleep', type=int, default=1, help='sleep after ray init. avoids weird errors. set to 40 on Compute Canada. see https://github.com/ray-project/ray/issues/8326')
-
+    parser.add_argument('--local_debug', action='store_true',
+                        help='debug all components in a single process')
     args = parser.parse_args()
     config = get_hparams(args)
     assert (not args.restart) or (args.resume and args.run_id is not None), 'provide wandb run_id for resuming'
@@ -93,8 +94,10 @@ if __name__ == '__main__':
 
     # instantiate apex launcher
     apex = ApeXDQN(cfg=config, use_gpu=args.use_gpu)
+    if args.local_debug:
+        apex.local_debug()
 
-    if args.debug_actor is not None:
+    elif args.debug_actor is not None:
         # # spawn all the other actors as usual
         # all_actor_names = apex.actors.copy()
         # debug_actor = all_actor_names.pop(args.debug_actor)

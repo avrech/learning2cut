@@ -14,6 +14,9 @@ from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.utils import remove_self_loops, add_self_loops, softmax
 from torch_geometric.nn.inits import glorot, zeros
 TransformerDecoderContext = namedtuple('TransformerDecoderContext', ('edge_index', 'edge_attr'))
+SCIP_STATE_V_DIM = 13
+SCIP_STATE_C_DIM = 13
+SCIP_STATE_A_DIM = 15
 
 
 # Cut convolution with attention and pairwise edge attributes
@@ -574,9 +577,9 @@ class TQnet(torch.nn.Module):
         # Encoder #
         ###########
         # stack lp conv layers todo consider skip connections
-        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
-                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
-                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
                                                                 edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
                                                                 emb_dim=hparams.get('emb_dim', 32),                   # default
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
@@ -1000,9 +1003,9 @@ class TQnetOld(torch.nn.Module):
         # Encoder #
         ###########
         # stack lp conv layers todo consider skip connections
-        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
-                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
-                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
                                                                 edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
                                                                 emb_dim=hparams.get('emb_dim', 32),                   # default
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
@@ -1299,9 +1302,9 @@ class Qnet(torch.nn.Module):
         # Encoder #
         ###########
         # stack lp conv layers todo consider skip connections
-        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', 13) if i == 0 else hparams.get('emb_dim', 32),
-                                                                x_c_channels=hparams.get('state_x_c_channels', 14) if i == 0 else hparams.get('emb_dim', 32),
-                                                                x_a_channels=hparams.get('state_x_a_channels', 16) if i == 0 else hparams.get('emb_dim', 32),
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM) if i == 0 else hparams.get('emb_dim', 32),
+                                                                x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM) if i == 0 else hparams.get('emb_dim', 32),
+                                                                x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM) if i == 0 else hparams.get('emb_dim', 32),
                                                                 edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
                                                                 emb_dim=hparams.get('emb_dim', 32),  # default
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),  # default
@@ -1411,9 +1414,9 @@ class CutSelectionModel(torch.nn.Module):
 
         # cuts embedding
         self.cuts_embedding = LPConv(
-            x_v_channels=hparams.get('state_x_v_channels', 13),     # mandatory - derived from state features
-            x_c_channels=hparams.get('state_x_c_channels', 14),     # mandatory - derived from state features
-            x_a_channels=hparams.get('state_x_a_channels', 16),     # mandatory - derived from state features
+            x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM),     # mandatory - derived from state features
+            x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM),     # mandatory - derived from state features
+            x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM),     # mandatory - derived from state features
             edge_attr_dim=hparams.get('state_edge_attr_dim', 1),    # mandatory - derived from state features
             emb_dim=hparams.get('emb_dim', 32),                     # default
             aggr=hparams.get('cuts_embedding_aggr', 'mean')         # default

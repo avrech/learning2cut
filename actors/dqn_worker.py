@@ -277,16 +277,27 @@ class DQNWorker(Sepa):
             received_new_params = self.recv_messages()
             if received_new_params:
                 # evaluate validation instances, and send all training and test stats to apex
-                global_step, validation_stats = self.evaluate()
-                log_packet = ('log', f'worker_{self.worker_id}', global_step,
-                              ([(k, v) for k, v in self.training_stats.items()], validation_stats))
-                log_packet = pa.serialize(log_packet).to_buffer()
-                self.send_2_apex_socket.send(log_packet)
-                # reset training stats for the next round
-                for k in self.training_stats.keys():
-                    self.training_stats[k] = []
+                # global_step, validation_stats = self.evaluate()
+                # log_packet = ('log', f'worker_{self.worker_id}', global_step,
+                #               ([(k, v) for k, v in self.training_stats.items()], validation_stats))
+                # log_packet = pa.serialize(log_packet).to_buffer()
+                # self.send_2_apex_socket.send(log_packet)
+                # # reset training stats for the next round
+                # for k in self.training_stats.keys():
+                #     self.training_stats[k] = []
+                self.evaluate_and_send_logs()
             replay_data = self.collect_data()
             self.send_replay_data(replay_data)
+
+    def evaluate_and_send_logs(self):
+        global_step, validation_stats = self.evaluate()
+        log_packet = ('log', f'worker_{self.worker_id}', global_step,
+                      ([(k, v) for k, v in self.training_stats.items()], validation_stats))
+        log_packet = pa.serialize(log_packet).to_buffer()
+        self.send_2_apex_socket.send(log_packet)
+        # reset training stats for the next round
+        for k in self.training_stats.keys():
+            self.training_stats[k] = []
 
     # # todo - update to unified worker and tester
     # def run_test(self):
@@ -426,8 +437,7 @@ class DQNWorker(Sepa):
         info = {}
         # get the current state, a dictionary of available cuts (keyed by their names,
         # and query statistics related to the previous action (cut activeness etc.)
-        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True,
-                                                        query=self.prev_action)
+        cur_state, available_cuts = self.model.getState(state_format='tensor', get_available_cuts=True, query=self.prev_action)
         info['state_info'], info['action_info'] = cur_state, available_cuts
 
         # validate the solver behavior
@@ -441,6 +451,7 @@ class DQNWorker(Sepa):
         if available_cuts['ncuts'] > 0:
 
             # select an action, and get the decoder context for a case we use transformer and q_values for PER
+            assert not np.any(np.isnan(cur_state['C'])) and not np.any(np.isnan(cur_state['A'])), 'Nan values in state features'
             action_info = self._select_action(cur_state)
             selected = action_info['selected_by_agent']
             available_cuts['selected_by_agent'] = action_info['selected_by_agent'].numpy()
@@ -849,7 +860,7 @@ class DQNWorker(Sepa):
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
                 # now, assign to each cut its reward according to its slack
-                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should happen)
+                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should not happen)
                 # so we punish inactive cuts by decreasing their reward to
                 # R * (1 - slack)
                 # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
@@ -1457,7 +1468,7 @@ class DQNWorker(Sepa):
             self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
             # todo update to new struct: self.trainset['instances'][0][1].pop('rootonly_stats')
         else:
-            self.trainset = self.datasets['trainset_20_30']
+            self.trainset = [v for k, v in self.datasets.items() if 'trainset' in k][0]
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 

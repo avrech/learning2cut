@@ -78,7 +78,8 @@ class ApeXDQN:
         if not os.path.exists(run_dir):
             os.makedirs(run_dir)
         # initialize ray server
-        self.init_ray()
+        if not cfg['local_debug']:
+            self.init_ray()
         # apex controller socket for receiving logs
         self.apex_socket = None
         # logging
@@ -246,82 +247,82 @@ class ApeXDQN:
         # ready_ids, remaining_ids = ray.wait([actor.run.remote() for actor in self.actors.values()])
         for actor in self.actors.values():
             actor.run.remote()
-        self.wandb_loop()
-
-    def wandb_loop(self):
-        # todo refactor - receive eval results from all workers, organize and log to wandb
         while True:
-            # receive message
-            packet = self.apex_socket.recv()
-            topic, sender, global_step, body = pa.deserialize(packet)
-            assert topic == 'log'
-            assert self.step_counter[sender] < global_step
-            # increment sender step counter
-            self.step_counter[sender] = global_step
+            self.recv_and_log_wandb()
 
-            # check if packet is outdated
-            if global_step <= self.last_logging_step:
-                self.print(
-                    f'Outdated packet from {sender} discarded (last logging step = {self.last_logging_step}, packet step = {global_step})')
-                continue
+    def recv_and_log_wandb(self):
+        # todo refactor - receive eval results from all workers, organize and log to wandb
+        # receive message
+        packet = self.apex_socket.recv()
+        topic, sender, global_step, body = pa.deserialize(packet)
+        assert topic == 'log'
+        assert self.step_counter[sender] < global_step
+        # increment sender step counter
+        self.step_counter[sender] = global_step
 
-            # put things into dictionaries
-            # create entry:
-            if global_step not in self.stats_history.keys():
-                self.stats_history[global_step] = deepcopy(self.stats_template_dict)
+        # check if packet is outdated
+        if global_step <= self.last_logging_step:
+            self.print(
+                f'Outdated packet from {sender} discarded (last logging step = {self.last_logging_step}, packet step = {global_step})')
+            return
 
-            log_dict = {}
-            if sender == 'learner':
-                stats, model_params = body
-                for k, v in stats:
-                    log_dict[k] = v
-                # store params for checkpointing best models
-                # for param, new_param in zip(self.stats_history[global_step]['policy_net'].parameters(), model_params):
-                #     new_param = torch.FloatTensor(new_param)
-                #     param.data.copy_(new_param)
-                self.stats_history[global_step]['params'] = model_params
+        # put things into dictionaries
+        # create entry:
+        if global_step not in self.stats_history.keys():
+            self.stats_history[global_step] = deepcopy(self.stats_template_dict)
 
+        log_dict = {}
+        if sender == 'learner':
+            stats, model_params = body
+            for k, v in stats:
+                log_dict[k] = v
+            # store params for checkpointing best models
+            # for param, new_param in zip(self.stats_history[global_step]['policy_net'].parameters(), model_params):
+            #     new_param = torch.FloatTensor(new_param)
+            #     param.data.copy_(new_param)
+            self.stats_history[global_step]['params'] = model_params
+
+        else:
+            assert 'worker' in sender
+            training_stats, validation_stats = body
+            # training_stats = {k: v for k, v in training_stats}
+            # todo concat training stats to existing step
+                # if type(v) == tuple and v[0] == 'fig':
+                #     log_dict[k] = wandb.Image(v[1], caption=k)
+                # else:
+                #     log_dict[k] = v
+
+            # update stats
+            for k, v in training_stats:
+                self.stats_history[global_step]['training'][k] += v
+            for k_v_list in validation_stats:
+                stats_dict = {k: v for k, v in k_v_list}
+            self.stats_history[global_step]['validation'][stats_dict['dataset_name']][stats_dict['inst_idx']][stats_dict['scip_seed']] = stats_dict
+
+
+        # update logs
+        if len(log_dict) > 0:
+            if global_step in self.logs_history.keys():
+                self.logs_history[global_step].update(log_dict)
             else:
-                assert 'worker' in sender
-                training_stats, validation_stats = body
-                # training_stats = {k: v for k, v in training_stats}
-                # todo concat training stats to existing step
-                    # if type(v) == tuple and v[0] == 'fig':
-                    #     log_dict[k] = wandb.Image(v[1], caption=k)
-                    # else:
-                    #     log_dict[k] = v
+                self.logs_history[global_step] = log_dict
 
-                # update stats
-                for k, v in training_stats:
-                    self.stats_history[global_step]['training'][k] += v
-                for k_v_list in validation_stats:
-                    stats_dict = {k: v for k, v in k_v_list}
-                self.stats_history[global_step]['validation'][stats_dict['dataset_name']][stats_dict['inst_idx']][stats_dict['scip_seed']] = stats_dict
+        # push to pending logs
+        if not self.unfinished_steps or global_step > self.unfinished_steps[-1]:
+            self.unfinished_steps.append(global_step)
 
-
-            # update logs
-            if len(log_dict) > 0:
-                if global_step in self.logs_history.keys():
-                    self.logs_history[global_step].update(log_dict)
-                else:
-                    self.logs_history[global_step] = log_dict
-
-            # push to pending logs
-            if not self.unfinished_steps or global_step > self.unfinished_steps[-1]:
-                self.unfinished_steps.append(global_step)
-
-            # if all actors finished a certain step, log this step to wandb.
-            # wait for late actors up to 10 steps. after that, late packets will be discarded.
-            if len(self.unfinished_steps) > 50:  # todo return to 1000
-                self.print('some actor is dead. restart to continue logging.')
-                print(self.step_counter)
-            while self.unfinished_steps and (all([self.unfinished_steps[0] <= cnt for cnt in self.step_counter.values()]) or len(self.unfinished_steps) > 50):
-                step = self.unfinished_steps.pop(0)
-                # todo - finish step, create figures, average stats and return log_dict
-                log_dict = self.finish_step(step)
-                wandb.log(log_dict, step=step)
-                self.last_logging_step = step
-                self.save_checkpoint()
+        # if all actors finished a certain step, log this step to wandb.
+        # wait for late actors up to 10 steps. after that, late packets will be discarded.
+        if len(self.unfinished_steps) > 50:  # todo return to 1000
+            self.print('some actor is dead. restart to continue logging.')
+            print(self.step_counter)
+        while self.unfinished_steps and (all([self.unfinished_steps[0] <= cnt for cnt in self.step_counter.values()]) or len(self.unfinished_steps) > 50):
+            step = self.unfinished_steps.pop(0)
+            # todo - finish step, create figures, average stats and return log_dict
+            log_dict = self.finish_step(step)
+            wandb.log(log_dict, step=step)
+            self.last_logging_step = step
+            self.save_checkpoint()
 
     def finish_step(self, step):
         print_msg = f'Step: {step}'
@@ -518,7 +519,8 @@ class ApeXDQN:
                 with open(pid_file, 'w') as f:
                     f.writelines(str(pid) + '\n')
                 self.print('starting wandb loop')
-                self.wandb_loop()
+                while True:
+                    self.recv_and_log_wandb()
 
         # # todo - skip this when debugging an actor
         # if len(handles) > 0:
@@ -561,6 +563,133 @@ class ApeXDQN:
     def run(self):
         self.setup()
         self.train()
+
+    def local_debug(self):
+        # setup
+        self.cfg['com'] = {'apex_port': 18985,
+                           'replay_server_2_learner_port': 21244,
+                           'learner_2_workers_pubsub_port': 28824,
+                           'learner_2_replay_server_port': 30728,
+                           'workers_2_replay_server_port': 31768,
+                           'replay_server_2_workers_pubsub_port': 35392}
+
+        # open main logger socket for receiving logs from all actors
+        context = zmq.Context()
+        self.apex_socket = context.socket(zmq.PULL)
+        self.apex_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_port"]}')
+        self.print(f'binding to {self.cfg["com"]["apex_port"]} for receiving logs')
+
+        # learner
+        self.actors['learner'] = learner = DQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu)
+        # replay server
+        self.actors['replay_server'] = replay_server = PrioritizedReplayServer(config=self.cfg)
+        # workers
+        workers = []
+        for n in range(1, self.num_workers + 1):
+            worker = DQNWorker(n, hparams=self.cfg, use_gpu=self.worker_gpu)
+            worker.initialize_training()
+            worker.load_datasets()
+            self.actors[f'worker_{n}'] = worker
+            workers.append(worker)
+
+        # initialize wandb logger
+        self.print('initializing wandb')
+        wandb_config = self.cfg.copy()
+        wandb_config.pop('datasets')
+        wandb_config.pop('com')
+        wandb_config.pop('ray_info', None)
+        if self.cfg['wandb_offline']:
+            os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
+            os.environ['WANDB_MODE'] = 'dryrun'
+        wandb.init(resume='allow',
+                   id=self.cfg['run_id'],
+                   project=self.cfg['project'],
+                   config=wandb_config,
+                   tags=self.cfg['tags'])
+        self.print('setup finished')
+
+        ##### train #####
+        first_time = True
+
+        while True:
+            # WORKER SIDE
+            # collect data and send to replay server, one packet per worker
+            for worker in workers:
+                new_params_packet = worker.recv_messages()
+                replay_data = worker.collect_data()
+                # local_buffer is full enough. pack the local buffer and send packet
+                worker.send_replay_data(replay_data)
+
+            # REPLAY SERVER SIDE
+            # request demonstration data
+            if replay_server.collecting_demonstrations:
+                replay_server.request_data(data_type='demonstration')
+                first_time = True
+            elif first_time:
+                replay_server.request_data(data_type='agent')
+                first_time = False
+
+            # try receiving up to num_workers replay data packets,
+            # each received packets is unpacked and pushed into memory
+            replay_server.recv_replay_data()
+            # if learning from demonstrations, the data generated before the demonstrations request should be discarded.
+            # collect now demonstration data and receive in server
+            # WORKER SIDE
+            # collect data and send to replay server, one packet per worker
+            for worker in workers:
+                new_params_packet = worker.recv_messages()
+                replay_data = worker.collect_data()
+                # local_buffer is full enough. pack the local buffer and send packet
+                worker.send_replay_data(replay_data)
+
+            # REPLAY SERVER SIDE
+            replay_server.recv_replay_data()
+            # assuming that the amount of demonstrations achieved, request agent data
+            if replay_server.collecting_demonstrations and replay_server.next_idx >= replay_server.n_demonstrations:
+                # request workers to generate agent data from now on
+                replay_server.collecting_demonstrations = False
+                replay_server.request_data(data_type='agent')
+                # see now in the next iterations that workers generate agent data
+            # send batches to learner
+            replay_server.send_batches()
+            # wait for new priorities
+            # (in the real application - receive new replay data from workers in the meanwhile)
+
+            # LEARNER SIDE
+            # in the real application, the learner receives batches and sends back new priorities in a separate thread,
+            # while pulling processing the batches in another asynchronous thread.
+            # here we alternate receiving a batch, processing and sending back priorities,
+            # until no more waiting batches exist.
+
+            while learner.recv_batch(blocking=False):
+                # receive batch from replay server and push into learner.replay_data_queue
+                # pull batch from queue, process and push new priorities to learner.new_priorities_queue
+                learner.optimize_model()
+                # push new params to learner.new_params_queue periodically
+                learner.prepare_new_params_to_workers()
+                # send back the new priorities
+                learner.send_new_priorities()
+                # publish new params if any available in the new_params_queue
+                learner.publish_params()
+
+            # REPLAY SERVER SIDE
+            # receive all the waiting new_priorities packets and update memory
+            replay_server.recv_new_priorities()
+            if replay_server.num_sgd_steps_done > 0 and replay_server.num_sgd_steps_done % replay_server.checkpoint_interval == 0:
+                replay_server.save_checkpoint()
+
+            # WORKER SIDE
+            # subscribe new_params from learner
+            for worker in workers:
+                received_new_params = worker.recv_messages()
+                if received_new_params:
+                    worker.evaluate_and_send_logs()
+
+            # APEX SIDE
+            # receive logs of test round
+            for _ in range(len(workers)):
+                self.recv_and_log_wandb()
+
 
     def print(self, expr):
         print(self.print_prefix, expr)

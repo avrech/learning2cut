@@ -137,12 +137,12 @@ class DQNLearner:
 
         else:
             # reuse com config
-            self.print('connecting to ports: ', hparams["com"])
+            self.print(f'connecting to ports: {hparams["com"]}', )
             self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
             self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_learner_port"]}')
             self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_replay_server_port"]}')
             self.params_pub_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
-            self.print('reusing ports', hparams['com'])
+            self.print(f'reusing ports {hparams["com"]}')
 
         self.initialize_training()
 

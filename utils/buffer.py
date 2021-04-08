@@ -223,7 +223,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         """
         assert len(idxes) == len(priorities)
         assert len(idxes) == len(data_ids)
-        assert all(priorities > 0)
+        assert all(priorities > 0), priorities
 
         for idx, priority, data_id in zip(idxes, priorities, data_ids):
             # filter invalid packets

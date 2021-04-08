@@ -55,6 +55,7 @@ log_interval: 5
 checkpoint_interval: 5
 verbose: 1
 ignore_test_early_stop: True  # report performance ignoring early stops due to branching
+aggressive_separation: True
 
 # DEBUG FLAGS
 debug: False
