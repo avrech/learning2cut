@@ -17,7 +17,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: False
   validset_50_60:
-    lp_iterations_limit: 1000
+    lp_iterations_limit: 2000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
     ngraphs: 5
