@@ -8,6 +8,9 @@ from tqdm import tqdm
 import pickle
 import pandas as pd
 
+import os
+if not os.path.isdir('variability_results'):
+    os.makedirs('variability_results')
 
 # randomize graphs
 graph_sizes = [100, 150, 200]
@@ -19,10 +22,10 @@ if False:
         for g1, g2 in combinations(glist, 2):
             assert not nx.is_isomorphic(g1, g2, node_match=lambda v1, v2: v1['c'] == v2['c'])
 
-    with open('mvc-variability-graphs.pkl', 'wb') as f:
+    with open('variability_results/mvc-variability-graphs.pkl', 'wb') as f:
         pickle.dump(graphs, f)
 
-with open('mvc-variability-graphs.pkl', 'rb') as f:
+with open('variability_results/mvc-variability-graphs.pkl', 'rb') as f:
     graphs = pickle.load(f)
 seeds = [46, 72, 101]
 lp_iterations_limit = 2000
@@ -77,10 +80,10 @@ if False:
 
                     cut_aggr_results[cut_aggressivness][size].append(stats)
 
-    with open(f'mvc-variability-results-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
+    with open(f'variability_results/mvc-variability-results-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
         pickle.dump(cut_aggr_results, f)
 
-with open(f'mvc-variability-results-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
+with open(f'variability_results/mvc-variability-results-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
     cut_aggr_results = pickle.load(f)
 
 # validate correctness of records:
@@ -113,7 +116,7 @@ for size in graph_sizes:
     dfs[size] = df
     df.to_csv(f'mvc-variability-{size}.csv')
 
-with open(f'mvc-variability-dfs-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
+with open(f'variability_results/mvc-variability-dfs-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
 print('########## test baselines with aggressive cuts ##########')
@@ -164,10 +167,10 @@ if False:
                     baselines_results[baseline][size].append(stats)
 
     baselines_results['default'] = cut_aggr_results['aggressive']
-    with open(f'mvc-variability-baselines-results-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
+    with open(f'variability_results/mvc-variability-baselines-results-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
         pickle.dump(baselines_results, f)
 
-with open(f'mvc-variability-baselines-results-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
+with open(f'variability_results/mvc-variability-baselines-results-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
     baselines_results = pickle.load(f)
 baselines_results['default'] = cut_aggr_results['aggressive']
 # validate correctness of records:
@@ -200,7 +203,7 @@ for size in [150, 200]:
     dfs[size] = df
     df.to_csv(f'mvc-variability-baselines-{size}.csv')
 
-with open(f'mvc-variability-baselines-df-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
+with open(f'variability_results/mvc-variability-baselines-df-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
     pickle.dump(dfs, f)
 
 if True:
