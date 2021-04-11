@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=1:00:00
+#SBATCH --time=3:00:00
 #SBATCH --account=def-alodi
 #SBATCH --output=gen-trainset-%j.out
 #SBATCH --job-name=generate_dataset-%j
