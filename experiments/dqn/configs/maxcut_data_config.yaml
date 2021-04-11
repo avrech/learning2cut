@@ -6,81 +6,81 @@
 # so we set the lp_iterations_limit to 3K, 50K and 100K for the graphs of 25, 50 and 100 nodes respectively
 problem: MAXCUT
 datasets:
-  trainset_20_30:
-    lp_iterations_limit: 3000
+  trainset_30_40:
+    lp_iterations_limit: 5000
     ngraphs: 10000
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    barabasi_albert_m: 15
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 20
-      max: 30
-    dataset_name: trainset.20-30
+      min: 30
+      max: 40
+    dataset_name: trainset.30-40
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: False
-  validset_20_30:
-    lp_iterations_limit: 3000
+  validset_30_40:
+    lp_iterations_limit: 5000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    ngraphs: 5
+    barabasi_albert_m: 15
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 20
-      max: 30
-    dataset_name: validset.20-30
+      min: 30
+      max: 40
+    dataset_name: validset.30-40
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
-  testset_20_30:
-    lp_iterations_limit: 3000
+  testset_30_40:
+    lp_iterations_limit: 5000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    ngraphs: 15
+    barabasi_albert_m: 15
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 20
-      max: 30
-    dataset_name: testset.20-30
+      min: 30
+      max: 40
+    dataset_name: testset.30-40
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
-  validset_50_60:
+  validset_60_70:
     lp_iterations_limit: 7000  # 50000
     eval_interval: 10  # single-thread: 500, distributed: 10
     scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    ngraphs: 25
+    barabasi_albert_m: 25
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 50
-      max: 60
-    dataset_name: validset.50-60
+      min: 60
+      max: 70
+    dataset_name: validset.60-70
     time_limit_sec: 3600
     baseline_solver: scip
     save_all_stats: True
-  testset_50_60:
+  testset_60_70:
     lp_iterations_limit: 7000  # 50000
     eval_interval: 10  # single-thread: 500, distributed: 10
     scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    ngraphs: 5
+    barabasi_albert_m: 25
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 50
-      max: 60
-    dataset_name: testset.50-60
+      min: 60
+      max: 70
+    dataset_name: testset.60-70
     time_limit_sec: 3600
     baseline_solver: scip
     save_all_stats: True
@@ -88,9 +88,9 @@ datasets:
     lp_iterations_limit: 15000  # 100000
     eval_interval: 50  # single-thread: 1000, distributed: 50
     scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    ngraphs: 5
+    barabasi_albert_m: 45
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:
@@ -104,9 +104,9 @@ datasets:
     lp_iterations_limit: 15000  # 100000
     eval_interval: 50  # single-thread: 1000, distributed: 50
     scip_seed: [52, 176, 223]
-    ngraphs: 10
-    barabasi_albert_m: 10
-    weights: normal  # uniform01 | normal | ones
+    ngraphs: 5
+    barabasi_albert_m: 45
+    weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
     seed: 46
     graph_size:

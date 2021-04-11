@@ -12,6 +12,10 @@ import os
 if not os.path.isdir('sweet_spot_results'):
     os.makedirs('sweet_spot_results')
 
+print('#################################################')
+print('################ MVC ############################')
+print('#################################################')
+
 # randomize graphs
 graph_sizes = [60, 100, 150] # 200
 seeds = [46, 72, 101]
@@ -19,7 +23,7 @@ densities = {k: np.arange(5, k, 10) / k for k in graph_sizes}
 
 
 # MVC with branch and cut:
-if True:
+if False:
     results = {gs: {'density': [],
                     'time': [],
                     'lp_iterations': [],
@@ -37,7 +41,7 @@ if True:
                 'applied': [],
                 'lp_rounds': [],
             }
-            g = nx.erdos_renyi_graph(n=gs, p=density, directed=True)
+            g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
             nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
             for seed in seeds:
                 model, _ = mvc_model(g, use_random_branching=False)
@@ -65,7 +69,7 @@ with open(f'sweet_spot_results/mvc-er-sweet-spot-results-bnc.pkl', 'rb') as f:
 # plot for each graph size:
 # metric vs. density for metric in stats.keys
 fig = plt.figure(figsize=(16, 10))
-axes = fig.subplots(5, 4)
+axes = fig.subplots(5, 3)
 plt.suptitle('MVC Branch & Cut')
 for col, gs in enumerate(graph_sizes):
     x_labels = results[gs]['density']
@@ -91,7 +95,7 @@ plt.savefig('sweet_spot_results/mvc-er-sweet-spot-bnc.png')
 lp_iterations_limit = 1500
 
 # MVC in root node:
-if True:
+if False:
     results = {gs: {'density': [],
                     'time': [],
                     'lp_iterations': [],
@@ -109,7 +113,7 @@ if True:
                 'applied': [],
                 'lp_rounds': [],
             }
-            g = nx.erdos_renyi_graph(n=gs, p=density, directed=True)
+            g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
             nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
             for seed in seeds:
                 model, _ = mvc_model(g)
@@ -147,7 +151,7 @@ with open(f'sweet_spot_results/mvc-er-sweet-spot-results-lpiter{lp_iterations_li
 # plot for each graph size:
 # metric vs. density for metric in stats.keys
 fig = plt.figure(figsize=(16, 10))
-axes = fig.subplots(5, 4)
+axes = fig.subplots(5, 3)
 plt.suptitle(f'MVC Root Node (LP Iter Limit = {lp_iterations_limit})')
 for col, gs in enumerate(graph_sizes):
     x_labels = results[gs]['density']
@@ -256,7 +260,7 @@ densities = {k: np.arange(5, k, 10)/k for k in graph_sizes}
 lp_iterations_limit = 5000
 
 # MAXCUT in root node:
-if True:
+if False:
     results = {gs: {'density': [],
                     'time': [],
                     'lp_iterations': [],
@@ -274,7 +278,7 @@ if True:
                 'applied': [],
                 'lp_rounds': [],
             }
-            g = nx.erdos_renyi_graph(n=gs, p=density, directed=True)
+            g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
             nx.set_node_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
             for seed in seeds:
                 model, _, _ = maxcut_mccormic_model(g)
@@ -311,7 +315,7 @@ with open(f'sweet_spot_results/maxcut-sweet-spot-results-lpiter{lp_iterations_li
 # plot for each graph size:
 # metric vs. density for metric in stats.keys
 fig = plt.figure(figsize=(16, 10))
-axes = fig.subplots(5, 4)
+axes = fig.subplots(5, 3)
 plt.suptitle(f'MAXCUT Root Node (LP Iter Limit = {lp_iterations_limit}')
 for col, gs in enumerate(graph_sizes):
     x_labels = results[gs]['density']
@@ -338,7 +342,7 @@ exit(0)
 full_res = {}
 if False:
     for gs, density in zip(graph_sizes, [10, 20, 20]):
-        g = nx.erdos_renyi_graph(n=gs, p=density, directed=True)
+        g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
         nx.set_node_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
         for seed in seeds:
             model, _, _ = maxcut_mccormic_model(g)
