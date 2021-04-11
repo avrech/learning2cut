@@ -261,35 +261,35 @@ if __name__ == '__main__':
         cfg['workerid'] = workerid
         configs.append(cfg)
 
-    # # first generate all graphs in the main thread and ensure no isomorphism
-    # generate_graphs(configs)
-    #
-    # if args.mp == 'mp':
-    #     from multiprocessing import Pool
-    #     with Pool() as p:
-    #         res = p.map_async(solve_graphs, configs)
-    #         res.wait()
-    #         print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
-    #
-    # elif args.mp == 'ray':
-    #     # from ray.tune import track
-    #     # track.init(experiment_dir=args.datadir)
-    #     # tune_configs = tune.grid_search(configs)
-    #     # analysis = tune.run(solve_graphs,
-    #     #                     config=tune_configs,
-    #     #                     resources_per_trial={'cpu': 1, 'gpu': 0},
-    #     #                     local_dir=args.datadir,
-    #     #                     trial_name_creator=None,
-    #     #                     max_failures=1  # TODO learn how to recover from checkpoints
-    #     #                     )
-    #     ray.init()
-    #     ray.get([run_worker.remote(cfg) for cfg in configs])
-    #
-    #
-    # else:
-    #     # process sequentially without threading
-    #     for cfg in configs:
-    #         solve_graphs(cfg)
+    # first generate all graphs in the main thread and ensure no isomorphism
+    generate_graphs(configs)
+
+    if args.mp == 'mp':
+        from multiprocessing import Pool
+        with Pool() as p:
+            res = p.map_async(solve_graphs, configs)
+            res.wait()
+            print(f'multiprocessing finished {"successfully" if res.successful() else "with errors"}')
+
+    elif args.mp == 'ray':
+        # from ray.tune import track
+        # track.init(experiment_dir=args.datadir)
+        # tune_configs = tune.grid_search(configs)
+        # analysis = tune.run(solve_graphs,
+        #                     config=tune_configs,
+        #                     resources_per_trial={'cpu': 1, 'gpu': 0},
+        #                     local_dir=args.datadir,
+        #                     trial_name_creator=None,
+        #                     max_failures=1  # TODO learn how to recover from checkpoints
+        #                     )
+        ray.init()
+        ray.get([run_worker.remote(cfg) for cfg in configs])
+
+
+    else:
+        # process sequentially without threading
+        for cfg in configs:
+            solve_graphs(cfg)
 
     # post processing - collect all graphs and save to a single file
     datasets = data_config['datasets']
