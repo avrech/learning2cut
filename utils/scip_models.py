@@ -49,7 +49,7 @@ def set_aggresive_separation(model):
 
 def mvc_model(G, model_name='MVC Model',
               use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
-              use_random_branching=True, use_cut_pool=True, allow_restarts=False):
+              use_random_branching=True, use_cut_pool=True, allow_restarts=False, add_trivial_sol=True):
     r"""
         Returns Minimum Vertex Cover model defined by G(V,E)
 
@@ -117,12 +117,17 @@ def mvc_model(G, model_name='MVC Model',
         # model.setBoolParam('separating/cgmip/usecutpool', False)
     if not allow_restarts:
         model.setIntParam('presolving/maxrestarts', 0)
+    if add_trivial_sol:
+        s = model.createSol()
+        for x_i in x.values():
+            s[x_i] = 1
+        assert model.addSol(s, free=True)
     return model, x
 
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
                           use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
-                          use_random_branching=True, use_cycles=True, hparams={}, allow_restarts=False):
+                          use_random_branching=True, use_cycles=True, hparams={}, allow_restarts=False, add_trivial_sol=True):
     r"""
     Returns MAXCUT model of G assuming edge attributes named 'weight', denoted by `w`.
 
@@ -206,9 +211,15 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
                           priority=1000000, freq=1)
     if not allow_restarts:
         model.setIntParam('presolving/maxrestarts', 0)
+    if add_trivial_sol:
+        s = model.createSol()
+        for x_i in x.values():
+            s[x_i] = 1
+        for y_ij in y.values():
+            s[y_ij] = 1
+        assert model.addSol(s, free=True)
     # unify x and y to a single dictionary
     x_dict = {**x, **y}
-
     return model, x_dict, cycle_sepa
 
 
