@@ -85,7 +85,7 @@ worker_gpu: False
 #tester_gpu: False
 num_workers: 3
 num_learners: 1
-param_sync_interval: 10 # 100  # number of learner.sgd_steps between workers policy update
+param_sync_interval: 100 # 100  # number of learner.sgd_steps between workers policy update
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters

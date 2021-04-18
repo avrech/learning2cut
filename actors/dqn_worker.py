@@ -314,6 +314,7 @@ class DQNWorker(Sepa):
             self.send_replay_data(replay_data)
 
     def evaluate_and_send_logs(self):
+        self.print(f'executing evaluation no {self.next_eval_round}')
         global_step, validation_stats = self.evaluate()
         log_packet = ('log', f'worker_{self.worker_id}', global_step,
                       ([(k, v) for k, v in self.training_stats.items()], validation_stats))

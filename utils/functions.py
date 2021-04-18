@@ -159,7 +159,11 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
     #    t0  t1 t2   tN-1 t_support (normalized such that t_support = 1)
     # the areas returned are a0, a1, aN-1
     # old and incorrect : ft = np.abs(ft - reference) / np.abs(ft[0])
-    ft = np.abs(ft - ft[0]) / np.abs(reference - ft[0])
+    if reference - ft[0] != 0:
+        ft = np.abs(ft - ft[0]) / np.abs(reference - ft[0])
+    else:
+        # the curve is optimal from the beginning. override with ones
+        ft = np.ones_like(ft)
 
     # normalize t to [0,1]
     t = t / t_support
