@@ -80,14 +80,18 @@ class ApeXDQN:
         # initialize ray server
         if not cfg['local_debug']:
             self.init_ray()
-        # apex controller socket for receiving logs
+        # socket for receiving logs
         self.apex_socket = None
+        # socket for syncing workers
+        self.apex_pub_sync_socket = None
+
         # logging
         self.step_counter = {actor_name: -1 for actor_name in self.actors.keys() if actor_name != 'replay_server'}
         self.unfinished_steps = []
         self.logs_history = {}
         self.stats_history = {}
         self.last_logging_step = -1
+        self.next_eval_round = -1
         self.datasets = DQNWorker.load_data(cfg)
         self.stats_template_dict = {
             'training': {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []},
@@ -180,8 +184,13 @@ class ApeXDQN:
         context = zmq.Context()
         self.apex_socket = context.socket(zmq.PULL)
         apex_port = self.apex_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
-        self.cfg['com'] = {'apex_port': apex_port}
         self.print(f"binding to {apex_port} for receiving logs")
+        self.apex_pub_sync_socket = context.socket(zmq.PUB)
+        apex_pub_sync_port = self.apex_pub_sync_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+        self.print(f"binding to {apex_pub_sync_port} for syncing workers")
+        self.cfg['com'] = {'apex_port': apex_port,
+                           'apex_pub_sync_port': apex_pub_sync_port}
+
 
         # spawn learner
         self.print('spawning learner process')
@@ -253,7 +262,11 @@ class ApeXDQN:
     def recv_and_log_wandb(self):
         # todo refactor - receive eval results from all workers, organize and log to wandb
         # receive message
-        packet = self.apex_socket.recv()
+        try:
+            packet = self.apex_socket.recv(zmq.DONTWAIT)
+        except zmq.Again:
+            return
+
         topic, sender, global_step, body = pa.deserialize(packet)
         assert topic == 'log'
         assert self.step_counter[sender] < global_step
@@ -281,6 +294,14 @@ class ApeXDQN:
             #     new_param = torch.FloatTensor(new_param)
             #     param.data.copy_(new_param)
             self.stats_history[global_step]['params'] = model_params
+            # check if last eval round has finished and sync workers to the next eval round
+            if self.next_eval_round == -1:
+                # sync workers to evaluate on num_param_updates = global_step + 2
+                sync_msg = ("sync_eval", global_step + 2)
+                sync_packet = pa.serialize(sync_msg).to_buffer()
+                self.apex_pub_sync_socket.send(sync_packet)
+                self.next_eval_round = global_step + 2
+                self.print(f'syncing workers to eval on update number {global_step+2}')
 
         else:
             assert 'worker' in sender
@@ -320,6 +341,9 @@ class ApeXDQN:
             step = self.unfinished_steps.pop(0)
             # todo - finish step, create figures, average stats and return log_dict
             log_dict = self.finish_step(step)
+            if step == self.next_eval_round:
+                # eval round finished, reset next_eval_round to sync the next eval round.
+                self.next_eval_round = -1
             wandb.log(log_dict, step=step)
             self.last_logging_step = step
             self.save_checkpoint()
@@ -355,8 +379,8 @@ class ApeXDQN:
                 'applied_available_ratio': [],
                 'accuracy': [],
                 'f1_score': [],
-                'solving_time': [],
-                'lp_iterations': [],
+                'tot_solving_time': [],
+                'tot_lp_iterations': [],
             }
             db_auc_without_early_stops = []
             gap_auc_without_early_stops = []
@@ -567,6 +591,7 @@ class ApeXDQN:
     def local_debug(self):
         # setup
         self.cfg['com'] = {'apex_port': 18985,
+                           'apex_pub_sync_port': 37284,
                            'replay_server_2_learner_port': 21244,
                            'learner_2_workers_pubsub_port': 28824,
                            'learner_2_replay_server_port': 30728,
@@ -578,6 +603,9 @@ class ApeXDQN:
         self.apex_socket = context.socket(zmq.PULL)
         self.apex_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_port"]}')
         self.print(f'binding to {self.cfg["com"]["apex_port"]} for receiving logs')
+        self.apex_pub_sync_socket = context.socket(zmq.PUB)
+        apex_pub_sync_port = self.apex_pub_sync_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_pub_sync_port"]}')
+        self.print(f"binding to {apex_pub_sync_port} for syncing workers")
 
         # learner
         self.actors['learner'] = learner = DQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu)
@@ -660,11 +688,13 @@ class ApeXDQN:
             # while pulling processing the batches in another asynchronous thread.
             # here we alternate receiving a batch, processing and sending back priorities,
             # until no more waiting batches exist.
-
+            publish_params = False
             while learner.recv_batch(blocking=False):
                 # receive batch from replay server and push into learner.replay_data_queue
                 # pull batch from queue, process and push new priorities to learner.new_priorities_queue
                 learner.optimize_model()
+                publish_params = True
+            if publish_params:
                 # push new params to learner.new_params_queue periodically
                 learner.prepare_new_params_to_workers()
                 # send back the new priorities
@@ -678,11 +708,16 @@ class ApeXDQN:
             if replay_server.num_sgd_steps_done > 0 and replay_server.num_sgd_steps_done % replay_server.checkpoint_interval == 0:
                 replay_server.save_checkpoint()
 
+            # APEX
+            # receive log packet from learner if sent and send sync to all workers
+            self.recv_and_log_wandb()
+
             # WORKER SIDE
-            # subscribe new_params from learner
+            # subscribe new_params from learner and sync from apex
             for worker in workers:
                 received_new_params = worker.recv_messages()
-                if received_new_params:
+                assert worker.num_param_updates <= worker.next_eval_round or worker.next_eval_round == -1, f'missed param packet {worker.next_eval_round} for evaluation'
+                if received_new_params and worker.num_param_updates == worker.next_eval_round:  # todo simulate syncing workers?
                     worker.evaluate_and_send_logs()
 
             # APEX SIDE

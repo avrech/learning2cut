@@ -12,7 +12,7 @@
 # - num_policy_updates equals to the number of workers' policy updates, which happen every param_update_interval
 # - the hard datasets can be evaluated on the tester in the same frequency as the easy datasets.
 # DQN ALGORITHM HPARAMS
-batch_size: 128
+batch_size: 32 # 128
 lr: 0.001
 weight_decay: 0.0001
 nstep_learning: 1 # 1, 8

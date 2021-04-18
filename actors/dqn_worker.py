@@ -159,6 +159,7 @@ class DQNWorker(Sepa):
             idx += hparams['num_workers']
 
         # distributed system stuff
+        self.next_eval_round = -1
         self.worker_id = worker_id
         self.generate_demonstration_data = False
         self.print_prefix = f'[Worker {self.worker_id}] '
@@ -172,9 +173,17 @@ class DQNWorker(Sepa):
         self.sub_socket = context.socket(zmq.SUB)
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
         self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
+        self.sub_sync_socket = context.socket(zmq.SUB)
+        self.sub_sync_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
+        self.sub_sync_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
+
         # connect to the main apex process
         self.send_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
         self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
+
+        # connect to apex pub sync port:
+        self.sub_sync_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_pub_sync_port"]}')
+        self.print(f'connecting to apex_pub_sync_port: {hparams["com"]["apex_pub_sync_port"]}')
 
         # connect to learner pub socket
         self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
@@ -183,6 +192,7 @@ class DQNWorker(Sepa):
         # connect to replay_server pub socket
         self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_workers_pubsub_port"]}')
         self.print(f'connecting to replay_server_2_workers_pubsub_port: {hparams["com"]["replay_server_2_workers_pubsub_port"]}')
+
 
         # for sending replay data to buffer
         context = zmq.Context()
@@ -255,6 +265,17 @@ class DQNWorker(Sepa):
                 # no packets are waiting
                 pass
 
+        # sync evaluation rounds
+        try:
+            message = self.sub_sync_socket.recv(zmq.DONTWAIT)
+            message = pa.deserialize(message)
+            assert message[0] == 'sync_eval' and message[1] > 0
+            self.next_eval_round = message[1]
+            self.print(f'syncing eval {message[1]}')
+
+        except zmq.Again:
+            pass
+
         if new_params_packet is not None:
             self.synchronize_params(new_params_packet)
             received_new_params = True
@@ -275,7 +296,8 @@ class DQNWorker(Sepa):
         self.load_datasets()
         while True:
             received_new_params = self.recv_messages()
-            if received_new_params:
+            assert self.num_param_updates <= self.next_eval_round or self.next_eval_round == -1, f'missed param packet {self.next_eval_round} for evaluation'
+            if received_new_params and self.num_param_updates == self.next_eval_round:
                 # evaluate validation instances, and send all training and test stats to apex
                 # global_step, validation_stats = self.evaluate()
                 # log_packet = ('log', f'worker_{self.worker_id}', global_step,
@@ -286,6 +308,8 @@ class DQNWorker(Sepa):
                 # for k in self.training_stats.keys():
                 #     self.training_stats[k] = []
                 self.evaluate_and_send_logs()
+                self.next_eval_round = -1  # mark that eval round done
+
             replay_data = self.collect_data()
             self.send_replay_data(replay_data)
 
@@ -442,10 +466,43 @@ class DQNWorker(Sepa):
 
         # validate the solver behavior
         if self.prev_action is not None:
-            # assert that all the selected cuts were actually applied
-            # otherwise, there is a bug (or maybe safety/feasibility issue?)
+            # assert that all the selected cuts are in the LP.
+            # if the are missing cuts, they were probably redundant and removed by scip.
+            # in this case, we should compute the slack manually, and correct the 'applied' flag'.
             selected_cuts = self.prev_action['selected_by_scip'] if self.demonstration_episode else self.prev_action['selected_by_agent']
-            assert (selected_cuts == self.prev_action['applied']).all()
+            # assert (selected_cuts == self.prev_action['applied']).all(), f"selected cuts({len(selected_cuts)}): {selected_cuts}\napplied({self.prev_action['applied']}): {self.prev_action['applied']}"
+            if (selected_cuts != self.prev_action['applied']).any():
+                # find the missing cuts, assert that they are marked in sepastore, compute slack, and correct applied flag
+                missing_cuts_idx = np.nonzero(selected_cuts != self.prev_action['applied'])
+                selected_cuts_names = self.model.getSelectedCutsNames()
+                nvars = self.model.getNVars()
+                ncuts = self.prev_action['ncuts']
+                cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
+                cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
+                cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
+                cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)),
+                                                   shape=[ncuts, nvars]).toarray()
+                final_solution = self.model.getBestSol()
+                sol_vector = np.array([self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()])
+                # todo - we should take the LP solution and not the best primal solution as it is done. The
+                # problem is that getLPSol produces large negative slacks....
+                # sol_vector = np.array([x_i.getLPSol() for x_i in self.x.values()])
+                cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
+                rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
+                normalized_slack = rhs_slack / cuts_norm
+
+                for idx in missing_cuts_idx:
+                    cut_name = list(self.prev_action['cuts'].keys())
+                    assert cut_name in selected_cuts_names, "action was not executed by sepastore properly"
+                    self.prev_action['cuts'][cut_name]['applied'] = True
+                    self.prev_action['cuts'][cut_name]['normalized_slack'] = normalized_slack[idx]
+                    self.prev_action['cuts'][cut_name]['selection_order'] = selected_cuts_names.index(cut_name)
+                    self.prev_action['normalized_slack'][idx] = normalized_slack[idx]
+                    self.prev_action['applied'][idx] = True
+                    self.prev_action['selection_order'][idx] = selected_cuts_names.index(cut_name)
+
+            # # assert that the slack variables are all non-negative
+            # assert (self.prev_action['normalized_slack'] >= 0).all()
 
         # if there are available cuts, select action and continue to the next state
         if available_cuts['ncuts'] > 0:
@@ -762,15 +819,12 @@ class DQNWorker(Sepa):
             cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
             cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)), shape=[ncuts, nvars]).toarray()
             final_solution = self.model.getBestSol()
-            sol_vector = [self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()]
-            # sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
-            sol_vector = np.array(sol_vector)
+            sol_vector = np.array([self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()])
+            # # sol_vector += [self.model.getSolVal(final_solution, y_ij) for y_ij in self.y.values()]
+            # sol_vector = np.array(sol_vector)
+            # sol_vector = np.array([x_i.getLPSol() for x_i in self.x.values()])
             # rhs slack of all cuts added at the previous round (including the discarded cuts)
-            # generally, LP rows look like
-            # lhs <= coef @ vars + cst <= rhs
-            # here, self.prev_action['rhss'] = rhs - cst,
-            # so cst is already subtracted.
-            # in addition, we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
+            # we normalize the slack by the coefficients norm, to avoid different penalty to two same cuts,
             # with only constant factor between them
             cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
             rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
@@ -857,6 +911,9 @@ class DQNWorker(Sepa):
                 next_action = next_step_info.get('action_info', None)
                 next_q_values = next_step_info.get('selected_q_values', None)
 
+                # verify correct normalized slack.
+
+
                 # credit assignment:
                 # R is a joint reward for all cuts applied at each step.
                 # now, assign to each cut its reward according to its slack
@@ -865,6 +922,10 @@ class DQNWorker(Sepa):
                 # R * (1 - slack)
                 # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
                 normalized_slack = action['normalized_slack']
+                # todo: verify with Aleks - consider slack < 1e-10 as zero
+                approximately_zero = np.abs(normalized_slack) < self.hparams['slack_tol']
+                normalized_slack[approximately_zero] = 0
+                assert (normalized_slack >= 0).all(), f'rhs slack variable is negative,{normalized_slack}'
                 if self.hparams.get('credit_assignment', True):
                     credit = 1 - normalized_slack
                     reward = joint_reward * credit
@@ -968,8 +1029,8 @@ class DQNWorker(Sepa):
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
                      'f1_score': np.mean(f1_score_list),
-                     'solving_time': self.episode_stats['solving_time'][-1],
-                     'lp_iterations': self.episode_stats['lp_iterations'][-1],
+                     'tot_solving_time': self.episode_stats['solving_time'][-1],
+                     'tot_lp_iterations': self.episode_stats['lp_iterations'][-1],
                      'terminal_state': self.terminal_state,
                      'true_pos': true_pos,
                      'true_neg': true_neg,
@@ -1496,9 +1557,9 @@ class DQNWorker(Sepa):
         # create a SCIP model for G, and disable default cuts
         hparams = self.hparams
         if hparams['problem'] == 'MAXCUT':
-            model, x, cut_generator = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', True), hparams=hparams)
+            model, x, cut_generator = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', True), hparams=hparams, use_propagation=False) #, use_heuristics=False, use_propagation=False)
         elif hparams['problem'] == 'MVC':
-            model, x = mvc_model(G)
+            model, x = mvc_model(G, use_propagation=False) #, use_heuristics=False, use_propagation=False)
             cut_generator = None
         if hparams['aggressive_separation']:
             set_aggresive_separation(model)
@@ -1533,8 +1594,8 @@ class DQNWorker(Sepa):
             model.hideOutput()
 
         if self.hparams.get('debug_events'):
-            debug_eventhdlr = DebugEvents()
-            model.includeEventhdlr(debug_eventhdlr, "DebugEvents", "Catches LPSOLVED and ROWADDEDSEPA events")
+            debug_eventhdlr = DebugEvents(self.hparams.get('debug_events'))
+            model.includeEventhdlr(debug_eventhdlr, "DebugEvents", "Catches "+",".join(self.hparams.get('debug_events')))
 
         # gong! run episode
         model.optimize()
