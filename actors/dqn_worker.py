@@ -860,8 +860,11 @@ class DQNWorker(Sepa):
 
         # compute the area under the curve:
         if len(dualbound) <= 2:
-            print(self.episode_stats)
-            print(self.episode_history)
+            if self.training:
+                # this episode is not informative. too easy. optimal on the beginning.
+                return [], None
+            # print(self.episode_stats)
+            # print(self.episode_history)
 
         # todo - consider squaring the dualbound/gap before computing the AUC.
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.instance_info['optimal_value'])
