@@ -2,7 +2,7 @@
 #SBATCH --time=3:00:00
 #SBATCH --account=def-alodi
 #SBATCH --output=apex-dqn-%j.out
-#SBATCH --mem=64G
+#SBATCH --mem=80G
 #SBATCH --cpus-per-task=18
 #SBATCH --job-name=apex-dqn-%j
 #SBATCH --gres=gpu:1
@@ -10,7 +10,10 @@
 python run_apex_dqn.py \
   --configfile configs/exp5.yaml \
   --rootdir $SCRATCH/dqn/results/exp5 \
-  --datadir $SCRATCH/dqn/data/maxcut \
-  --tags exp5 \
+  --datadir $SCRATCH/dqn/data \
+  --data_config configs/mvc_data_config.yaml \
+  --problem MVC \
+  --tags exp5 MVC \
   --use-gpu \
-  --num_workers 13
+  --num_workers 15 \
+  --wandb_offline
