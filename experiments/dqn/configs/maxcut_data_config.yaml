@@ -5,6 +5,7 @@
 # barabasi albert 100 (20 instances) mean ~ 80K, std ~ 51K
 # so we set the lp_iterations_limit to 3K, 50K and 100K for the graphs of 25, 50 and 100 nodes respectively
 problem: MAXCUT
+aggressive_separation: True
 datasets:
   trainset_30_40:
     lp_iterations_limit: 5000

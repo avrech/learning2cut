@@ -1,6 +1,7 @@
 # DATASETS
 
 problem: MVC
+aggressive_separation: True
 datasets:
   trainset_50_60:
     lp_iterations_limit: 2000
@@ -27,7 +28,7 @@ datasets:
     seed: 46
     graph_size:
       min: 50
-      max: 100
+      max: 60
     dataset_name: validset.50-60
     time_limit_sec: 600
     baseline_solver: scip
@@ -43,7 +44,7 @@ datasets:
     seed: 46
     graph_size:
       min: 50
-      max: 100
+      max: 60
     dataset_name: testset.50-60
     time_limit_sec: 600
     baseline_solver: scip

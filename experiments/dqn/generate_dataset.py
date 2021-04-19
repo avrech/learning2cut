@@ -6,7 +6,7 @@ Store optimal_dualbound as baseline
 Store average of: lp_iterations, optimal_dualbound, initial_dualbound, initial_gap
 Each graph is stored with its baseline in graph_<worker_id>_<idx>.pkl
 """
-from utils.scip_models import mvc_model, maxcut_mccormic_model, CSBaselineSepa, CSResetSepa
+from utils.scip_models import mvc_model, maxcut_mccormic_model, CSBaselineSepa, CSResetSepa, set_aggresive_separation
 import pickle
 import os
 import numpy as np
@@ -160,7 +160,12 @@ def solve_graphs(worker_config):
                 # solve graphs for all seeds.
                 # for training graphs solve only once for seed=223
                 for scip_seed in dataset_config.get('scip_seed', [223]):
-                    bsl_model, _, _ = maxcut_mccormic_model(G)
+                    if problem == 'MAXCUT':
+                        bsl_model, _, _ = maxcut_mccormic_model(G)
+                    elif problem == 'MVC':
+                        bsl_model, _ = mvc_model(G)
+                    if worker_config['aggressive_separation']:
+                        set_aggresive_separation(bsl_model)
                     bsl_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
                     bsl_model.setLongintParam('limits/nodes', 1)  # solve only at the root node
                     bsl_model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
@@ -234,7 +239,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--datadir', type=str, default='data',
                         help='path to generate/read data')
-    parser.add_argument('--configfile', type=str, default='configs/maxcut_data_config.yaml',
+    parser.add_argument('--data_configfile', type=str, default='configs/maxcut_data_config.yaml',
                         help='path to config file')
     parser.add_argument('--workerid', type=int, default=0,
                         help='worker id')
@@ -247,7 +252,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # read data config
-    with open(args.configfile) as f:
+    with open(args.data_configfile) as f:
         data_config = yaml.load(f, Loader=yaml.FullLoader)
 
     # product the dataset configs and worker ids.
