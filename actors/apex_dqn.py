@@ -83,7 +83,7 @@ class ApeXDQN:
         # socket for receiving logs
         self.apex_socket = None
         # socket for syncing workers
-        self.apex_pub_sync_socket = None
+        self.apex_2_learner_socket = None
 
         # logging
         self.step_counter = {actor_name: -1 for actor_name in self.actors.keys() if actor_name != 'replay_server'}
@@ -91,7 +91,8 @@ class ApeXDQN:
         self.logs_history = {}
         self.stats_history = {}
         self.last_logging_step = -1
-        self.next_eval_round = -1
+        self.all_workers_ready_for_eval = True
+        self.evaluation_step = -1
         self.datasets = DQNWorker.load_data(cfg)
         self.stats_template_dict = {
             'training': {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []},
@@ -145,28 +146,28 @@ class ApeXDQN:
         self.cfg['ray_info'] = ray_info
         time.sleep(self.cfg.get('ray_init_sleep', 0))
 
-    def find_free_ports(self):
-        """ finds free ports for all actors and returns a dictionary of all ports """
-        ports = {}
-        # replay server
-        context = zmq.Context()
-        learner_2_replay_server_socket = context.socket(zmq.PULL)
-        workers_2_replay_server_socket = context.socket(zmq.PULL)
-        data_request_pub_socket = context.socket(zmq.PUB)
-        replay_server_2_learner_socket = context.socket(zmq.PULL)
-        params_pub_socket = context.socket(zmq.PUB)
-        ports["learner_2_replay_server_port"] = learner_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
-        ports["workers_2_replay_server_port"] = workers_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
-        ports["replay_server_2_workers_pubsub_port"] = data_request_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
-        ports["replay_server_2_learner_port"] = replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
-        ports["learner_2_workers_pubsub_port"] = params_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
-        learner_2_replay_server_socket.close()
-        workers_2_replay_server_socket.close()
-        data_request_pub_socket.close()
-        replay_server_2_learner_socket.close()
-        params_pub_socket.close()
-
-        return ports
+    # def find_free_ports(self):
+    #     """ finds free ports for all actors and returns a dictionary of all ports """
+    #     ports = {}
+    #     # replay server
+    #     context = zmq.Context()
+    #     learner_2_replay_server_socket = context.socket(zmq.PULL)
+    #     workers_2_replay_server_socket = context.socket(zmq.PULL)
+    #     data_request_pub_socket = context.socket(zmq.PUB)
+    #     replay_server_2_learner_socket = context.socket(zmq.PULL)
+    #     params_pub_socket = context.socket(zmq.PUB)
+    #     ports["learner_2_replay_server_port"] = learner_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+    #     ports["workers_2_replay_server_port"] = workers_2_replay_server_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+    #     ports["replay_server_2_workers_pubsub_port"] = data_request_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+    #     ports["replay_server_2_learner_port"] = replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+    #     ports["learner_2_workers_pubsub_port"] = params_pub_socket.bind_to_random_port('tcp://127.0.0.1', min_port=self.cfg['min_port'], max_port=self.cfg['min_port'] + self.cfg['port_range'])
+    #     learner_2_replay_server_socket.close()
+    #     workers_2_replay_server_socket.close()
+    #     data_request_pub_socket.close()
+    #     replay_server_2_learner_socket.close()
+    #     params_pub_socket.close()
+    #
+    #     return ports
 
     def setup(self):
         """
@@ -185,12 +186,11 @@ class ApeXDQN:
         self.apex_socket = context.socket(zmq.PULL)
         apex_port = self.apex_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
         self.print(f"binding to {apex_port} for receiving logs")
-        self.apex_pub_sync_socket = context.socket(zmq.PUB)
-        apex_pub_sync_port = self.apex_pub_sync_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
-        self.print(f"binding to {apex_pub_sync_port} for syncing workers")
+        self.apex_2_learner_socket = context.socket(zmq.PUSH)
+        apex_2_learner_port = self.apex_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+        self.print(f"binding to {apex_2_learner_port} for requesting params")
         self.cfg['com'] = {'apex_port': apex_port,
-                           'apex_pub_sync_port': apex_pub_sync_port}
-
+                           'apex_2_learner_port': apex_2_learner_port}
 
         # spawn learner
         self.print('spawning learner process')
@@ -257,6 +257,7 @@ class ApeXDQN:
         for actor in self.actors.values():
             actor.run.remote()
         while True:
+            self.send_param_request()
             self.recv_and_log_wandb()
 
     def recv_and_log_wandb(self):
@@ -294,17 +295,20 @@ class ApeXDQN:
             #     new_param = torch.FloatTensor(new_param)
             #     param.data.copy_(new_param)
             self.stats_history[global_step]['params'] = model_params
-            # check if last eval round has finished and sync workers to the next eval round
-            if self.next_eval_round == -1:
-                # sync workers to evaluate on num_param_updates = global_step + 2
-                sync_msg = ("sync_eval", global_step + 2)
-                sync_packet = pa.serialize(sync_msg).to_buffer()
-                self.apex_pub_sync_socket.send(sync_packet)
-                self.next_eval_round = global_step + 2
-                self.print(f'syncing workers to eval on update number {global_step+2}')
+            # # check if last eval round has finished and sync workers to the next eval round
+            # if self.next_eval_round == -1:
+            #     # sync workers to evaluate on num_param_updates = global_step + 2
+            #     sync_msg = ("sync_eval", global_step + 2)
+            #     sync_packet = pa.serialize(sync_msg).to_buffer()
+            #     self.apex_2_learner_socket.send(sync_packet)
+            #     self.next_eval_round = global_step + 2
+            #     self.print(f'syncing workers to eval on update number {global_step+2}')
 
         else:
             assert 'worker' in sender
+            assert global_step == self.evaluation_step or self.evaluation_step == -1
+            self.evaluation_step = global_step
+
             training_stats, validation_stats = body
             # training_stats = {k: v for k, v in training_stats}
             # todo concat training stats to existing step
@@ -318,7 +322,7 @@ class ApeXDQN:
                 self.stats_history[global_step]['training'][k] += v
             for k_v_list in validation_stats:
                 stats_dict = {k: v for k, v in k_v_list}
-            self.stats_history[global_step]['validation'][stats_dict['dataset_name']][stats_dict['inst_idx']][stats_dict['scip_seed']] = stats_dict
+                self.stats_history[global_step]['validation'][stats_dict['dataset_name']][stats_dict['inst_idx']][stats_dict['scip_seed']] = stats_dict
 
 
         # update logs
@@ -341,12 +345,26 @@ class ApeXDQN:
             step = self.unfinished_steps.pop(0)
             # todo - finish step, create figures, average stats and return log_dict
             log_dict = self.finish_step(step)
-            if step == self.next_eval_round:
-                # eval round finished, reset next_eval_round to sync the next eval round.
-                self.next_eval_round = -1
+            # if step == self.next_eval_round:
+            #     # eval round finished, reset next_eval_round to sync the next eval round.
+            #     self.next_eval_round = -1
             wandb.log(log_dict, step=step)
             self.last_logging_step = step
             self.save_checkpoint()
+            if step == self.evaluation_step:
+                # either all workers finished evaluating, or some worker is dead.
+                # continue to the next eval step
+                self.all_workers_ready_for_eval = True
+                self.evaluation_step = -1
+
+    def send_param_request(self):
+        # request new params for evaluation and for updating workers policy when eval round was finished
+        # if everything works fine, it will happen in intervals of < 50 steps.
+        # if some worker has died, it will happen once per 50 steps.
+        if self.all_workers_ready_for_eval:
+            self.print('sending param_request to learner')
+            self.apex_2_learner_socket.send(pa.serialize("param_request").to_buffer())
+            self.all_workers_ready_for_eval = False
 
     def finish_step(self, step):
         print_msg = f'Step: {step}'
@@ -416,8 +434,8 @@ class ApeXDQN:
 
             # if all validation results are ready, then
             # save model and figures if its performance is the best till now
-            # 30 is because of each validset contains 10 graphs solved for 3 seeds
-            if all([len(v) == 30 for v in all_values.values()]):
+            n_evals = dataset['num_instances'] * len(dataset['scip_seed'])
+            if all([len(v) == n_evals for v in all_values.values()]):
                 self.print(f'{"#"*50} new results for {dataset_name} {"#"*50}')
                 cur_perf = avg_values[self.cfg['dqn_objective']]
                 if cur_perf > self.best_performance[dataset_name]:
@@ -591,7 +609,7 @@ class ApeXDQN:
     def local_debug(self):
         # setup
         self.cfg['com'] = {'apex_port': 18985,
-                           'apex_pub_sync_port': 37284,
+                           'apex_2_learner_port': 37284,
                            'replay_server_2_learner_port': 21244,
                            'learner_2_workers_pubsub_port': 28824,
                            'learner_2_replay_server_port': 30728,
@@ -603,9 +621,9 @@ class ApeXDQN:
         self.apex_socket = context.socket(zmq.PULL)
         self.apex_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_port"]}')
         self.print(f'binding to {self.cfg["com"]["apex_port"]} for receiving logs')
-        self.apex_pub_sync_socket = context.socket(zmq.PUB)
-        apex_pub_sync_port = self.apex_pub_sync_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_pub_sync_port"]}')
-        self.print(f"binding to {apex_pub_sync_port} for syncing workers")
+        self.apex_2_learner_socket = context.socket(zmq.PUSH)
+        apex_2_learner_port = self.apex_2_learner_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_2_learner_port"]}')
+        self.print(f"binding to {apex_2_learner_port} for syncing workers")
 
         # learner
         self.actors['learner'] = learner = DQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu)
@@ -688,6 +706,7 @@ class ApeXDQN:
             # while pulling processing the batches in another asynchronous thread.
             # here we alternate receiving a batch, processing and sending back priorities,
             # until no more waiting batches exist.
+            self.send_param_request()
             publish_params = False
             while learner.recv_batch(blocking=False):
                 # receive batch from replay server and push into learner.replay_data_queue
@@ -724,6 +743,7 @@ class ApeXDQN:
             # receive logs of test round
             for _ in range(len(workers)):
                 self.recv_and_log_wandb()
+            self.send_param_request()
 
 
     def print(self, expr):

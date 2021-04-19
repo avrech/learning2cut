@@ -159,7 +159,6 @@ class DQNWorker(Sepa):
             idx += hparams['num_workers']
 
         # distributed system stuff
-        self.next_eval_round = -1
         self.worker_id = worker_id
         self.generate_demonstration_data = False
         self.print_prefix = f'[Worker {self.worker_id}] '
@@ -173,17 +172,10 @@ class DQNWorker(Sepa):
         self.sub_socket = context.socket(zmq.SUB)
         self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
         self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
-        self.sub_sync_socket = context.socket(zmq.SUB)
-        self.sub_sync_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
-        self.sub_sync_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
 
         # connect to the main apex process
         self.send_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
         self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
-
-        # connect to apex pub sync port:
-        self.sub_sync_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_pub_sync_port"]}')
-        self.print(f'connecting to apex_pub_sync_port: {hparams["com"]["apex_pub_sync_port"]}')
 
         # connect to learner pub socket
         self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
@@ -265,17 +257,6 @@ class DQNWorker(Sepa):
                 # no packets are waiting
                 pass
 
-        # sync evaluation rounds
-        try:
-            message = self.sub_sync_socket.recv(zmq.DONTWAIT)
-            message = pa.deserialize(message)
-            assert message[0] == 'sync_eval' and message[1] > 0
-            self.next_eval_round = message[1]
-            self.print(f'syncing eval {message[1]}')
-
-        except zmq.Again:
-            pass
-
         if new_params_packet is not None:
             self.synchronize_params(new_params_packet)
             received_new_params = True
@@ -296,8 +277,7 @@ class DQNWorker(Sepa):
         self.load_datasets()
         while True:
             received_new_params = self.recv_messages()
-            assert self.num_param_updates <= self.next_eval_round or self.next_eval_round == -1, f'missed param packet {self.next_eval_round} for evaluation'
-            if received_new_params and self.num_param_updates == self.next_eval_round:
+            if received_new_params:
                 # evaluate validation instances, and send all training and test stats to apex
                 # global_step, validation_stats = self.evaluate()
                 # log_packet = ('log', f'worker_{self.worker_id}', global_step,
@@ -308,13 +288,12 @@ class DQNWorker(Sepa):
                 # for k in self.training_stats.keys():
                 #     self.training_stats[k] = []
                 self.evaluate_and_send_logs()
-                self.next_eval_round = -1  # mark that eval round done
 
             replay_data = self.collect_data()
             self.send_replay_data(replay_data)
 
     def evaluate_and_send_logs(self):
-        self.print(f'executing evaluation no {self.next_eval_round}')
+        self.print(f'evaluating param id = {self.num_param_updates}')
         global_step, validation_stats = self.evaluate()
         log_packet = ('log', f'worker_{self.worker_id}', global_step,
                       ([(k, v) for k, v in self.training_stats.items()], validation_stats))

@@ -76,6 +76,7 @@ class DQNLearner:
         self.num_env_steps_done = 0
         self.num_sgd_steps_done = 0
         self.num_param_updates = 0
+        self.publish_new_params = False
         self.training = True
         self.walltime_offset = 0
         self.start_time = time.time()
@@ -110,6 +111,7 @@ class DQNLearner:
 
         context = zmq.Context()
         self.learner_2_apex_socket = context.socket(zmq.PUSH)  # for sending logs
+        self.apex_2_learner_socket = context.socket(zmq.PULL)
         self.replay_server_2_learner_socket = context.socket(zmq.PULL)  # for receiving batch from replay server
         self.learner_2_replay_server_socket = context.socket(zmq.PUSH)  # for sending back new priorities to replay server
         self.params_pub_socket = context.socket(zmq.PUB)  # for publishing new params to workers
@@ -118,6 +120,8 @@ class DQNLearner:
             # connect to the main apex process
             self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
             self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
+            self.apex_2_learner_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_2_learner_port"]}')
+            self.print(f'connecting to apex_2_learner_port: {hparams["com"]["apex_2_learner_port"]}')
 
             # bind sockets to random free ports
             hparams['com']["replay_server_2_learner_port"] = self.replay_server_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
@@ -139,6 +143,7 @@ class DQNLearner:
             # reuse com config
             self.print(f'connecting to ports: {hparams["com"]}', )
             self.learner_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
+            self.apex_2_learner_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_2_learner_port"]}')
             self.replay_server_2_learner_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_learner_port"]}')
             self.learner_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_replay_server_port"]}')
             self.params_pub_socket.bind(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
@@ -198,7 +203,16 @@ class DQNLearner:
         The test worker will synchronize to the learner state every params update, so it won't be
         affected from checkpointing separately.
         """
-        if self.num_sgd_steps_done > 0 and self.num_sgd_steps_done % self.param_sync_interval == 0:
+        try:
+            packet = self.apex_2_learner_socket.recv(zmq.DONTWAIT)
+            msg = pa.deserialize(packet)
+            assert msg == 'param_request'
+            self.publish_new_params = True
+
+        except zmq.Again:
+            pass
+
+        if self.publish_new_params and self.num_sgd_steps_done > 0 and self.num_sgd_steps_done % self.param_sync_interval == 0:
             self.num_param_updates += 1
 
             # prepare params_packet
@@ -213,6 +227,7 @@ class DQNLearner:
             log_packet = pa.serialize(log_packet).to_buffer()
             self.learner_2_apex_socket.send(log_packet)
             self.save_checkpoint()
+            self.publish_new_params = False
 
     def unpack_batch_packet(self, batch_packet):
         """ Prepares received data for sgd """
@@ -668,6 +683,7 @@ class DQNLearner:
         # todo wandb
         log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
         log_dict['Demonstration_Loss'] = self.demonstration_loss_moving_avg
+        log_dict['SGD_Step'] = self.num_sgd_steps_done
 
         # print the additional info
         print('Idle time: {:.2f}% | '.format(self.idle_time_sec / (cur_time_sec - self.last_time_sec)), end='')
