@@ -41,7 +41,7 @@ datasets:
     lp_iterations_limit: 5000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
-    ngraphs: 15
+    ngraphs: 5
     barabasi_albert_m: 15
     weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
@@ -57,7 +57,7 @@ datasets:
     lp_iterations_limit: 7000  # 50000
     eval_interval: 10  # single-thread: 500, distributed: 10
     scip_seed: [52, 176, 223]
-    ngraphs: 25
+    ngraphs: 5
     barabasi_albert_m: 25
     weights: uniform01  # uniform01 | normal | ones
     graph_type: barabasi-albert
