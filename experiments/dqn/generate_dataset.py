@@ -177,8 +177,8 @@ def solve_graphs(worker_config):
                     hparams = {
                         'lp_iterations_limit': dataset_config['lp_iterations_limit'],
                         'criterion': bsl,
-                        'reset_maxcuts': 1000000,
-                        'reset_maxcutsroot': 1000000
+                        'reset_maxcuts': worker_config['reset_maxcuts'],
+                        'reset_maxcutsroot': worker_config['reset_maxcutsroot']
                     }
                     bsl_sepa = CSBaselineSepa(hparams=hparams)
                     bsl_model.includeSepa(bsl_sepa, f'#CS_{bsl}', f'enforce cut selection: {bsl}', priority=-1000000, freq=1)
@@ -241,6 +241,8 @@ if __name__ == '__main__':
                         help='path to generate/read data')
     parser.add_argument('--data_configfile', type=str, default='configs/maxcut_data_config.yaml',
                         help='path to config file')
+    parser.add_argument('--experiment_configfile', type=str, default='configs/exp5.yaml',
+                        help='path to config file')
     parser.add_argument('--workerid', type=int, default=0,
                         help='worker id')
     parser.add_argument('--nworkers', type=int, default=1,
@@ -251,9 +253,11 @@ if __name__ == '__main__':
                         help='hide scip solving messages')
     args = parser.parse_args()
 
-    # read data config
+    # read configs
     with open(args.data_configfile) as f:
         data_config = yaml.load(f, Loader=yaml.FullLoader)
+    with open(args.experiment_configfile) as f:
+        experiment_config = yaml.load(f, Loader=yaml.FullLoader)
 
     # product the dataset configs and worker ids.
     configs = []
@@ -262,6 +266,7 @@ if __name__ == '__main__':
     #         dataset_config[k] = v
     for workerid in range(args.nworkers):
         cfg = deepcopy(vars(args))
+        cfg.update(experiment_config)
         cfg.update(data_config)
         cfg['workerid'] = workerid
         configs.append(cfg)

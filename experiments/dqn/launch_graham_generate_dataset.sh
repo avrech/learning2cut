@@ -21,7 +21,7 @@
 #source $HOME/venv/bin/activate\n')
 
 # generate dataset
-srun python generate_dataset.py --data_configfile configs/maxcut_data_config.yaml --datadir $SCRATCH/dqn/data --mp ray --nworkers 31
+srun python generate_dataset.py --experiment_configfile configs/exp5.yaml --data_configfile configs/mvc_data_config.yaml --datadir $SCRATCH/dqn/data --mp ray --nworkers 31
 
 
 

@@ -1540,9 +1540,9 @@ class DQNWorker(Sepa):
         # create a SCIP model for G, and disable default cuts
         hparams = self.hparams
         if hparams['problem'] == 'MAXCUT':
-            model, x, cut_generator = maxcut_mccormic_model(G, use_general_cuts=hparams.get('use_general_cuts', True), hparams=hparams, use_propagation=False) #, use_heuristics=False, use_propagation=False)
+            model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams) #, use_heuristics=False, use_propagation=False)
         elif hparams['problem'] == 'MVC':
-            model, x = mvc_model(G, use_propagation=False) #, use_heuristics=False, use_propagation=False)
+            model, x = mvc_model(G) #, use_heuristics=False, use_propagation=False)
             cut_generator = None
         if hparams['aggressive_separation']:
             set_aggresive_separation(model)
