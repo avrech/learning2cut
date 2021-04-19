@@ -1070,7 +1070,7 @@ class DQNWorker(Sepa):
         lp_iterations_limit = self.lp_iterations_limit
         if lp_iterations_limit > 0 and self.episode_stats['lp_iterations'][-1] > lp_iterations_limit:
             # interpolate the dualbound and gap at the limit
-            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit
+            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit, f'episode stats: {self.episode_stats}'
             t = self.episode_stats['lp_iterations'][-2:]
             for k in ['dualbound', 'gap']:
                 ft = self.episode_stats[k][-2:]
