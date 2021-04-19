@@ -3,7 +3,7 @@
 problem: MVC
 aggressive_separation: True
 datasets:
-  trainset_50_60:
+  trainset_60_70:
     lp_iterations_limit: 2000
     ngraphs: 10000
     barabasi_albert_m: 15
@@ -11,13 +11,13 @@ datasets:
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 50
-      max: 60
-    dataset_name: trainset.50-60
+      min: 60
+      max: 70
+    dataset_name: trainset.60-70
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: False
-  validset_50_60:
+  validset_60_70:
     lp_iterations_limit: 2000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
@@ -27,13 +27,13 @@ datasets:
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 50
-      max: 60
-    dataset_name: validset.50-60
+      min: 60
+      max: 70
+    dataset_name: validset.60-70
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
-  testset_50_60:
+  testset_60_70:
     lp_iterations_limit: 2000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
@@ -43,9 +43,9 @@ datasets:
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 50
-      max: 60
-    dataset_name: testset.50-60
+      min: 60
+      max: 70
+    dataset_name: testset.60-70
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
