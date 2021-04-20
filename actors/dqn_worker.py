@@ -908,7 +908,10 @@ class DQNWorker(Sepa):
                 # todo: verify with Aleks - consider slack < 1e-10 as zero
                 approximately_zero = np.abs(normalized_slack) < self.hparams['slack_tol']
                 normalized_slack[approximately_zero] = 0
-                assert (normalized_slack >= 0).all(), f'rhs slack variable is negative,{normalized_slack}'
+                # assert (normalized_slack >= 0).all(), f'rhs slack variable is negative,{normalized_slack}'
+                if (normalized_slack < 0).any():
+                    self.print(f'Warning: encountered negative RHS slack variable.\nnormalized_slack: {normalized_slack}\ndiscarding the rest of the episode')
+                    break
                 if self.hparams.get('credit_assignment', True):
                     credit = 1 - normalized_slack
                     reward = joint_reward * credit
@@ -968,7 +971,7 @@ class DQNWorker(Sepa):
             action = info['action_info']
             normalized_slack = action['normalized_slack']
             # todo: verify with Aleks - consider slack < 1e-10 as zero
-            approximately_zero = np.abs(normalized_slack) < 1e-10
+            approximately_zero = np.abs(normalized_slack) < self.hparams['slack_tol']
             normalized_slack[approximately_zero] = 0
 
             applied = action['applied']
