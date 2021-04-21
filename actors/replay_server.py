@@ -143,8 +143,13 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
                 break
 
             new_replay_data_list = self.unpack_replay_data(new_replay_data_packet)
-            # cur_len = len(self.pbar.desc)
+            cur_capacity = self.capacity
             n_added = self.add_data_list(new_replay_data_list)
+            if self.capacity != cur_capacity:
+                # update pbar
+                self.pbar.total = self.capacity
+                self.pbar.refresh()
+
             if self.pbar.n < self.next_idx:
                 self.pbar.update(n_added)
             else:
