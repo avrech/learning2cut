@@ -7,7 +7,7 @@ from time import time
 import numpy as np
 
 import utils.scip_models
-from utils.data import Transition
+from utils.data import Transition, get_data_memory
 from utils.misc import get_img_from_fig
 from utils.event_hdlrs import DebugEvents, BranchingEventHdlr
 import os
@@ -346,7 +346,8 @@ class DQNWorker(Sepa):
         """
         replay_data_packet = []
         for transition, initial_priority, is_demonstration in replay_data:
-            replay_data_packet.append((transition.to_numpy_tuple(), initial_priority, is_demonstration))
+            size_gbyte = get_data_memory(transition, units='G')
+            replay_data_packet.append((transition.to_numpy_tuple(), initial_priority, is_demonstration, size_gbyte))
         replay_data_packet = pa.serialize(replay_data_packet).to_buffer()
         return replay_data_packet
 
@@ -1073,7 +1074,7 @@ class DQNWorker(Sepa):
         lp_iterations_limit = self.lp_iterations_limit
         if lp_iterations_limit > 0 and self.episode_stats['lp_iterations'][-1] > lp_iterations_limit:
             # interpolate the dualbound and gap at the limit
-            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit, f'episode stats: {self.episode_stats}'
+            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit, 'episode_stats={\n' + "\n".join(["{k}:{v}," for k,v in self.episode_stats.items()]) + '\n}' + f'episode_history={self.episode_history}'
             t = self.episode_stats['lp_iterations'][-2:]
             for k in ['dualbound', 'gap']:
                 ft = self.episode_stats[k][-2:]
