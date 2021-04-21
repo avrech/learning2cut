@@ -108,7 +108,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.num_sgd_steps_done = 0  # saved and loaded from checkpoint
         # beta = self.priority_beta_end - (self.priority_beta_end - self.priority_beta_start) * \
         #        math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
-        self.print_prefix = '[ReplayBuffer] '
+        self.print_prefix = '[ReplayBuffer]'
 
     def add(self, data: tuple([Transition, float, bool, float])):
         """
@@ -129,6 +129,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
                 # limit capacity to storage length + 1.
                 # this data will be appended, but the next data will override the oldest.
                 self.capacity = len(self.storage) + 1
+                self.print(f'limiting capacity to {self.capacity} (current storage size = {self.storage_size}GB)')
                 # todo update pbar size in replay server
         else:
             # we are going to override the oldest data in buffer.
@@ -252,7 +253,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         for idx, priority, data_id in zip(idxes, priorities, data_ids):
             # filter invalid packets
             if not 0 <= idx <= len(self.storage):
-                print(self.print_prefix, 'received invalid index')
+                self.print('received invalid index')
                 # todo - possibly the whole packet is corrupted/outdated, should we stop here to save time?
                 continue
             if data_id != self._data_unique_ids[idx]:
@@ -274,6 +275,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
             self._it_min[idx] = priority ** self._alpha
             self._max_priority = max(self._max_priority, priority)
 
+    def print(self, expr):
+        print(self.print_prefix, expr)
 
 # from pytorch dqn tutorial
 class ReplayMemory(object):
