@@ -32,7 +32,7 @@ class ReplayBuffer(object):
         :param data: Transition object
         :return:
         """
-        if len(self.storage) < self.capacity:
+        if self.next_idx == len(self.storage) < self.capacity:
             # extend the memory for storing the new data
             self.storage.append(None)
         self.storage[self.next_idx] = data
@@ -93,6 +93,8 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self._max_priority = 1.0
         self._next_unique_id = 0
         self._data_unique_ids = -np.ones((self.capacity,))
+        self._data_sizes = np.zeros((self.capacity,), dtype=float)
+        self.storage_size = 0
 
         # unpack buffer configs
         # self.max_num_updates = self.cfg["max_num_updates"]
@@ -108,21 +110,43 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         #        math.exp(-1. * self.num_sgd_steps_done / self.priority_beta_decay)
         self.print_prefix = '[ReplayBuffer] '
 
-    def add(self, data: tuple([Transition, float, bool])):
+    def add(self, data: tuple([Transition, float, bool, float])):
         """
         Push Transition into storage and update its initial priority.
         :param data: Tuple containing Transition and initial_priority float
         :return:
         """
-        transition, initial_priority, is_demonstration = data
-        idx = self.next_idx
-        if idx < self.n_demonstrations and not is_demonstration:
+        transition, initial_priority, is_demonstration, size_gbyte = data
+        if self.next_idx < self.n_demonstrations and not is_demonstration:
             # ignore non-demonstration data if we are in demonstrations collection phase.
             return 0
+
+        # check memory usage
+        if len(self.storage) < self.capacity:
+            total_mem = self.storage_size + size_gbyte
+            if total_mem > self.config['replay_buffer_max_mem'] - 0.5:
+                # we are close to the mem limit (<0.5GB free space).
+                # limit capacity to storage length + 1.
+                # this data will be appended, but the next data will override the oldest.
+                self.capacity = len(self.storage) + 1
+                # todo update pbar size in replay server
+        else:
+            # we are going to override the oldest data in buffer.
+            # remove elements from the end of storage until there will be enough space
+            while self.storage_size + size_gbyte - self._data_sizes[self.next_idx] >= self.config['replay_buffer_max_mem']:
+                # delete the last element in storage and update self.next_idx if needed
+                self.storage_size -= self._data_sizes[len(self.storage)-1]
+                self._data_sizes[len(self.storage)-1] = 0
+                del self.storage[-1]
+                if self.next_idx > len(self.storage):
+                    self.next_idx = len(self.storage)
+
+        idx = self.next_idx
+
         super().add(transition)
         # assign unique id to data
         # such that new arriving data won't be updated with outdated new_priorities arriving from the learner.
-        # (highly important in distributed setting)
+        # (critical for distributed setting)
         self._data_unique_ids[idx] = self._next_unique_id
         # update the initial priority
         self.update_priorities(np.array([idx]), np.array([initial_priority]), np.array([self._next_unique_id]))  # todo verify
