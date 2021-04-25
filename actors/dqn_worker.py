@@ -912,6 +912,7 @@ class DQNWorker(Sepa):
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
             bootstrapping_q = []
+            discarded = False
             # assign rewards and store transitions (s,a,r,s')
             for step, (step_info, joint_reward) in enumerate(zip(self.episode_history, R)):
                 state, action, q_values = step_info['state_info'], step_info['action_info'], step_info['selected_q_values']
@@ -949,7 +950,8 @@ class DQNWorker(Sepa):
                 normalized_slack[approximately_zero] = 0
                 # assert (normalized_slack >= 0).all(), f'rhs slack variable is negative,{normalized_slack}'
                 if (normalized_slack < 0).any():
-                    self.print(f'Warning: encountered negative RHS slack variable.\nnormalized_slack: {normalized_slack}\ndiscarding the rest of the episode')
+                    self.print(f'Warning: encountered negative RHS slack variable.\nnormalized_slack: {normalized_slack}\ndiscarding the rest of the episode\ncur_graph = {self.cur_graph}')
+                    discarded = True
                     break
                 if self.hparams.get('credit_assignment', True):
                     credit = 1 - normalized_slack
@@ -1000,7 +1002,9 @@ class DQNWorker(Sepa):
                     trajectory.append((transition, initial_priority, self.demonstration_episode))
                 else:
                     trajectory.append(transition)
-            bootstrapped_returns = R + self.gamma**self.nstep_learning * np.array(bootstrapping_q)
+
+            if not discarded:
+                bootstrapped_returns = R.flatten() + self.gamma**self.nstep_learning * np.array(bootstrapping_q).flatten()
 
 
         # compute some stats and store in buffer
@@ -1053,10 +1057,11 @@ class DQNWorker(Sepa):
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
-            self.last_training_episode_stats['bootstrapped_returns'] = bootstrapped_returns
-            self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
-            self.last_training_episode_stats['selected_q_avg'] = selected_q_avg
-            self.last_training_episode_stats['selected_q_std'] = selected_q_std
+            if not discarded:
+                self.last_training_episode_stats['bootstrapped_returns'] = bootstrapped_returns
+                self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
+                self.last_training_episode_stats['selected_q_avg'] = selected_q_avg
+                self.last_training_episode_stats['selected_q_std'] = selected_q_std
 
             stats = None
         else:

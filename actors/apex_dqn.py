@@ -863,7 +863,8 @@ def add_subplot(figures, row, col, dqn_stats, inst_info, scip_seed, dataset, avg
                     xytext=(0, 3),  # 3 points vertical offset
                     textcoords="offset points",
                     ha='center', va='bottom')
-    ax.set_xticks([], [])  # disable x ticks
+    ax.set_xticks([])  # disable x ticks
+    ax.set_xticklabels([])
 
     # plot R and Q+-std across steps
     ax = figures['Returns_and_Q']['axes'][row, col]
