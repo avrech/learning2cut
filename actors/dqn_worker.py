@@ -5,7 +5,7 @@ from sklearn.metrics import f1_score
 from pyscipopt import Sepa, SCIP_RESULT
 from time import time
 import numpy as np
-
+from warnings import warn
 import utils.scip_models
 from utils.data import Transition, get_data_memory
 from utils.misc import get_img_from_fig
@@ -126,11 +126,16 @@ class DQNWorker(Sepa):
         # learning from demonstrations stuff
         self.demonstration_episode = False
         self.num_demonstrations_done = 0
+        # debugging stats
+        self.training_n_random_actions = 0
+        self.training_n_actions = 0
+
         # file system paths
         self.run_dir = hparams['run_dir']
         self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
         # training logs
-        self.training_stats = {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
+        self.training_stats = {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
+        self.last_training_episode_stats = {}
         # tmp buffer for holding cutting planes statistics
         self.sepa_stats = None
 
@@ -138,6 +143,7 @@ class DQNWorker(Sepa):
         self.debug_n_tracking_errors = 0
         self.debug_n_early_stop = 0
         self.debug_n_episodes_done = 0
+        self.debug_n_buggy_episodes = 0
 
         # # initialize (set seed and load checkpoint)
         # self.initialize_training()
@@ -296,12 +302,17 @@ class DQNWorker(Sepa):
         self.print(f'evaluating param id = {self.num_param_updates}')
         global_step, validation_stats = self.evaluate()
         log_packet = ('log', f'worker_{self.worker_id}', global_step,
-                      ([(k, v) for k, v in self.training_stats.items()], validation_stats))
+                      ([(k, v) for k, v in self.training_stats.items()],
+                       validation_stats,
+                       [(f'worker_{self.worker_id}_exploration', self.training_n_random_actions/self.training_n_actions)],
+                       [(k, v) for k, v in self.last_training_episode_stats.items()]))
         log_packet = pa.serialize(log_packet).to_buffer()
         self.send_2_apex_socket.send(log_packet)
         # reset training stats for the next round
         for k in self.training_stats.keys():
             self.training_stats[k] = []
+        self.training_n_actions = 0
+        self.training_n_random_actions = 0
 
     # # todo - update to unified worker and tester
     # def run_test(self):
@@ -320,13 +331,20 @@ class DQNWorker(Sepa):
 
     def collect_data(self):
         """ Fill local buffer until some stopping criterion is satisfied """
+        self.set_training_mode()
         local_buffer = []
         trainset = self.trainset
         while len(local_buffer) < self.hparams.get('local_buffer_size'):
             # sample graph randomly
             graph_idx = self.graph_indices[(self.i_episode + 1) % len(self.graph_indices)]
             G, instance_info = trainset['instances'][graph_idx]
-
+            # fix training scip_seed for debug purpose
+            if self.hparams['fix_training_scip_seed']:
+                scip_seed = self.hparams['fix_training_scip_seed']
+            else:
+                # set random scip seed
+                scip_seed = np.random.randint(1000000000)
+            self.cur_graph = f'trainset graph {graph_idx} seed {scip_seed}'
             # execute episodes, collect experience and append to local_buffer
             trajectory, _ = self.execute_episode(G, instance_info, trainset['lp_iterations_limit'],
                                                  dataset_name=trainset['dataset_name'],
@@ -454,7 +472,7 @@ class DQNWorker(Sepa):
             # assert (selected_cuts == self.prev_action['applied']).all(), f"selected cuts({len(selected_cuts)}): {selected_cuts}\napplied({self.prev_action['applied']}): {self.prev_action['applied']}"
             if (selected_cuts != self.prev_action['applied']).any():
                 # find the missing cuts, assert that they are marked in sepastore, compute slack, and correct applied flag
-                missing_cuts_idx = np.nonzero(selected_cuts != self.prev_action['applied'])
+                missing_cuts_idx = np.nonzero(selected_cuts != self.prev_action['applied'])[0]
                 selected_cuts_names = self.model.getSelectedCutsNames()
                 nvars = self.model.getNVars()
                 ncuts = self.prev_action['ncuts']
@@ -471,10 +489,20 @@ class DQNWorker(Sepa):
                 cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
                 rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
                 normalized_slack = rhs_slack / cuts_norm
-
+                cut_names = list(self.prev_action['cuts'].keys())
                 for idx in missing_cuts_idx:
-                    cut_name = list(self.prev_action['cuts'].keys())
-                    assert cut_name in selected_cuts_names, "action was not executed by sepastore properly"
+                    cut_name = cut_names[idx]
+                    # assert cut_name in selected_cuts_names, "action was not executed by sepastore properly"
+                    if cut_name not in selected_cuts_names:
+                        # duboius behavior
+                        warn(f'action was not executed by sepastore properly\nprev_action = {self.prev_action}\nselected_cuts_names = {selected_cuts_names}\nmissing_cut_name = {cut_name}')
+                        if self.training:
+                            # terminate episode with 'TRAINING_BUG' and discard
+                            self.terminal_state = 'TRAINING_BUG'
+                            self.model.clearCuts()
+                            self.model.interruptSolve()
+                            return {"result": SCIP_RESULT.DIDNOTFIND}
+
                     self.prev_action['cuts'][cut_name]['applied'] = True
                     self.prev_action['cuts'][cut_name]['normalized_slack'] = normalized_slack[idx]
                     self.prev_action['cuts'][cut_name]['selection_order'] = selected_cuts_names.index(cut_name)
@@ -489,7 +517,7 @@ class DQNWorker(Sepa):
         if available_cuts['ncuts'] > 0:
 
             # select an action, and get the decoder context for a case we use transformer and q_values for PER
-            assert not np.any(np.isnan(cur_state['C'])) and not np.any(np.isnan(cur_state['A'])), 'Nan values in state features'
+            assert not np.any(np.isnan(cur_state['C'])) and not np.any(np.isnan(cur_state['A'])), f'Nan values in state features\ncur_graph = {self.cur_graph}\nA = {cur_state["A"]}\nC = {cur_state["C"]}'
             action_info = self._select_action(cur_state)
             selected = action_info['selected_by_agent']
             available_cuts['selected_by_agent'] = action_info['selected_by_agent'].numpy()
@@ -606,6 +634,9 @@ class DQNWorker(Sepa):
                 if self.select_at_least_one_cut and random_action.sum() == 0:
                     # select a cut arbitrarily
                     random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = True
+                self.training_n_random_actions += 1
+            self.training_n_actions += 1
+
         else:
             random_action = None
 
@@ -662,6 +693,12 @@ class DQNWorker(Sepa):
         self.debug_n_episodes_done += 1         # todo debug remove when finished
 
         # classify the terminal state
+        if self.terminal_state == 'TRAINING_BUG':
+            assert self.training
+            self.debug_n_buggy_episodes += 1
+            self.print(f'discarded {self.debug_n_buggy_episodes} episodes')
+            return [], None
+
         if self.terminal_state == 'EMPTY_ACTION':
             raise ValueError('invalid state. set argument select_at_least_one_cut=True')
             # all the available cuts were discarded.
@@ -874,6 +911,7 @@ class DQNWorker(Sepa):
             # compute returns
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
+            bootstrapping_q = []
             # assign rewards and store transitions (s,a,r,s')
             for step, (step_info, joint_reward) in enumerate(zip(self.episode_history, R)):
                 state, action, q_values = step_info['state_info'], step_info['action_info'], step_info['selected_q_values']
@@ -941,6 +979,7 @@ class DQNWorker(Sepa):
                     if next_q_values is None:
                         # next state is terminal, and its q_values are 0 by convention
                         target_q_values = torch.from_numpy(reward)
+                        bootstrapping_q.append(0)
                     else:
                         # todo - tqnet v2 & v3:
                         #  take only the max q value over the "select" entries
@@ -952,7 +991,7 @@ class DQNWorker(Sepa):
                                 max_next_q_values_aggr = next_q_values.max()
                             if self.hparams.get('value_aggr', 'mean') == 'mean':
                                 max_next_q_values_aggr = next_q_values.mean()
-
+                        bootstrapping_q.append(max_next_q_values_aggr)
                         max_next_q_values_broadcast = torch.full_like(q_values, fill_value=max_next_q_values_aggr)
                         target_q_values = torch.from_numpy(reward) + (self.gamma ** self.nstep_learning) * max_next_q_values_broadcast
                     td_error = torch.abs(q_values - target_q_values)
@@ -961,8 +1000,15 @@ class DQNWorker(Sepa):
                     trajectory.append((transition, initial_priority, self.demonstration_episode))
                 else:
                     trajectory.append(transition)
+            bootstrapped_returns = R + self.gamma**self.nstep_learning * np.array(bootstrapping_q)
+
 
         # compute some stats and store in buffer
+        n_rewards = len(dualbound_area)
+        discounted_rewards = [np.sum(dualbound_area[idx:] * self.gamma**np.arange(n_rewards-idx)) for idx in range(n_rewards)]
+        selected_q_avg = [np.mean(info.get('selected_q_values', torch.zeros((1,))).numpy()) for info in self.episode_history]
+        selected_q_std = [np.std(info.get('selected_q_values', torch.zeros((1,))).numpy()) for info in self.episode_history]
+
         active_applied_ratio = []
         applied_available_ratio = []
         accuracy_list, f1_score_list = [], []
@@ -1000,11 +1046,18 @@ class DQNWorker(Sepa):
         if self.training:
             # todo - add here db auc improvement
             self.training_stats['db_auc'].append(db_auc)
+            self.training_stats['db_auc_improvement'].append(db_auc / self.instance_info['baselines']['default'][223]['db_auc'])
             self.training_stats['gap_auc'].append(gap_auc)
+            self.training_stats['gap_auc_improvement'].append(gap_auc / self.instance_info['baselines']['default'][223]['gap_auc'])
             self.training_stats['active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
+            self.last_training_episode_stats['bootstrapped_returns'] = bootstrapped_returns
+            self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
+            self.last_training_episode_stats['selected_q_avg'] = selected_q_avg
+            self.last_training_episode_stats['selected_q_std'] = selected_q_std
+
             stats = None
         else:
             stats = {**self.episode_stats,
@@ -1023,6 +1076,9 @@ class DQNWorker(Sepa):
                      'true_neg': true_neg,
                      'false_pos': false_pos,
                      'false_neg': false_neg,
+                     'discounted_rewards': discounted_rewards,
+                     'selected_q_avg': selected_q_avg,
+                     'selected_q_std': selected_q_std,
                      }
 
         # # todo remove this and store instead test episode_stats, terminal_state, gap_auc, db_auc, and send to logger as is.
@@ -1074,7 +1130,10 @@ class DQNWorker(Sepa):
         lp_iterations_limit = self.lp_iterations_limit
         if lp_iterations_limit > 0 and self.episode_stats['lp_iterations'][-1] > lp_iterations_limit:
             # interpolate the dualbound and gap at the limit
-            assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit, 'episode_stats={\n' + "\n".join(["{k}:{v}," for k,v in self.episode_stats.items()]) + '\n}' + f'episode_history={self.episode_history}'
+            if self.episode_stats['lp_iterations'][-2] >= lp_iterations_limit:
+                warn(f'BUG IN STATS\ntraining={self.training}\nterminal_state={self.terminal_state}\nepisode_stats={self.episode_stats}\ncur_graph={self.cur_graph}')
+            # assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit, f'terminal_state={self.terminal_state}\nepisode_stats={self.episode_stats}\nepisode_history={self.episode_history}'
+            # assert self.episode_stats['lp_iterations'][-2] < lp_iterations_limit, f'terminal_state={self.terminal_state}\n'+'episode_stats={\n' + "\n".join([f"{k}:{v}," for k,v in self.episode_stats.items()]) + '\n}' + f'episode_history={self.episode_history}'
             t = self.episode_stats['lp_iterations'][-2:]
             for k in ['dualbound', 'gap']:
                 ft = self.episode_stats[k][-2:]
@@ -1537,11 +1596,7 @@ class DQNWorker(Sepa):
 
     # done
     def execute_episode(self, G, instance_info, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
-        # fix training scip_seed for debug purpose
-        if self.training and self.hparams.get('fix_training_scip_seed'):
-            scip_seed = self.hparams['fix_training_scip_seed']
-
-        # create a SCIP model for G, and disable default cuts
+        # create a SCIP model for G
         hparams = self.hparams
         if hparams['problem'] == 'MAXCUT':
             model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams) #, use_heuristics=False, use_propagation=False)
@@ -1570,12 +1625,10 @@ class DQNWorker(Sepa):
         model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
         # set environment random seed
-        if scip_seed is None:
-            # set random scip seed
-            scip_seed = np.random.randint(1000000000)
-        model.setBoolParam('randomization/permutevars', True)
-        model.setIntParam('randomization/permutationseed', scip_seed)
-        model.setIntParam('randomization/randomseedshift', scip_seed)
+        if scip_seed is not None:
+            model.setBoolParam('randomization/permutevars', True)
+            model.setIntParam('randomization/permutationseed', scip_seed)
+            model.setIntParam('randomization/randomseedshift', scip_seed)
 
         if self.hparams.get('hide_scip_output', True):
             model.hideOutput()

@@ -95,8 +95,11 @@ class ApeXDQN:
         self.evaluation_step = -1
         self.datasets = DQNWorker.load_data(cfg)
         self.stats_template_dict = {
-            'training': {'db_auc': [], 'gap_auc': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []},
-            'validation': {dataset_name: {inst_idx: {} for inst_idx in range(len(dataset['instances']))} for dataset_name, dataset in self.datasets.items() if 'valid' in dataset_name}}
+            'training': {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []},
+            'validation': {dataset_name: {inst_idx: {} for inst_idx in range(len(dataset['instances']))} for dataset_name, dataset in self.datasets.items() if 'valid' in dataset_name},
+            'debugging': {},
+            'last_training_episode_stats': {}
+        }
         self.best_performance = {dataset_name: -1 for dataset_name in self.datasets.keys() if 'valid' in dataset_name}
         self.checkpoint_filepath = os.path.join(self.cfg['run_dir'], 'apex_checkpoint.pt')
         self.print_prefix = '[Apex] '
@@ -309,7 +312,7 @@ class ApeXDQN:
             assert global_step == self.evaluation_step or self.evaluation_step == -1
             self.evaluation_step = global_step
 
-            training_stats, validation_stats = body
+            training_stats, validation_stats, debugging_stats, last_training_episode_stats = body
             # training_stats = {k: v for k, v in training_stats}
             # todo concat training stats to existing step
                 # if type(v) == tuple and v[0] == 'fig':
@@ -323,7 +326,9 @@ class ApeXDQN:
             for k_v_list in validation_stats:
                 stats_dict = {k: v for k, v in k_v_list}
                 self.stats_history[global_step]['validation'][stats_dict['dataset_name']][stats_dict['inst_idx']][stats_dict['scip_seed']] = stats_dict
-
+            for k, v in debugging_stats:
+                self.stats_history[global_step]['debugging'][k] = v
+            self.stats_history[global_step]['last_training_episode_stats'][sender] = {k: v for k, v in last_training_episode_stats}
 
         # update logs
         if len(log_dict) > 0:
@@ -374,6 +379,26 @@ class ApeXDQN:
         for k, values in stats['training'].items():
             if len(values) > 0:
                 log_dict[f'training/{k}'] = np.mean(values)
+                if 'improvement' in k:
+                    log_dict[f'training/frac_of_{k}'] = np.mean(np.array(values) > 1)
+        for k, v in stats['debugging'].items():
+            log_dict[f'debugging/{k}'] = v
+        # todo add here plot of training R, boostrappedR, and Qvals+-std
+        for worker_id, last_training_episode_stats in stats['last_training_episode_stats'].items():
+            fig, ax = plt.subplots(1)
+            discounted_rewards = last_training_episode_stats['discounted_rewards']
+            selected_q_avg = last_training_episode_stats['selected_q_avg']
+            selected_q_std = last_training_episode_stats['selected_q_std']
+            bootstrapped_returns = last_training_episode_stats['last_training_episode_stats']
+            x_axis = np.arange(len(discounted_rewards))
+            ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
+            ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
+            ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
+            ax.fill_between(x_axis, selected_q_avg + selected_q_std, selected_q_avg - selected_q_std, facecolor='red', alpha=0.5)
+            ax.legend()
+            ax.set_xlabel('step')
+            ax.grid()
+            log_dict[f'debugging/{worker_id}_last_training_episode'] = wandb.Image(get_img_from_fig(fig, dpi=300), caption=f'{worker_id}_last_training_episode')
 
         # process validation results
         for dataset_name, dataset_stats in stats['validation'].items():
@@ -752,7 +777,7 @@ class ApeXDQN:
 
 def init_figures(nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_i']*10):
     figures = {}
-    fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP']
+    fignames = ['Dual_Bound_vs_LP_Iterations', 'Gap_vs_LP_Iterations', 'Similarity_to_SCIP', 'Returns_and_Q']
     for figname in fignames:
         fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True, squeeze=False)
         fig.set_size_inches(w=8, h=10)
@@ -839,6 +864,16 @@ def add_subplot(figures, row, col, dqn_stats, inst_info, scip_seed, dataset, avg
                     textcoords="offset points",
                     ha='center', va='bottom')
     ax.set_xticks([], [])  # disable x ticks
+
+    # plot R and Q+-std across steps
+    ax = figures['Returns_and_Q']['axes'][row, col]
+    discounted_rewards = dqn_stats['discounted_rewards']
+    selected_q_avg = dqn_stats['selected_q_avg']
+    selected_q_std = dqn_stats['selected_q_std']
+    x_axis = np.arange(len(discounted_rewards))
+    ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
+    ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
+    ax.fill_between(x_axis, selected_q_avg+selected_q_std, selected_q_avg-selected_q_std, facecolor='red', alpha=0.5)
 
 
 def finish_figures(figures):
