@@ -22,7 +22,7 @@ credit_assignment: True  # False, True
 gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
-eps_decay: 100000
+eps_decay: 50000 #100000
 dqn_objective: db_auc  # options: db_auc, gap_auc
 empty_action_penalty: 0
 select_at_least_one_cut: True
@@ -63,7 +63,7 @@ debug: False
 debug_cuda: False
 overfit: False
 sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
-fix_training_scip_seed: 0  # 0 -> use random seed, 0 < int -> fix the specified seed
+fix_training_scip_seed: 223  # 0 -> use random seed, 0 < int -> fix the specified seed. 223 is scip seed used in solving trainset for default baselines. useful for comparing agent on trainset.
 
 # SCIP STUFF
 #reset_maxcuts_every_round: True  # avoid undesired "unoughcuts" in SCIPseparationRoundLP
@@ -89,10 +89,11 @@ param_sync_interval: 1 # 100  # number of learner.sgd_steps between workers poli
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters
-replay_buffer_capacity: 100000
+replay_buffer_capacity: 50000
 replay_buffer_n_demonstrations: 5000 #10k
 replay_buffer_demonstration_priority_bonus: 0.0001  # todo - tune
 replay_buffer_minimum_size: 5000 #10k
+replay_buffer_max_mem: 40
 use_per: True
 priority_alpha: 0.6
 priority_beta: 0.4

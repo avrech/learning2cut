@@ -182,7 +182,6 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
                 # change pbar description
                 self.pbar.set_description(f'[Replay Server] Filling agent data round no. {self.filling_round}')
 
-
     def request_data(self, data_type):
         assert data_type in ['agent', 'demonstration']
         print(self.print_prefix, f'Publishing {data_type} data request')

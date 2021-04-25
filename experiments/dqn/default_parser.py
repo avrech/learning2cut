@@ -82,7 +82,7 @@ parser.add_argument("--replay_buffer_capacity", type=int, default=100000, help="
 parser.add_argument("--replay_buffer_n_demonstrations", type=int, default=10000, help="how many demonstration transitions to save in replay buffer during training")
 parser.add_argument("--replay_buffer_demonstration_priority_bonus", type=float, default=0.0001, help="additive bonus to demonstrations priority")
 parser.add_argument("--replay_buffer_minimum_size", type=int, default=10000, help="minimal number of transitions in replay buffer to start learning")
-parser.add_argument("--replay_buffer_max_mem", type=int, default=45, help="maximal memory usage in GBytes")
+parser.add_argument("--replay_buffer_max_mem", type=int, default=40, help="maximal memory usage in GBytes")
 parser.add_argument("--use_per", type=str2bool, nargs='?', const=True, default=False, help="use prioritiezed replay buffer")
 parser.add_argument("--priority_alpha", type=float, default=0.6, help="prioritized replay buffer alpha")
 parser.add_argument("--priority_beta", type=float, default=0.4, help="prioritized replay buffer beta (exploration temperature. 1 is random?)")
