@@ -191,7 +191,11 @@ def solve_graphs(worker_config):
                     db, gap, lp_iter = bsl_sepa.stats['dualbound'], bsl_sepa.stats['gap'], bsl_sepa.stats['lp_iterations']
                     db_auc = sum(get_normalized_areas(t=lp_iter, ft=db, t_support=dataset_config['lp_iterations_limit'], reference=bnc_model.getObjVal()))
                     gap_auc = sum(get_normalized_areas(t=lp_iter, ft=gap, t_support=dataset_config['lp_iterations_limit'], reference=0))
-                    stats = {'db_auc': db_auc, 'gap_auc': gap_auc}
+                    stats = {'db_auc': db_auc,
+                             'gap_auc': gap_auc,
+                             'lp_iterations': bsl_sepa.stats['lp_iterations'],
+                             'dualbound': bsl_sepa.stats['dualbound'],
+                             'gap': bsl_sepa.stats['gap']}
                     if save_all_stats:
                         stats.update(bsl_sepa.stats)
                     baseline_stats[bsl][scip_seed] = stats
