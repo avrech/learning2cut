@@ -389,7 +389,7 @@ class ApeXDQN:
             discounted_rewards = last_training_episode_stats['discounted_rewards']
             selected_q_avg = last_training_episode_stats['selected_q_avg']
             selected_q_std = last_training_episode_stats['selected_q_std']
-            bootstrapped_returns = last_training_episode_stats['last_training_episode_stats']
+            bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
             x_axis = np.arange(len(discounted_rewards))
             ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
             ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
