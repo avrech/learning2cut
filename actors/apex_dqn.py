@@ -387,8 +387,8 @@ class ApeXDQN:
         for worker_id, last_training_episode_stats in stats['last_training_episode_stats'].items():
             fig, ax = plt.subplots(1)
             discounted_rewards = last_training_episode_stats['discounted_rewards']
-            selected_q_avg = last_training_episode_stats['selected_q_avg']
-            selected_q_std = last_training_episode_stats['selected_q_std']
+            selected_q_avg = np.array(last_training_episode_stats['selected_q_avg'])
+            selected_q_std = np.array(last_training_episode_stats['selected_q_std'])
             bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
             x_axis = np.arange(len(discounted_rewards))
             ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
@@ -868,8 +868,8 @@ def add_subplot(figures, row, col, dqn_stats, inst_info, scip_seed, dataset, avg
     # plot R and Q+-std across steps
     ax = figures['Returns_and_Q']['axes'][row, col]
     discounted_rewards = dqn_stats['discounted_rewards']
-    selected_q_avg = dqn_stats['selected_q_avg']
-    selected_q_std = dqn_stats['selected_q_std']
+    selected_q_avg = np.array(dqn_stats['selected_q_avg'])
+    selected_q_std = np.array(dqn_stats['selected_q_std'])
     x_axis = np.arange(len(discounted_rewards))
     ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
     ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
