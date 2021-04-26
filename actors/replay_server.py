@@ -70,7 +70,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         torch.save({
             'num_sgd_steps_done': self.num_sgd_steps_done
         }, self.checkpoint_filepath)
-        self.print(f'saved checkpoint to {self.checkpoint_filepath}')
+        # self.print(f'saved checkpoint to {self.checkpoint_filepath}')
 
     def load_checkpoint(self):
         if not os.path.exists(self.checkpoint_filepath):
@@ -201,13 +201,14 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
 
         if self.collecting_demonstrations:
             self.request_data(data_type='demonstration')
-
+        last_checkpoint_sgd_step = -1
         while True:
             self.recv_replay_data()
             self.send_batches()
             self.recv_new_priorities()
-            if self.num_sgd_steps_done > 0 and self.num_sgd_steps_done % self.checkpoint_interval == 0:
+            if self.num_sgd_steps_done > 0 and self.num_sgd_steps_done % self.checkpoint_interval == 0 and last_checkpoint_sgd_step < self.num_sgd_steps_done:
                 self.save_checkpoint()
+                last_checkpoint_sgd_step = self.num_sgd_steps_done
 
             if self.collecting_demonstrations and self.next_idx >= self.n_demonstrations:
                 # request workers to generate agent data from now on
