@@ -472,43 +472,53 @@ class DQNWorker(Sepa):
             # assert (selected_cuts == self.prev_action['applied']).all(), f"selected cuts({len(selected_cuts)}): {selected_cuts}\napplied({self.prev_action['applied']}): {self.prev_action['applied']}"
             if (selected_cuts != self.prev_action['applied']).any():
                 # find the missing cuts, assert that they are marked in sepastore, compute slack, and correct applied flag
-                missing_cuts_idx = np.nonzero(selected_cuts != self.prev_action['applied'])[0]
-                selected_cuts_names = self.model.getSelectedCutsNames()
-                nvars = self.model.getNVars()
-                ncuts = self.prev_action['ncuts']
-                cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
-                cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
-                cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
-                cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)),
-                                                   shape=[ncuts, nvars]).toarray()
-                final_solution = self.model.getBestSol()
-                sol_vector = np.array([self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()])
-                # todo - we should take the LP solution and not the best primal solution as it is done. The
-                # problem is that getLPSol produces large negative slacks....
-                # sol_vector = np.array([x_i.getLPSol() for x_i in self.x.values()])
-                cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
-                rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
-                normalized_slack = rhs_slack / cuts_norm
-                cut_names = list(self.prev_action['cuts'].keys())
-                for idx in missing_cuts_idx:
-                    cut_name = cut_names[idx]
-                    # assert cut_name in selected_cuts_names, "action was not executed by sepastore properly"
-                    if cut_name not in selected_cuts_names:
-                        # duboius behavior
-                        warn(f'action was not executed by sepastore properly\nprev_action = {self.prev_action}\nselected_cuts_names = {selected_cuts_names}\nmissing_cut_name = {cut_name}')
-                        if self.training:
-                            # terminate episode with 'TRAINING_BUG' and discard
-                            self.terminal_state = 'TRAINING_BUG'
-                            self.model.clearCuts()
-                            self.model.interruptSolve()
-                            return {"result": SCIP_RESULT.DIDNOTFIND}
-
-                    self.prev_action['cuts'][cut_name]['applied'] = True
-                    self.prev_action['cuts'][cut_name]['normalized_slack'] = normalized_slack[idx]
-                    self.prev_action['cuts'][cut_name]['selection_order'] = selected_cuts_names.index(cut_name)
-                    self.prev_action['normalized_slack'][idx] = normalized_slack[idx]
-                    self.prev_action['applied'][idx] = True
-                    self.prev_action['selection_order'][idx] = selected_cuts_names.index(cut_name)
+                try:
+                    missing_cuts_idx = np.nonzero(selected_cuts != self.prev_action['applied'])[0]
+                    selected_cuts_names = self.model.getSelectedCutsNames()
+                    nvars = self.model.getNVars()
+                    ncuts = self.prev_action['ncuts']
+                    cuts_nnz_vals = self.prev_state['cut_nzrcoef']['vals']
+                    cuts_nnz_rowidxs = self.prev_state['cut_nzrcoef']['rowidxs']
+                    cuts_nnz_colidxs = self.prev_state['cut_nzrcoef']['colidxs']
+                    cuts_matrix = sp.sparse.coo_matrix((cuts_nnz_vals, (cuts_nnz_rowidxs, cuts_nnz_colidxs)),
+                                                       shape=[ncuts, nvars]).toarray()
+                    final_solution = self.model.getBestSol()
+                    sol_vector = np.array([self.model.getSolVal(final_solution, x_i) for x_i in self.x.values()])
+                    # todo - we should take the LP solution and not the best primal solution as it is done. The
+                    # problem is that getLPSol produces large negative slacks....
+                    # sol_vector = np.array([x_i.getLPSol() for x_i in self.x.values()])
+                    cuts_norm = np.linalg.norm(cuts_matrix, axis=1)
+                    rhs_slack = self.prev_action['rhss'] - cuts_matrix @ sol_vector  # todo what about the cst and norm?
+                    normalized_slack = rhs_slack / cuts_norm
+                    cut_names = list(self.prev_action['cuts'].keys())
+                    for idx in missing_cuts_idx:
+                        cut_name = cut_names[idx]
+                        # assert cut_name in selected_cuts_names, "action was not executed by sepastore properly"
+                        if cut_name not in selected_cuts_names:
+                            # duboius behavior
+                            warn(f'SCIP ERROR:\naction was not executed by sepastore properly\nprev_action = {self.prev_action}\nselected_cuts_names = {selected_cuts_names}\nmissing_cut_name = {cut_name}')
+                            if self.training:
+                                # terminate episode with 'TRAINING_BUG' and discard
+                                self.terminal_state = 'TRAINING_BUG'
+                                self.model.clearCuts()
+                                self.model.interruptSolve()
+                                return {"result": SCIP_RESULT.DIDNOTFIND}
+                        # we mark cut as applied, although it is not in the LP, assuming that it was just removed by SCIP for some reason.
+                        self.prev_action['cuts'][cut_name]['applied'] = True
+                        self.prev_action['cuts'][cut_name]['normalized_slack'] = normalized_slack[idx]
+                        self.prev_action['cuts'][cut_name]['selection_order'] = selected_cuts_names.index(cut_name)
+                        self.prev_action['normalized_slack'][idx] = normalized_slack[idx]
+                        self.prev_action['applied'][idx] = True
+                        self.prev_action['selection_order'][idx] = selected_cuts_names.index(cut_name)
+                except IndexError:
+                    warn(f'INDEX ERROR:\nprev_action = {self.prev_action}\nselected_cuts_names = {selected_cuts_names}\nmissing_cuts_idx = {missing_cuts_idx}\ncur_graph = {self.cur_graph}')
+                    if self.training:
+                        self.print('discarding corrupted episode')
+                        # terminate episode with 'TRAINING_BUG' and discard
+                        self.terminal_state = 'TRAINING_BUG'
+                        self.model.clearCuts()
+                        self.model.interruptSolve()
+                        return {"result": SCIP_RESULT.DIDNOTFIND}
 
             # # assert that the slack variables are all non-negative
             # assert (self.prev_action['normalized_slack'] >= 0).all()

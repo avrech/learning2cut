@@ -89,9 +89,6 @@ class DQNLearner:
         self.n_step_loss_moving_avg = 0
         self.demonstration_loss_moving_avg = 0
 
-        # initialize (set seed and load checkpoint)
-        self.initialize_training()
-
         # idle time monitor
         self.idle_time_sec = 0
 
@@ -745,9 +742,6 @@ class DQNLearner:
         self.set_training_mode()
         if self.hparams.get('resume', False):
             self.load_checkpoint()
-            # initialize prioritized replay buffer internal counters, to continue beta from the point it was
-            if self.use_per:
-                self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
     def print(self, expr):
         print(self.print_prefix, expr)

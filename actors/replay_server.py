@@ -70,6 +70,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         torch.save({
             'num_sgd_steps_done': self.num_sgd_steps_done
         }, self.checkpoint_filepath)
+        self.print(f'saved checkpoint to {self.checkpoint_filepath}')
 
     def load_checkpoint(self):
         if not os.path.exists(self.checkpoint_filepath):
