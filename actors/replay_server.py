@@ -85,7 +85,7 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
         batch_packet = pa.serialize(batch).to_buffer()
         return batch_packet
 
-    # todo - this is essentially the same like unpcak_replay_data. unify those two to one general unpack()
+    # todo - this is the same like unpcak_replay_data. unify those two to one general unpack()
     @staticmethod
     def unpack_priorities(priorities_packet):
         unpacked_priorities = pa.deserialize(priorities_packet)
@@ -151,9 +151,9 @@ class PrioritizedReplayServer(PrioritizedReplayBuffer):
                 self.pbar.total = self.capacity
                 self.pbar.refresh()
 
-            if self.pbar.n < self.next_idx:
+            if self.pbar.n < self.next_idx and n_added > 0:
                 self.pbar.update(n_added)
-            else:
+            elif n_added > 0:
                 # completed filling round
                 self.pbar.update(self.capacity - self.pbar.n)
                 self.pbar.close()
