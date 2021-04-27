@@ -2,6 +2,7 @@
 
 problem: MVC
 aggressive_separation: True
+use_heuristics: False
 datasets:
   trainset_60_70:
     lp_iterations_limit: 2000

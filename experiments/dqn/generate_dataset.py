@@ -161,9 +161,9 @@ def solve_graphs(worker_config):
                 # for training graphs solve only once for seed=223
                 for scip_seed in dataset_config.get('scip_seed', [223]):
                     if problem == 'MAXCUT':
-                        bsl_model, _, _ = maxcut_mccormic_model(G)
+                        bsl_model, _, _ = maxcut_mccormic_model(G, use_heuristics=worker_config['use_heuristics'])
                     elif problem == 'MVC':
-                        bsl_model, _ = mvc_model(G)
+                        bsl_model, _ = mvc_model(G, use_heuristics=worker_config['use_heuristics'])
                     if worker_config['aggressive_separation']:
                         set_aggresive_separation(bsl_model)
                     bsl_model.setRealParam('limits/time', dataset_config['time_limit_sec'])
