@@ -381,6 +381,20 @@ class ApeXDQN:
                 log_dict[f'training/{k}'] = np.mean(values)
                 if 'improvement' in k:
                     log_dict[f'training/frac_of_{k}'] = np.mean(np.array(values) > 1)
+        # todo check if works and renove the else statement below (logging 0)
+        for k in ['db_auc', 'gap_auc']:
+            dqn_vals = np.array(stats['training'][k])
+            dqn_imp = np.array(stats['training'][k+'_improvement'])
+            if sum(dqn_imp > 1) > 0:
+                dqn_vals_above1 = dqn_vals[dqn_imp > 1]
+                diff_where_imp_above1 = dqn_vals_above1 * (1 - 1 / dqn_imp[dqn_imp > 1])
+                imp_above1 = dqn_imp[dqn_imp > 1]
+                log_dict[f'training/{k}_imp_where_imp_above1'] = np.mean(imp_above1)
+                log_dict[f'training/{k}_diff_where_imp_above1'] = np.mean(diff_where_imp_above1)
+            else:
+                log_dict[f'training/{k}_imp_where_imp_above1'] = 0
+                log_dict[f'training/{k}_diff_where_imp_above1'] = 0
+                
         for k, v in stats['debugging'].items():
             log_dict[f'debugging/{k}'] = v
         # todo add here plot of training R, boostrappedR, and Qvals+-std

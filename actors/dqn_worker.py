@@ -1614,13 +1614,12 @@ class DQNWorker(Sepa):
         # create a SCIP model for G
         hparams = self.hparams
         if hparams['problem'] == 'MAXCUT':
-            model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams) #, use_heuristics=False, use_propagation=False)
+            model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams, use_heuristics=hparams['use_heuristics'])  #, use_propagation=False)
         elif hparams['problem'] == 'MVC':
-            model, x = mvc_model(G) #, use_heuristics=False, use_propagation=False)
+            model, x = mvc_model(G, use_heuristics=hparams['use_heuristics'])  #, use_heuristics=False, use_propagation=False)
             cut_generator = None
         if hparams['aggressive_separation']:
             set_aggresive_separation(model)
-
 
         # reset new episode
         self.init_episode(G, x, lp_iterations_limit, cut_generator=cut_generator, instance_info=instance_info,

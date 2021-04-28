@@ -5,7 +5,7 @@ aggressive_separation: True
 use_heuristics: False
 datasets:
   trainset_60_70:
-    lp_iterations_limit: 2000
+    lp_iterations_limit: 1000
     ngraphs: 10000
     barabasi_albert_m: 15
     weights: uniform01  # uniform01 | normal | ones
@@ -19,7 +19,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: False
   validset_60_70:
-    lp_iterations_limit: 2000
+    lp_iterations_limit: 1000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
     ngraphs: 5
@@ -35,7 +35,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: True
   testset_60_70:
-    lp_iterations_limit: 2000
+    lp_iterations_limit: 1000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
     ngraphs: 5
@@ -51,7 +51,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: True
   validset_90_100:
-    lp_iterations_limit: 2000  # 50000
+    lp_iterations_limit: 1000  # 50000
     eval_interval: 10  # single-thread: 500, distributed: 10
     scip_seed: [52, 176, 223]
     ngraphs: 5
@@ -67,7 +67,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: True
   testset_90_100:
-    lp_iterations_limit: 2000  # 50000
+    lp_iterations_limit: 1000  # 50000
     eval_interval: 10  # single-thread: 500, distributed: 10
     scip_seed: [52, 176, 223]
     ngraphs: 5
@@ -83,7 +83,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: True
   validset_150_160:
-    lp_iterations_limit: 2000  # 100000
+    lp_iterations_limit: 1000  # 100000
     eval_interval: 50  # single-thread: 1000, distributed: 50
     scip_seed: [52, 176, 223]
     ngraphs: 5
@@ -99,7 +99,7 @@ datasets:
     baseline_solver: scip
     save_all_stats: True
   testset_150_160:
-    lp_iterations_limit: 2000  # 100000
+    lp_iterations_limit: 1000  # 100000
     eval_interval: 50  # single-thread: 1000, distributed: 50
     scip_seed: [52, 176, 223]
     ngraphs: 5
