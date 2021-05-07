@@ -284,7 +284,7 @@ if False:
                 'lp_rounds': [],
             }
             g = nx.barabasi_albert_graph(n=gs, m=m)
-            nx.set_node_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
+            nx.set_edge_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
             for seed in seeds:
                 model, _, _ = maxcut_mccormic_model(g)
                 set_aggresive_separation(model)
@@ -344,10 +344,10 @@ plt.savefig(f'sweet_spot_results/maxcut-ba-sweet-spot-lpiter{lp_iterations_limit
 
 # plot dual bound graphs of each graph size to see if plateau was reached:
 full_res = {}
-if False:
-    for gs, m in zip(graph_sizes, [20,35,50]):
+if True:
+    for gs, m, lp_iterations_limit in zip(graph_sizes, [15, 20, 40], [5000, 7000, 10000]):
         g = nx.barabasi_albert_graph(n=gs, m=m)
-        nx.set_node_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
+        nx.set_edge_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
         for seed in seeds:
             model, _, _ = maxcut_mccormic_model(g)
             set_aggresive_separation(model)
@@ -368,10 +368,10 @@ if False:
             sepa.update_stats()
             full_res[gs] = sepa.stats
             full_res[gs]['density'] = '{}({:.2f})'.format(m, nx.density(g))
-    with open(f'sweet_spot_results/maxcut-ba-full-res-lpiter{lp_iterations_limit}.pkl', 'wb') as f:
+    with open(f'sweet_spot_results/maxcut-ba-full-res-lpiter5k7k10k.pkl', 'wb') as f:
         pickle.dump(full_res, f)
 
-with open(f'sweet_spot_results/maxcut-ba-full-res-lpiter{lp_iterations_limit}.pkl', 'rb') as f:
+with open(f'sweet_spot_results/maxcut-ba-full-res-lpiter5k7k10k.pkl', 'rb') as f:
     full_res = pickle.load(f)
 
 fig = plt.figure(figsize=(16,10))

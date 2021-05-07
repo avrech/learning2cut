@@ -176,7 +176,7 @@ def solve_graphs(worker_config):
                     bsl_model.hideOutput(quiet=quiet)
                     hparams = {
                         'lp_iterations_limit': dataset_config['lp_iterations_limit'],
-                        'criterion': bsl,
+                        'policy': bsl,
                         'reset_maxcuts': worker_config['reset_maxcuts'],
                         'reset_maxcutsroot': worker_config['reset_maxcutsroot']
                     }

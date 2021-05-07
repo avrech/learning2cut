@@ -848,17 +848,19 @@ class MccormickCycleSeparator(Sepa):
 class CSBaselineSepa(Sepa):
     def __init__(self, hparams={}):
         """
+        Applies criterion to cut selection, supporting:
+        default (do nothing), k_random, k_most_violated, all_cuts.
         Sample scip.Model state every time self.sepaexeclp is invoked.
-        Store the generated data object in
         """
         super(CSBaselineSepa, self).__init__()
         self.name = 'Baseline Separator'
         self.hparams = hparams
-        self.criterion = hparams.get('criterion', 'default')
+        self.policy = hparams.get('policy', 'default')
         self.add_k = 0
-        if self.criterion != 'default':
-            self.add_k = int(self.criterion.split('_')[0])
-            assert self.criterion.endswith('random') or self.criterion.endswith('most_violated')
+        if self.policy not in ['default', 'all_cuts']:
+            self.add_k = int(self.policy.split('_')[0])
+            assert self.policy.endswith('random') or self.policy.endswith('most_violated')
+
         # instance specific data needed to be reset every episode
         # todo unifiy x and y to x only (common for all combinatorial problems)
         self.G = None
@@ -932,11 +934,21 @@ class CSBaselineSepa(Sepa):
         # print('n pool cuts ', self.model.getNPoolCuts())
         if available_cuts['ncuts'] > 0:
             # prob what scip cut selection algorithm would do in this state
-            if self.criterion == 'default':
+            if self.policy == 'default':
                 # use SCIP's cut selection (don't do anything)
                 result = {"result": SCIP_RESULT.DIDNOTRUN}
 
-            elif self.criterion.endswith('random'):
+            elif self.policy == 'all_cuts':
+                selected = np.ones((available_cuts['ncuts'],))
+                self.model.forceCuts(selected)
+                # set SCIP maxcutsroot and maxcuts to the number of selected cuts,
+                # in order to prevent it from adding more or less cuts
+                self.model.setIntParam('separating/maxcuts', int(sum(selected)))
+                self.model.setIntParam('separating/maxcutsroot', int(sum(selected)))
+                # continue to the next state
+                result = {"result": SCIP_RESULT.SEPARATED}
+
+            elif self.policy.endswith('random'):
                 # apply the action
                 random_idxes = torch.randperm(available_cuts['ncuts'])[:self.add_k].numpy()
                 selected = np.zeros((available_cuts['ncuts'],))
@@ -950,7 +962,7 @@ class CSBaselineSepa(Sepa):
                 # continue to the next state
                 result = {"result": SCIP_RESULT.SEPARATED}
 
-            elif self.criterion.endswith('most_violated'):
+            elif self.policy.endswith('most_violated'):
                 # available_cuts['selected_by_scip'] = np.array(
                 #     [cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
                 info = self.model.getState(state_format='dict')
@@ -974,7 +986,7 @@ class CSBaselineSepa(Sepa):
         return result
 
     def assert_behavior(self):
-        if self.criterion != 'default':
+        if self.policy != 'default':
             assert self.model.getParam('separating/maxcuts') == self.hparams.get('reset_maxcuts', 100)
             assert self.model.getParam('separating/maxcutsroot') == self.hparams.get('reset_maxcutsroot', 2000)
 

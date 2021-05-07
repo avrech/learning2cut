@@ -127,7 +127,7 @@ if False:
             if size == 100:
                 continue
             hparams = {'lp_iterations_limit': lp_iterations_limit,
-                       'criterion': baseline,
+                       'policy': baseline,
                        'reset_maxcuts': 100000,
                        'reset_maxcutsroot': 100000}
             for idx, G in enumerate(tqdm(glist, desc=f'solving size={size} baseline={baseline}')):
