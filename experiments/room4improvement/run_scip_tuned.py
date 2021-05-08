@@ -16,6 +16,7 @@ parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus availab
 parser.add_argument('--nodeid', type=int, default=0, help='node id for running on compute canada')
 parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
 parser.add_argument('--run_local', action='store_true', help='run on the local machine')
+parser.add_argument('--run_node', action='store_true', help='run on the local machine')
 args = parser.parse_args()
 np.random.seed(777)
 
@@ -117,7 +118,7 @@ def get_data_and_configs():
     for k, vals in search_space.items():
         kv_list.append([(k, v) for v in vals])
 
-    configs = product(*kv_list)
+    configs = list(product(*kv_list))
     assert len(configs) == 3**6
     return data, configs
 
@@ -133,7 +134,7 @@ def run_node(args):
     main_results_file = os.path.join(args.rootdir, 'scip_tuned_main_results.pkl')
     with open(main_results_file, 'rb') as f:
         main_results = pickle.load(f)
-    missing_configs = set(all_configs) - set(main_results['configs'].keys())
+    missing_configs = list(set(all_configs) - set(main_results['configs'].keys()))
     # assign configs to current machine
     node_configs = []
     for idx in range(args.nodeid, len(missing_configs), args.nnodes):
@@ -196,12 +197,12 @@ def submit_job(jobname, nodeid, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines(f'python run_scip_tuned.py --rootdir {args.rootdir} --nnodes {args.nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid}\n')
+        fh.writelines(f'python run_scip_tuned.py --rootdir {args.rootdir} --nnodes {args.nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
 
     os.system("sbatch {}".format(job_file))
 
 
-def main():
+def main(args):
     data, all_configs = get_data_and_configs()
     # update main_results
     main_results_file = os.path.join(args.rootdir, 'scip_tuned_main_results.pkl')
@@ -261,4 +262,9 @@ def main():
         print(f'saved scip_tuned_best_configs to {scip_tuned_best_configs_file}')
 
 
-print('finished')
+if __name__ == '__main__':
+    if args.run_node:
+        run_node(args)
+    else:
+        main(args)
+    print('finished')

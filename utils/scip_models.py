@@ -988,6 +988,7 @@ class CSBaselineSepa(Sepa):
                 self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'])
                 self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'])
                 self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'])
+                result = {"result": SCIP_RESULT.DIDNOTRUN}
 
             self.stats_updated = False  # mark false to record relevant stats after this action will make effect
             self.prev_ncuts = available_cuts['ncuts']
