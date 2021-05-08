@@ -7,7 +7,7 @@ from utils.functions import get_normalized_areas
 from tqdm import tqdm
 import pickle
 import pandas as pd
-
+np.random.seed(777)
 ROOTDIR = 'results'
 import os
 if not os.path.isdir(ROOTDIR):
@@ -24,7 +24,7 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
         g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
         nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
         model, _ = mvc_model(g, use_random_branching=False, allow_restarts=True)
-        model.hideOutput(True)
+        # model.hideOutput(True)
         model.optimize()
         assert model.getGap() == 0
         stats = {}
@@ -38,12 +38,12 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
 
     # maxcut
     graph_sizes = [40, 70, 100]
-    ms = [15, 20, 40]
+    ms = [15, 15, 15]
     for gs, m in tqdm(zip(graph_sizes, ms), desc='generating graphs for MAXCUT'):
         g = nx.barabasi_albert_graph(n=gs, m=m)
         nx.set_edge_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
-        model, _, _ = maxcut_mccormic_model(g, use_random_branching=False, allow_restarts=True)
-        model.hideOutput(True)
+        model, _, _ = maxcut_mccormic_model(g, use_random_branching=False, allow_restarts=True, use_cycles=False)
+        # model.hideOutput(True)
         model.optimize()
         assert model.getGap() == 0
         stats = {}
@@ -65,8 +65,22 @@ else:
         data = pickle.load(f)
 
 
+if not os.path.exists(f'{ROOTDIR}/scip_tuned_best_config.pkl'):
+    print('run scip tuned baseline first, then re-run again.')
+    exit(0)
 
-print('############### running simple baselines ###############')
+with open(f'{ROOTDIR}/scip_tuned_best_config.pkl', 'rb') as f:
+    scip_tuned_best_config = pickle.load(f)
+
+if not os.path.exists(f'{ROOTDIR}/scip_adaptive_best_config.pkl'):
+    print('run scip adaptive baseline first, then re-run again.')
+    exit(0)
+
+with open(f'{ROOTDIR}/scip_adaptive_best_config.pkl', 'rb') as f:
+    scip_adaptive_best_config = pickle.load(f)
+
+# todo run here also tuned and adaptive policies
+print('############### run all baselines on local machine to compare solving time ###############')
 # run default, 15-random, 15-most-violated and all-cuts baselines
 seeds = [46, 72, 101]
 problems = ['mvc', 'maxcut']
@@ -119,19 +133,6 @@ else:
     with open(f'{ROOTDIR}/results.pkl', 'rb') as f:
         results = pickle.load(f)
 
-if not os.path.exists(f'{ROOTDIR}/scip_tuned_results.pkl'):
-    print('run scip tuned baseline first, then re-run again.')
-    exit(0)
-
-with open(f'{ROOTDIR}/scip_tuned_results.pkl', 'rb') as f:
-    scip_tuned_results = pickle.load(f)
-
-if not os.path.exists(f'{ROOTDIR}/scip_adaptive.pkl'):
-    print('run scip adaptive baseline first, then re-run again.')
-    exit(0)
-
-with open(f'{ROOTDIR}/scip_adaptive_results.pkl', 'rb') as f:
-    scip_adaptive_results = pickle.load(f)
 
 print('############### analyzing results ###############')
 
