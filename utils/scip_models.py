@@ -209,6 +209,8 @@ def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
         model.includeSepa(cycle_sepa, 'MLCycles',
                           "Generate cycle inequalities for the MaxCut McCormick formulation",
                           priority=1000000, freq=1)
+    else:
+        cycle_sepa = None
     if not allow_restarts:
         model.setIntParam('presolving/maxrestarts', 0)
     if add_trivial_sol:
@@ -252,12 +254,12 @@ class MccormickCycleSeparator(Sepa):
         # cycle separation routine
         self.enable_chordality_check = hparams.get('enable_chordality_check', False)
         self.chordless_only = hparams.get('chordless_only', False)
-        self.simple_cycle_only = hparams.get('simple_cycle_only', False)
+        self.simple_cycle_only = hparams.get('simple_cycle_only', True)
         self._dijkstra_edge_list = None
         self.added_cuts = set()
 
         # policy
-        self.policy = hparams.get('policy', 'baseline')
+        self.policy = 'notusedanymore'  # hparams.get('policy', 'baseline')
 
         # adaptive policy
         self.starting_policies = []
@@ -857,7 +859,7 @@ class CSBaselineSepa(Sepa):
         self.hparams = hparams
         self.policy = hparams.get('policy', 'default')
         self.add_k = 0
-        if self.policy not in ['default', 'all_cuts']:
+        if self.policy not in ['default', 'all_cuts', 'tuned', 'adaptive']:
             self.add_k = int(self.policy.split('_')[0])
             assert self.policy.endswith('random') or self.policy.endswith('most_violated')
 
@@ -977,6 +979,16 @@ class CSBaselineSepa(Sepa):
                 self.model.setIntParam('separating/maxcuts', int(sum(selected)))
                 self.model.setIntParam('separating/maxcutsroot', int(sum(selected)))
                 result = {"result": SCIP_RESULT.SEPARATED}
+
+            elif self.policy == 'tuned':
+                # reset separating parameters
+                self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'])
+                self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'])
+                self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'])
+                self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'])
+                self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'])
+                self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'])
+
             self.stats_updated = False  # mark false to record relevant stats after this action will make effect
             self.prev_ncuts = available_cuts['ncuts']
 
