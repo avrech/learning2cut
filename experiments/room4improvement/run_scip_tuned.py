@@ -188,7 +188,7 @@ def submit_job(jobname, nodeid, time_limit_minutes):
         fh.writelines("#!/bin/bash\n")
         fh.writelines(f'#SBATCH --time=00:{time_limit_minutes}:00\n')
         fh.writelines('#SBATCH --account=def-alodi\n')
-        fh.writelines('#SBATCH --output=%j.out\n')
+        fh.writelines(f'#SBATCH --output={args.rootdir}/{jobname}.out\n')
         fh.writelines('#SBATCH --mem=0\n')
         fh.writelines('#SBATCH --nodes=1\n')
         fh.writelines(f'#SBATCH --job-name={jobname}\n')
