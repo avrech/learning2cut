@@ -84,7 +84,7 @@ def run_worker(data, configs, port, workerid):
                 cfg_db_auc_avg[problem][graph_size] = db_auc_avg
 
         logs.append((config, cfg_db_auc_avg))
-        if len(logs) >= 5:
+        if len(logs) >= 1:
             # send logs to main process for checkpointing
             msg = (workerid, logs, best_configs, best_db_aucs)
             packet = pa.serialize(msg).to_buffer()
@@ -169,8 +169,8 @@ def run_node(args):
                         node_results['best_db_aucs'][problem][graph_size] = worker_best_db_auc_avgs[problem][graph_size]
                         node_results['best_configs'][problem][graph_size] = worker_best_cfgs[problem][graph_size]
         pbar.update(len(logs))
-        # save to node results file every 10 configs
-        if len(node_results['configs']) - last_save > 10:
+        # save to node results file every 5 configs
+        if len(node_results['configs']) - last_save > 5:
             last_save = len(node_results['configs'])
             with open(node_results_file, 'wb') as f:
                 pickle.dump(node_results, f)
@@ -250,7 +250,7 @@ def main(args):
             run_node(args)
         else:
             # submit nnodes jobs
-            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 0.3 / args.nnodes / (args.ncpus_per_node - 1)) + 2), 16)
+            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 10 / args.nnodes / (args.ncpus_per_node - 1)) + 2), 16)
             for nodeid in range(args.nnodes):
                 submit_job(f'scip_tuned{nodeid}', nodeid, time_limit_minutes)
     else:
