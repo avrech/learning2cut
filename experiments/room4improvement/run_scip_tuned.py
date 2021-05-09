@@ -262,7 +262,7 @@ def main(args):
     else:
         # save scip tuned best config to
         scip_tuned_best_configs_file = os.path.join(args.rootdir, 'scip_tuned_best_config.pkl')
-        scip_tuned_best_configs = {p: {gs: {seed: {k: v for (k, v) in cfg} for seed, cfg in seeds.items()} for gs, seeds in graph_sizes.items()} for p, gss in main_results['best_configs'].items()}
+        scip_tuned_best_configs = {p: {gs: {seed: {k: v for (k, v) in cfg} for seed, cfg in seeds.items()} for gs, seeds in gss.items()} for p, gss in main_results['best_configs'].items()}
         with open(scip_tuned_best_configs_file, 'wb') as f:
             pickle.dump(scip_tuned_best_configs, f)
         print(f'saved scip_tuned_best_configs to {scip_tuned_best_configs_file}')
