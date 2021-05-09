@@ -220,6 +220,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines(f'#SBATCH --job-name={jobname}\n')
         fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines(f'#SBATCH --cpus-per-task={args.ncpus_per_node}\n')
+        fh.writelines('module load NiaEnv/2018a\n')
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
