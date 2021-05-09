@@ -19,6 +19,7 @@ parser.add_argument('--run_local', action='store_true', help='run on the local m
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
 args = parser.parse_args()
 np.random.seed(777)
+SEEDS = [46, 72, 101]
 
 
 @ray.remote
@@ -29,61 +30,57 @@ def run_worker(data, configs, port, workerid):
     send_socket.connect(f'tcp://127.0.0.1:{port}')
     baseline = 'scip_tuned'
     logs = []
-    best_configs = {p: {} for p in data.keys()}
-    best_db_aucs = {p: {gs: 0 for gs in instances.keys()} for p, instances in data.items()}
+    best_configs = {p: {gs: {seed: None for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()}
+    best_db_aucs = {p: {gs: {seed: 0 for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()}
     for config in tqdm(configs, desc=f'worker {workerid}'):
         cfg = {k: v for (k, v) in config}
-        cfg_db_auc_avg = {p: {} for p in data.keys()}
-        for problem, instances in data.items():
-            for graph_size, (g, info) in instances.items():
-                db_auc_values = []
-                for seed in [46, 72, 101]:
-                    if problem == 'mvc':
-                        model, _ = mvc_model(g)
-                        lp_iterations_limit = 1500
-                    elif problem == 'maxcut':
-                        model, _, _ = maxcut_mccormic_model(g)
-                        lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
-                    else:
-                        raise ValueError
-                    set_aggresive_separation(model)
-                    sepa_params = {'lp_iterations_limit': lp_iterations_limit,
-                                   'policy': 'tuned',
-                                   'reset_maxcuts': 100,
-                                   'reset_maxcutsroot': 100,
-                                   }
-                    sepa_params.update(cfg)
+        problem = cfg['problem']
+        instances = data[problem]
+        cfg_db_aucs = {problem: {gs: {} for gs in data[problem].keys()}}
+        for graph_size, (g, info) in instances.items():
+            for seed in SEEDS:
+                if problem == 'mvc':
+                    model, _ = mvc_model(g)
+                    lp_iterations_limit = 1500
+                elif problem == 'maxcut':
+                    model, _, _ = maxcut_mccormic_model(g)
+                    lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
+                else:
+                    raise ValueError
+                set_aggresive_separation(model)
+                sepa_params = {'lp_iterations_limit': lp_iterations_limit,
+                               'policy': 'tuned',
+                               'reset_maxcuts': 100,
+                               'reset_maxcutsroot': 100,
+                               }
+                sepa_params.update(cfg)
 
-                    sepa = CSBaselineSepa(hparams=sepa_params)
-                    model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)
-                    reset_sepa = CSResetSepa(hparams=sepa_params)
-                    model.includeSepa(reset_sepa, '#CS_reset', f'reset maxcuts params', priority=99999999, freq=1)
-                    model.setBoolParam("misc/allowdualreds", 0)
-                    model.setLongintParam('limits/nodes', 1)  # solve only at the root node
-                    model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
-                    model.setIntParam('branching/random/priority', 10000000)
-                    model.setBoolParam('randomization/permutevars', True)
-                    model.setIntParam('randomization/permutationseed', seed)
-                    model.setIntParam('randomization/randomseedshift', seed)
-                    model.setBoolParam('randomization/permutevars', True)
-                    model.setIntParam('randomization/permutationseed', seed)
-                    model.setIntParam('randomization/randomseedshift', seed)
-                    model.hideOutput(True)
-                    model.optimize()
-                    sepa.update_stats()
-                    stats = sepa.stats
-                    db_auc_values.append(
-                        sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'],
-                                                 t_support=lp_iterations_limit, reference=info['optval']))
-                    )
-                # average performance across seeds and find the best for each problem and graph separately
-                db_auc_avg = np.mean(db_auc_values)
-                if db_auc_avg > best_db_aucs[problem][graph_size]:
-                    best_configs[problem][graph_size] = config
-                    best_db_aucs[problem][graph_size] = db_auc_avg
-                cfg_db_auc_avg[problem][graph_size] = db_auc_avg
+                sepa = CSBaselineSepa(hparams=sepa_params)
+                model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)
+                reset_sepa = CSResetSepa(hparams=sepa_params)
+                model.includeSepa(reset_sepa, '#CS_reset', f'reset maxcuts params', priority=99999999, freq=1)
+                model.setBoolParam("misc/allowdualreds", 0)
+                model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+                model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+                model.setIntParam('branching/random/priority', 10000000)
+                model.setBoolParam('randomization/permutevars', True)
+                model.setIntParam('randomization/permutationseed', seed)
+                model.setIntParam('randomization/randomseedshift', seed)
+                model.setBoolParam('randomization/permutevars', True)
+                model.setIntParam('randomization/permutationseed', seed)
+                model.setIntParam('randomization/randomseedshift', seed)
+                model.hideOutput(True)
+                model.optimize()
+                sepa.update_stats()
+                stats = sepa.stats
+                db_auc = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'],
+                                                  t_support=lp_iterations_limit, reference=info['optval']))
+                cfg_db_aucs[problem][graph_size][seed] = db_auc
+                if db_auc > best_db_aucs[problem][graph_size][seed]:
+                    best_configs[problem][graph_size][seed] = config
+                    best_db_aucs[problem][graph_size][seed] = db_auc
 
-        logs.append((config, cfg_db_auc_avg))
+        logs.append((config, cfg_db_aucs))
         if len(logs) >= 1:
             # send logs to main process for checkpointing
             msg = (workerid, logs, best_configs, best_db_aucs)
@@ -112,8 +109,9 @@ def get_data_and_configs():
         'intsupportfac': [0.1, 0.5, 1],
         'maxcutsroot': [5, 15, 2000],
         'minorthoroot': [0.5, 0.9, 1],
+        'problem': ['mvc', 'maxcut']
     }
-    # seeds = [46, 72, 101]
+
     kv_list = []
     for k, vals in search_space.items():
         kv_list.append([(k, v) for v in vals])
@@ -152,22 +150,23 @@ def run_node(args):
     if not os.path.exists(node_results_dir):
         os.makedirs(node_results_dir)
     node_results_file = os.path.join(node_results_dir, 'scip_tuned_node_results.pkl')
-    node_results = {'best_db_aucs': {p: {gs: 0 for gs in insts.keys()} for p, insts in data.items()},
-                    'best_configs': {p: {} for p in data.keys()},
+    node_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
+                    'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
                     'configs': {}}
     # wait for logs
     last_save = 0
     pbar = tqdm(total=len(node_configs), desc='receiving logs')
     while len(node_results['configs']) < len(node_configs):
         msg = recv_socket.recv()
-        workerid, logs, worker_best_cfgs, worker_best_db_auc_avgs = pa.deserialize(msg)
-        for cfg, cfg_db_auc_avgs in logs:
-            node_results['configs'][cfg] = cfg_db_auc_avgs
-            for problem, instances in worker_best_db_auc_avgs.items():
-                for graph_size, db_auc_avg in instances.items():
-                    if db_auc_avg > node_results['best_db_aucs'][problem][graph_size]:
-                        node_results['best_db_aucs'][problem][graph_size] = worker_best_db_auc_avgs[problem][graph_size]
-                        node_results['best_configs'][problem][graph_size] = worker_best_cfgs[problem][graph_size]
+        workerid, logs, worker_best_cfgs, worker_best_db_aucs = pa.deserialize(msg)
+        for cfg, cfg_db_aucs in logs:
+            node_results['configs'][cfg] = cfg_db_aucs
+            for problem, graph_sizes in worker_best_db_aucs.items():
+                for graph_size, seeds in graph_sizes.items():
+                    for seed, db_auc in seeds.items():
+                        if db_auc > node_results['best_db_aucs'][problem][graph_size][seed]:
+                            node_results['best_db_aucs'][problem][graph_size][seed] = worker_best_db_aucs[problem][graph_size][seed]
+                            node_results['best_configs'][problem][graph_size][seed] = worker_best_cfgs[problem][graph_size][seed]
         pbar.update(len(logs))
         # save to node results file every 5 configs
         if len(node_results['configs']) - last_save > 5:
@@ -177,7 +176,7 @@ def run_node(args):
     # save results and exit
     with open(node_results_file, 'wb') as f:
         pickle.dump(node_results, f)
-    print(f'finished {len(node_results["configs"])} configs')
+    print(f'finished {len(node_results["configs"])}/{len(node_configs)} configs')
     print(f'saved node results to {node_results_file}')
 
 
@@ -194,6 +193,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines(f'#SBATCH --job-name={jobname}\n')
         fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines(f'#SBATCH --cpus-per-task={args.ncpus_per_node}\n')
+        fh.writelines('module load NiaEnv/2018a\n')
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
@@ -210,18 +210,19 @@ def main(args):
         with open(main_results_file, 'rb') as f:
             main_results = pickle.load(f)
     else:
-        main_results = {'best_db_aucs': {p: {gs: 0 for gs in insts.keys()} for p, insts in data.items()},
-                        'best_configs': {p: {} for p in data.keys()},
+        main_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in graph_sizes.keys()} for p, gss in data.items()},
+                        'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in graph_sizes.keys()} for p, gss in data.items()},
                         'configs': {}}
     for path in tqdm(Path(args.rootdir).rglob('scip_tuned_node_results.pkl'), desc='Loading node files'):
         with open(path, 'rb') as f:
             node_results = pickle.load(f)
             main_results['configs'].update(node_results['configs'])
-            for problem, instances in node_results['best_db_aucs'].items():
-                for graph_size, db_auc_avg in instances.items():
-                    if db_auc_avg > main_results['best_db_aucs'][problem][graph_size]:
-                        main_results['best_db_aucs'][problem][graph_size] = node_results['best_db_aucs'][problem][graph_size]
-                        main_results['best_configs'][problem][graph_size] = node_results['best_configs'][problem][graph_size]
+            for problem, graph_sizes in node_results['best_db_aucs'].items():
+                for graph_size, seeds in graph_sizes.items():
+                    for seed, db_auc in seeds.items():
+                        if db_auc > main_results['best_db_aucs'][problem][graph_size][seed]:
+                            main_results['best_db_aucs'][problem][graph_size][seed] = node_results['best_db_aucs'][problem][graph_size][seed]
+                            main_results['best_configs'][problem][graph_size][seed] = node_results['best_configs'][problem][graph_size][seed]
 
     # save updated results to main results file
     with open(main_results_file, 'wb') as f:
@@ -262,7 +263,7 @@ def main(args):
     else:
         # save scip tuned best config to
         scip_tuned_best_configs_file = os.path.join(args.rootdir, 'scip_tuned_best_config.pkl')
-        scip_tuned_best_configs = {p: {gs: {k: v for (k, v) in cfg} for gs, cfg in gss.items()} for p, gss in main_results['best_configs'].items()}
+        scip_tuned_best_configs = {p: {gs: {seed: {k: v for (k, v) in cfg} for seed, cfg in seeds.items()} for gs, seeds in graph_sizes.items()} for p, gss in main_results['best_configs'].items()}
         with open(scip_tuned_best_configs_file, 'wb') as f:
             pickle.dump(scip_tuned_best_configs, f)
         print(f'saved scip_tuned_best_configs to {scip_tuned_best_configs_file}')
