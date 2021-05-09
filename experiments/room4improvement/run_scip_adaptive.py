@@ -101,7 +101,7 @@ def run_worker(data, configs, port, workerid):
                 cfg_db_aucs[problem][graph_size][seed] = db_auc
 
         logs.append((config, cfg_db_aucs))
-        if len(logs) >= 1:
+        if len(logs) >= 5:
             # send logs to main process for checkpointing
             msg = (workerid, logs, best_configs, best_db_aucs)
             packet = pa.serialize(msg).to_buffer()
@@ -277,7 +277,7 @@ def main(args):
         else:
             # submit up to nnodes jobs
             nnodes = int(min(args.nnodes, np.ceil(len(missing_configs) / (args.ncpus_per_node-1))))
-            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 30 / nnodes / (args.ncpus_per_node - 1))), 16)
+            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 40 / nnodes / (args.ncpus_per_node - 1))), 16)
             time_limit_hours = int(np.floor(time_limit_minutes / 60))
             time_limit_minutes = time_limit_minutes % 60
             assert 24 > time_limit_hours >= 0
@@ -287,7 +287,7 @@ def main(args):
                 submit_job(f'scip_adapt{nodeid}', nnodes, nodeid, time_limit_hours, time_limit_minutes)
     else:
         # append best params for round_idx to scip_adaptive_params
-        for problem, graph_sizes in main_results['best_db_aucs'].items():
+        for problem, graph_sizes in main_results['best_configs'].items():
             for graph_size, seeds in graph_sizes.items():
                 for seed, cfg in seeds.items():
                     scip_adaptive_params[problem][graph_size][seed].append(cfg)
