@@ -257,7 +257,7 @@ def main(args):
             assert 24 > time_limit_hours >= 0
             assert 60 > time_limit_minutes > 0
 
-            for nodeid in range(args.nnodes):
+            for nodeid in range(nnodes):
                 submit_job(f'scip_tuned{nodeid}', nnodes, nodeid, time_limit_hours, time_limit_minutes)
     else:
         # save scip tuned best config to
