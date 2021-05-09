@@ -862,6 +862,7 @@ class CSBaselineSepa(Sepa):
         if self.policy not in ['default', 'all_cuts', 'tuned', 'adaptive']:
             self.add_k = int(self.policy.split('_')[0])
             assert self.policy.endswith('random') or self.policy.endswith('most_violated')
+        self.lp_round_idx = 0
 
         # instance specific data needed to be reset every episode
         # todo unifiy x and y to x only (common for all combinatorial problems)
@@ -992,13 +993,14 @@ class CSBaselineSepa(Sepa):
 
             elif self.policy == 'adaptive':
                 # reset separating params according to lp_round.
-                lp_round = self.model.getNLPs()
-                self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'])
-                self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'])
-                self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'])
-                self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'])
-                self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'])
-                self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'])
+                # set defaults if no adapted params exist
+                self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'].get(self.lp_round_idx, 0.1))
+                self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'].get(self.lp_round_idx, 0.5))
+                self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'].get(self.lp_round_idx, 1.0))
+                self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'].get(self.lp_round_idx, 0.1))
+                self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'].get(self.lp_round_idx, 2000))
+                self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'].get(self.lp_round_idx, 0.9))
+                self.lp_round_idx += 1
                 result = {"result": SCIP_RESULT.DIDNOTRUN}
 
             self.stats_updated = False  # mark false to record relevant stats after this action will make effect
@@ -1123,10 +1125,6 @@ if __name__ == "__main__":
     model, x, ci_cut = maxcut_mccormic_model(G, use_general_cuts=False)
     # model.setRealParam('limits/time', 1000 * 1)
     """ Define a controller and appropriate callback to add user's cuts """
-
-    model.includeSepa(ci_cut, "MLCycles", "Generate cycle inequalities for MaxCut using McCormic variables exchange",
-                      priority=1000000,
-                      freq=1)
     # model.setRealParam('separating/objparalfac', 0.1)
     # model.setRealParam('separating/dircutoffdistfac', 0.5)
     # model.setRealParam('separating/efficacyfac', 1)
