@@ -270,6 +270,7 @@ def main(args):
     missing_configs = set(all_configs) - set(main_results['configs'].keys())
 
     print(f'{len(missing_configs)} configs left to execute')
+    print(f'################### adapting round {round_idx} ###################')
     if len(missing_configs) > 0:
         # submit jobs or run local
         if args.run_local:
