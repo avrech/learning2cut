@@ -14,6 +14,7 @@ parser = ArgumentParser()
 parser.add_argument('--nnodes', type=int, default=1, help='number of machines')
 parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus available on each node')
 parser.add_argument('--nodeid', type=int, default=0, help='node id for running on compute canada')
+parser.add_argument('--nrounds', type=int, default=10, help='number of lp rounds to adapt')
 parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
 parser.add_argument('--run_local', action='store_true', help='run on the local machine')
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
@@ -27,7 +28,12 @@ def run_worker(data, configs, port, workerid):
     context = zmq.Context()
     send_socket = context.socket(zmq.PUSH)
     send_socket.connect(f'tcp://127.0.0.1:{port}')
-    baseline = 'scip_tuned'
+    baseline = 'adaptive'
+
+    print(f'[worker {workerid}] loading adapted params from: {args.rootdir}/scip_adaptive_best_config.pkl')
+    with open(f'{args.rootdir}/scip_adaptive_best_config.pkl', 'rb') as f:
+        scip_adaptive_best_config = pickle.load(f)
+
     logs = []
     best_configs = {p: {} for p in data.keys()}
     best_db_aucs = {p: {gs: 0 for gs in instances.keys()} for p, instances in data.items()}
@@ -38,6 +44,7 @@ def run_worker(data, configs, port, workerid):
         instances = data[problem]
         for graph_size, (g, info) in instances.items():
             db_auc_values = []
+
             for seed in [46, 72, 101]:
                 if problem == 'mvc':
                     model, _ = mvc_model(g)
