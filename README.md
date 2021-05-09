@@ -35,6 +35,7 @@ Reinforcement Learning for Cut Selection
 6. Sign up to [Weights & Biases](https://www.wandb.com/), and follow the [instructions](https://docs.wandb.com/quickstart) to connect your device to your `wandb` account. 
 
 ## Running on Compute Canada
+### Graham
 * `pyarrow` cannot be installed directly, and must be loaded using `module load arrow`.  
 * `torch_geometric` is compiled for specific `torch` and `cuda` versions. For available `torch` versions contact CC support. 
 * The following setup was tested successfully on Graham:
@@ -43,6 +44,24 @@ $ virtualenv env && source env/bin/activate
 (env) ~ $ pip install torch==1.4.0 torch_geometric torchvision torch-scatter torch-sparse torch-cluster torch-spline-conv -U --force  
 (env) ~ $ python -c "import pyarrow; torch_geometric; import torch_cluster; import torch_cluster.graclus_cpu"  
 (env) ~ $  
+### Niagara
+* This cluster was used only for experiment "room for improvement". All nodes support cpus only. No need to install cuda related packages.
+
+## Experiment 1 - Room for Improvement
+This experiment requires massive computation power. Performed on 20 nodes of 80 cpus each. 
+### Generate Data
+Inside `learning2cut/experiments/room4improvement` run:  
+> python run_experiment.py 
+The script will generate `data.pkl` file for the whole experiment. This can take a long time since we solve hard maxcut instances to optimality.  
+After finishing, log in to Niagara, copy `data.pkl` to `$SCRATCH/room4improvement`.
+### Find `scip_tuned` baseline
+On Niagara,
+> python run_scip_tuned.py --rootdir $SCRATCH/room4improvement --nnodes 20 --ncpus_per_node 80  
+This first run will submit jobs for finding `scip_tuned` policy. After all jobs have finished, run the same command line again to finalize stuff. 
+### Find `scip_adaptive` baseline
+
+
+
 
 
 ## Reproducing Datasets  
