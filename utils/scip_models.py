@@ -48,7 +48,7 @@ def set_aggresive_separation(model):
 
 
 def mvc_model(G, model_name='MVC Model',
-              use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
+              use_presolve=True, use_heuristics=False, use_general_cuts=True, use_propagation=True,
               use_random_branching=True, use_cut_pool=True, allow_restarts=False, add_trivial_sol=True):
     r"""
         Returns Minimum Vertex Cover model defined by G(V,E)
@@ -126,7 +126,7 @@ def mvc_model(G, model_name='MVC Model',
 
 
 def maxcut_mccormic_model(G, model_name='MAXCUT McCormic Model',
-                          use_presolve=True, use_heuristics=True, use_general_cuts=True, use_propagation=True,
+                          use_presolve=True, use_heuristics=False, use_general_cuts=True, use_propagation=True,
                           use_random_branching=True, use_cycles=True, hparams={}, allow_restarts=False, add_trivial_sol=True):
     r"""
     Returns MAXCUT model of G assuming edge attributes named 'weight', denoted by `w`.
@@ -982,6 +982,17 @@ class CSBaselineSepa(Sepa):
 
             elif self.policy == 'tuned':
                 # reset separating parameters
+                self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'])
+                self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'])
+                self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'])
+                self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'])
+                self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'])
+                self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'])
+                result = {"result": SCIP_RESULT.DIDNOTRUN}
+
+            elif self.policy == 'adaptive':
+                # reset separating params according to lp_round.
+                lp_round = self.model.getNLPs()
                 self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'])
                 self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'])
                 self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'])

@@ -14,7 +14,7 @@ if not os.path.isdir(ROOTDIR):
     os.makedirs(ROOTDIR)
 
 print('############### generating data ###############')
-
+# todo make it distributed
 if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
     data = {'mvc': {}, 'maxcut': {}}
     # mvc
@@ -23,7 +23,7 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
     for gs, density in tqdm(zip(graph_sizes, densities), desc='generating graphs for MVC'):
         g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
         nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
-        model, _ = mvc_model(g, use_random_branching=False, allow_restarts=True)
+        model, _ = mvc_model(g, use_random_branching=False, allow_restarts=True, use_heuristics=True)
         # model.hideOutput(True)
         model.optimize()
         assert model.getGap() == 0

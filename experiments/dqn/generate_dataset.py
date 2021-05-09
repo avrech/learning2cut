@@ -133,9 +133,9 @@ def solve_graphs(worker_config):
             # todo set problem type in config, and define graph sizes appropriately.
             # solve with B&C and the default cut selection
             if problem == 'MAXCUT':
-                bnc_model, x, _ = maxcut_mccormic_model(G, allow_restarts=True)
+                bnc_model, x, _ = maxcut_mccormic_model(G, allow_restarts=True, use_heuristics=True, use_random_branching=True)
             elif problem == 'MVC':
-                bnc_model, x = mvc_model(G, allow_restarts=True)
+                bnc_model, x = mvc_model(G, allow_restarts=True, use_heuristics=True, use_random_branching=True)
                 # set arbitrary random seed only for reproducibility and debug - doesn't matter for results
             bnc_seed = 72
             bnc_model.setBoolParam('randomization/permutevars', True)

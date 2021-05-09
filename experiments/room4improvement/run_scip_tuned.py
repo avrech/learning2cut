@@ -250,7 +250,7 @@ def main(args):
             run_node(args)
         else:
             # submit nnodes jobs
-            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 10 / args.nnodes / (args.ncpus_per_node - 1)) + 2), 16)
+            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 20 / args.nnodes / (args.ncpus_per_node - 1))), 16)
             for nodeid in range(args.nnodes):
                 submit_job(f'scip_tuned{nodeid}', nodeid, time_limit_minutes)
     else:
