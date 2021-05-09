@@ -181,7 +181,7 @@ def run_node(args):
     print(f'saved node results to {node_results_file}')
 
 
-def submit_job(jobname, nodeid, time_limit_hours, time_limit_minutes):
+def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
     # CREATE SBATCH FILE
     job_file = os.path.join(args.rootdir, jobname + '.sh')
     with open(job_file, 'w') as fh:
@@ -197,7 +197,7 @@ def submit_job(jobname, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines(f'python run_scip_tuned.py --rootdir {args.rootdir} --nnodes {args.nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
+        fh.writelines(f'python run_scip_tuned.py --rootdir {args.rootdir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
 
     os.system("sbatch {}".format(job_file))
 
@@ -249,15 +249,16 @@ def main(args):
         if args.run_local:
             run_node(args)
         else:
-            # submit nnodes jobs
-            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 30 / args.nnodes / (args.ncpus_per_node - 1))), 16)
+            # submit up to nnodes jobs
+            nnodes = min(args.nnodes, np.ceil(len(missing_configs) / (args.ncpus_per_node-1)))
+            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 30 / nnodes / (args.ncpus_per_node - 1))), 16)
             time_limit_hours = int(np.floor(time_limit_minutes / 60))
             time_limit_minutes = time_limit_minutes % 60
             assert 24 > time_limit_hours >= 0
             assert 60 > time_limit_minutes > 0
 
             for nodeid in range(args.nnodes):
-                submit_job(f'scip_tuned{nodeid}', nodeid, time_limit_hours, time_limit_minutes)
+                submit_job(f'scip_tuned{nodeid}', nnodes, nodeid, time_limit_hours, time_limit_minutes)
     else:
         # save scip tuned best config to
         scip_tuned_best_configs_file = os.path.join(args.rootdir, 'scip_tuned_best_config.pkl')
