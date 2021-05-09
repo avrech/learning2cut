@@ -203,7 +203,7 @@ def run_node(args):
     # save results and exit
     with open(node_results_file, 'wb') as f:
         pickle.dump(node_results, f)
-    print(f'finished {len(node_results["configs"])} configs')
+    print(f'finished {len(node_results["configs"])}/{len(node_configs)} configs')
     print(f'saved node results to {node_results_file}')
 
 
