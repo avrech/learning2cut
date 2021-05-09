@@ -209,8 +209,8 @@ def main(args):
         with open(main_results_file, 'rb') as f:
             main_results = pickle.load(f)
     else:
-        main_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in graph_sizes.keys()} for p, gss in data.items()},
-                        'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in graph_sizes.keys()} for p, gss in data.items()},
+        main_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
+                        'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
                         'configs': {}}
     for path in tqdm(Path(args.rootdir).rglob('scip_tuned_node_results.pkl'), desc='Loading node files'):
         with open(path, 'rb') as f:
