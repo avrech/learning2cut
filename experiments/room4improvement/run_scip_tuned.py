@@ -181,12 +181,12 @@ def run_node(args):
     print(f'saved node results to {node_results_file}')
 
 
-def submit_job(jobname, nodeid, time_limit_minutes):
+def submit_job(jobname, nodeid, time_limit_hours, time_limit_minutes):
     # CREATE SBATCH FILE
     job_file = os.path.join(args.rootdir, jobname + '.sh')
     with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
-        fh.writelines(f'#SBATCH --time=00:{time_limit_minutes}:00\n')
+        fh.writelines(f'#SBATCH --time={time_limit_hours}:{time_limit_minutes}:00\n')
         fh.writelines('#SBATCH --account=def-alodi\n')
         fh.writelines(f'#SBATCH --output={args.rootdir}/{jobname}.out\n')
         fh.writelines('#SBATCH --mem=0\n')
@@ -250,9 +250,14 @@ def main(args):
             run_node(args)
         else:
             # submit nnodes jobs
-            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 20 / args.nnodes / (args.ncpus_per_node - 1))), 16)
+            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 30 / args.nnodes / (args.ncpus_per_node - 1))), 16)
+            time_limit_hours = int(np.floor(time_limit_minutes / 60))
+            time_limit_minutes = time_limit_minutes % 60
+            assert 24 > time_limit_hours >= 0
+            assert 60 > time_limit_minutes > 0
+
             for nodeid in range(args.nnodes):
-                submit_job(f'scip_tuned{nodeid}', nodeid, time_limit_minutes)
+                submit_job(f'scip_tuned{nodeid}', nodeid, time_limit_hours, time_limit_minutes)
     else:
         # save scip tuned best config to
         scip_tuned_best_configs_file = os.path.join(args.rootdir, 'scip_tuned_best_config.pkl')
