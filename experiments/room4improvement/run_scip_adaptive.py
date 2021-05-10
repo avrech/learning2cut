@@ -119,6 +119,7 @@ def run_worker(data, configs, workerid):
     #     send_socket.send(packet)
     with open(worker_results_file, 'wb') as f:
         pickle.dump((logs, best_configs, best_db_aucs), f)
+    assert len(logs) == len(configs) == len(set([l[0] for l in logs]))
 
     print(f'[worker {workerid}] saved results to: {worker_results_file}')
     print(f'[worker {workerid}] finished')
