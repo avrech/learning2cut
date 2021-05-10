@@ -121,17 +121,17 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                         # set adaptive param lists
                         adapted_param_list = scip_adaptive_params[problem][graph_size][seed]
                         adapted_params = {
-                            'objparalfac': [],
-                            'dircutoffdistfac': [],
-                            'efficacyfac': [],
-                            'intsupportfac': [],
-                            'maxcutsroot': [],
-                            'minorthoroot': []
+                            'objparalfac': {},
+                            'dircutoffdistfac': {},
+                            'efficacyfac': {},
+                            'intsupportfac': {},
+                            'maxcutsroot': {},
+                            'minorthoroot': {}
                         }
-                        for kvlist in adapted_param_list:
+                        for round_idx, kvlist in enumerate(adapted_param_list):
                             param_dict = {k: v for k, v in kvlist}
                             for k in adapted_params.keys():
-                                adapted_params[k].append(param_dict[k])
+                                adapted_params[k][round_idx] = param_dict[k]
                         sepa_params.update(adapted_params)
 
                     sepa = CSBaselineSepa(hparams=sepa_params)
@@ -181,17 +181,17 @@ for problem, baselines in results.items():
     df.to_csv(csvfile)
     print(f'saved {problem} csv to: {csvfile}')
 
-    fig, ax = plt.subplots(1)
-    discounted_rewards = last_training_episode_stats['discounted_rewards']
-    selected_q_avg = np.array(last_training_episode_stats['selected_q_avg'])
-    selected_q_std = np.array(last_training_episode_stats['selected_q_std'])
-    bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
-    x_axis = np.arange(len(discounted_rewards))
-    ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
-    ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
-    ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
-    ax.fill_between(x_axis, selected_q_avg + selected_q_std, selected_q_avg - selected_q_std, facecolor='red',
-                    alpha=0.5)
-    ax.legend()
-    ax.set_xlabel('step')
-    ax.grid()
+    # fig, ax = plt.subplots(1)
+    # discounted_rewards = last_training_episode_stats['discounted_rewards']
+    # selected_q_avg = np.array(last_training_episode_stats['selected_q_avg'])
+    # selected_q_std = np.array(last_training_episode_stats['selected_q_std'])
+    # bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
+    # x_axis = np.arange(len(discounted_rewards))
+    # ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
+    # ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
+    # ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
+    # ax.fill_between(x_axis, selected_q_avg + selected_q_std, selected_q_avg - selected_q_std, facecolor='red',
+    #                 alpha=0.5)
+    # ax.legend()
+    # ax.set_xlabel('step')
+    # ax.grid()
