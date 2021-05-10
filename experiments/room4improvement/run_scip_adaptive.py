@@ -26,13 +26,13 @@ ROOTDIR = args.rootdir
 
 
 @ray.remote
-def run_worker(data, configs, port, workerid):
-    print(f'[worker {workerid}] connecting to {port}')
-    context = zmq.Context()
-    send_socket = context.socket(zmq.PUSH)
-    send_socket.connect(f'tcp://127.0.0.1:{port}')
+def run_worker(data, configs, workerid):
+    # print(f'[worker {workerid}] connecting to {port}')
+    # context = zmq.Context()
+    # send_socket = context.socket(zmq.PUSH)
+    # send_socket.connect(f'tcp://127.0.0.1:{port}')
     baseline = 'adaptive'
-
+    assert len(configs) == len(set(configs))
     print(f'[worker {workerid}] loading adapted params from: {SCIP_ADAPTIVE_PARAMS_FILE}')
     with open(SCIP_ADAPTIVE_PARAMS_FILE, 'rb') as f:
         scip_adaptive_params = pickle.load(f)
@@ -119,6 +119,7 @@ def run_worker(data, configs, port, workerid):
     #     send_socket.send(packet)
     with open(worker_results_file, 'wb') as f:
         pickle.dump((logs, best_configs, best_db_aucs), f)
+
     print(f'[worker {workerid}] saved results to: {worker_results_file}')
     print(f'[worker {workerid}] finished')
 
@@ -143,15 +144,16 @@ def get_data_and_configs():
         kv_list.append([(k, v) for v in vals])
 
     configs = list(product(*kv_list))
+    assert len(set(configs)) == 2*3**6
     return data, configs
 
 
 def run_node(args):
     # socket for receiving results from workers
-    context = zmq.Context()
-    recv_socket = context.socket(zmq.PULL)
-    port = recv_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
-    print(f'[node {args.nodeid} connected to port {port}')
+    # context = zmq.Context()
+    # recv_socket = context.socket(zmq.PULL)
+    # port = recv_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+    # print(f'[node {args.nodeid} connected to port {port}')
     # load adapted params:
     with open(SCIP_ADAPTIVE_PARAMS_FILE, 'rb') as f:
         scip_adaptive_params = pickle.load(f)
@@ -167,15 +169,20 @@ def run_node(args):
     node_configs = []
     for idx in range(args.nodeid, len(missing_configs), args.nnodes):
         node_configs.append(missing_configs[idx])
+    assert len(node_configs) == len(set(node_configs))
     # assign configs to workers
     nworkers = args.ncpus_per_node-1
     ray.init()
 
     worker_handles = []
+    all_worker_configs = []
     for workerid in range(nworkers):
         worker_configs = [node_configs[idx] for idx in range(workerid, len(node_configs), nworkers)]
         if len(worker_configs) > 0:
-            worker_handles.append(run_worker.remote(data, worker_configs, port, f'{args.nodeid}_{workerid}'))
+            assert len(worker_configs) == len(set(worker_configs))
+            worker_handles.append(run_worker.remote(data, worker_configs, f'{args.nodeid}_{workerid}'))
+            all_worker_configs += worker_configs
+    assert len(set(all_worker_configs)) == len(node_configs)
     # wait for all workers to finish
     ray.get(worker_handles)
     print('finished')
