@@ -302,7 +302,7 @@ def main(args):
     os.system("find $SCRATCH/room4improvement -type f -name 'scip_adaptive_worker_results*' -delete")
 
     # check for missing results:
-    missing_configs = set(all_configs) - set(main_results['configs'].keys())
+    missing_configs = list(set(all_configs) - set(main_results['configs'].keys()))
 
     print(f'{len(missing_configs)} configs left to execute')
     print(f'################### adapting round {round_idx} ###################')
