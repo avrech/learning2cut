@@ -16,6 +16,7 @@ parser.add_argument('--nnodes', type=int, default=1, help='number of machines')
 parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus available on each node')
 parser.add_argument('--nodeid', type=int, default=0, help='node id for running on compute canada')
 parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
+parser.add_argument('--default_separating_params_file', type=str, default=None, help='path to default params pkl. if None, uses SCIP defaults')
 parser.add_argument('--run_local', action='store_true', help='run on the local machine')
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
 args = parser.parse_args()
@@ -23,6 +24,11 @@ np.random.seed(777)
 SEEDS = [46, 72, 101]
 SCIP_ADAPTIVE_PARAMS_FILE = f'{args.rootdir}/scip_adaptive_params.pkl'
 ROOTDIR = args.rootdir
+if args.default_separating_params_file is not None:
+    with open(args.default_separating_params_file, 'rb') as f:
+        TUNED_SEPARATING_PARAMS = pickle.load(f)
+else:
+    TUNED_SEPARATING_PARAMS = None
 
 
 @ray.remote
@@ -76,8 +82,9 @@ def run_worker(data, configs, workerid):
                 # set the current round params:
                 for k in adaptive_cfg.keys():
                     adaptive_cfg[k][round_idx] = cfg[k]
-
                 sepa_params.update(adaptive_cfg)
+                # set the best tuned params for using after the adapted ones:
+                sepa_params['default_separating_params'] = TUNED_SEPARATING_PARAMS[problem][graph_size][seed]
                 sepa = CSBaselineSepa(hparams=sepa_params)
                 model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)
                 reset_sepa = CSResetSepa(hparams=sepa_params)

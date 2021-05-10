@@ -863,7 +863,13 @@ class CSBaselineSepa(Sepa):
             self.add_k = int(self.policy.split('_')[0])
             assert self.policy.endswith('random') or self.policy.endswith('most_violated')
         self.lp_round_idx = 0
-
+        # set default params for using after the adapted params
+        self.default_separating_params = hparams.get('default_separating_params', {'objparalfac': 0.1,
+                                                                                   'dircutoffdistfac': 0.5,
+                                                                                   'efficacyfac': 1.0,
+                                                                                   'intsupportfac': 0.1,
+                                                                                   'maxcutsroot': 2000,
+                                                                                   'minorthoroot': 0.9})
         # instance specific data needed to be reset every episode
         # todo unifiy x and y to x only (common for all combinatorial problems)
         self.G = None
@@ -994,12 +1000,12 @@ class CSBaselineSepa(Sepa):
             elif self.policy == 'adaptive':
                 # reset separating params according to lp_round.
                 # set defaults if no adapted params exist
-                self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'].get(self.lp_round_idx, 0.1))
-                self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'].get(self.lp_round_idx, 0.5))
-                self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'].get(self.lp_round_idx, 1.0))
-                self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'].get(self.lp_round_idx, 0.1))
-                self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'].get(self.lp_round_idx, 2000))
-                self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'].get(self.lp_round_idx, 0.9))
+                self.model.setRealParam('separating/objparalfac', self.hparams['objparalfac'].get(self.lp_round_idx, self.default_separating_params['objparalfac']))
+                self.model.setRealParam('separating/dircutoffdistfac', self.hparams['dircutoffdistfac'].get(self.lp_round_idx, self.default_separating_params['dircutoffdistfac']))
+                self.model.setRealParam('separating/efficacyfac', self.hparams['efficacyfac'].get(self.lp_round_idx, self.default_separating_params['efficacyfac']))
+                self.model.setRealParam('separating/intsupportfac', self.hparams['intsupportfac'].get(self.lp_round_idx, self.default_separating_params['intsupportfac']))
+                self.model.setIntParam('separating/maxcutsroot', self.hparams['maxcutsroot'].get(self.lp_round_idx, self.default_separating_params['maxcutsroot']))
+                self.model.setRealParam('separating/minorthoroot', self.hparams['minorthoroot'].get(self.lp_round_idx, self.default_separating_params['minorthoroot']))
                 self.lp_round_idx += 1
                 result = {"result": SCIP_RESULT.DIDNOTRUN}
 
