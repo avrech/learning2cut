@@ -307,7 +307,7 @@ def main(args):
         pickle.dump(main_results, f)
         print(f'saved main results to {main_results_file}')
     # remove all worker files
-    os.system("find $SCRATCH/room4improvement -type f -name 'scip_adaptive_worker_results*' -delete")
+    os.system(f"find {ROOTDIR} -type f -name 'scip_adaptive_worker_results*' -delete")
 
     # check for missing results:
     missing_configs = list(set(all_configs) - set(main_results['configs'].keys()))
