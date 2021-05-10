@@ -170,12 +170,12 @@ pd.set_option('display.max_colwidth', None)
 for problem, baselines in results.items():
     columns = [gs for gs in data[problem].keys()]
     summary = {baseline: [] for baseline in baselines.keys()}
-    for baseline in baselines:
-        for graph_size, seeds in baseline.items():
+    for baseline, baseline_results in baselines.items():
+        for graph_size, seeds in baseline_results.items():
             db_aucs = np.array([stats['db_auc'] for stats in seeds.values()])
             summary[baseline].append('{:.4f}{}{:.4f}'.format(db_aucs.mean(), u"\u00B1", db_aucs.std()))
     df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
-    print(f'{"#"*70} {problem} {"#"*70}')
+    print(f'{"#"*30} {problem} {"#"*30}')
     print(df)
     csvfile = f'{ROOTDIR}/{problem}_baselines.csv'
     df.to_csv(csvfile)

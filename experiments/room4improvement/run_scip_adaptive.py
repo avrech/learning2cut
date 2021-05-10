@@ -10,6 +10,7 @@ import ray
 import zmq
 from itertools import product
 import os
+from glob import glob
 parser = ArgumentParser()
 parser.add_argument('--nnodes', type=int, default=1, help='number of machines')
 parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus available on each node')
@@ -21,6 +22,7 @@ args = parser.parse_args()
 np.random.seed(777)
 SEEDS = [46, 72, 101]
 SCIP_ADAPTIVE_PARAMS_FILE = f'{args.rootdir}/scip_adaptive_params.pkl'
+ROOTDIR = args.rootdir
 
 
 @ray.remote
@@ -35,6 +37,8 @@ def run_worker(data, configs, port, workerid):
     with open(SCIP_ADAPTIVE_PARAMS_FILE, 'rb') as f:
         scip_adaptive_params = pickle.load(f)
     round_idx = len(scip_adaptive_params['mvc'][60][SEEDS[0]])
+    worker_results_file = f'{ROOTDIR}/scip_adaptive_worker_results_{workerid}_{round_idx}.pkl'
+
     logs = []
     best_db_aucs = {p: {gs: {seed: 0 for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()}
     best_configs = {p: {gs: {seed: None for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()}
@@ -101,19 +105,21 @@ def run_worker(data, configs, port, workerid):
                 cfg_db_aucs[problem][graph_size][seed] = db_auc
 
         logs.append((config, cfg_db_aucs))
-        if len(logs) >= 5:
-            # send logs to main process for checkpointing
-            msg = (workerid, logs, best_configs, best_db_aucs)
-            packet = pa.serialize(msg).to_buffer()
-            send_socket.send(packet)
-            logs = []
+        # if len(logs) >= 5:
+        #     # send logs to main process for checkpointing
+        #     msg = (workerid, logs, best_configs, best_db_aucs)
+        #     packet = pa.serialize(msg).to_buffer()
+        #     send_socket.send(packet)
+        #     logs = []
 
-    if len(logs) > 0:
-        # send remaining logs to main process for checkpointing
-        msg = (workerid, logs, best_configs, best_db_aucs)
-        packet = pa.serialize(msg).to_buffer()
-        send_socket.send(packet)
-
+    # if len(logs) > 0:
+    #     # send remaining logs to main process for checkpointing
+    #     msg = (workerid, logs, best_configs, best_db_aucs)
+    #     packet = pa.serialize(msg).to_buffer()
+    #     send_socket.send(packet)
+    with open(worker_results_file, 'wb') as f:
+        pickle.dump((logs, best_configs, best_db_aucs), f)
+    print(f'[worker {workerid}] saved results to: {worker_results_file}')
     print(f'[worker {workerid}] finished')
 
 
@@ -164,47 +170,47 @@ def run_node(args):
     # assign configs to workers
     nworkers = args.ncpus_per_node-1
     ray.init()
-    # ray.get([run_worker.remote(cfg) for cfg in configs])
+
     worker_handles = []
     for workerid in range(nworkers):
         worker_configs = [node_configs[idx] for idx in range(workerid, len(node_configs), nworkers)]
-        # if args.run_local:
-        #     run_worker(data, worker_configs, port, workerid)
-        # else:
-        worker_handles.append(run_worker.remote(data, worker_configs, port, workerid))
+        worker_handles.append(run_worker.remote(data, worker_configs, port, f'{args.nodeid}_{workerid}'))
+    # wait for all workers to finish
+    ray.get(worker_handles)
+    print('finished')
 
-    node_results_dir = os.path.join(args.rootdir, f'node{args.nodeid}_results')
-    if not os.path.exists(node_results_dir):
-        os.makedirs(node_results_dir)
-    node_results_file = os.path.join(node_results_dir, f'scip_adaptive_node_results_round{round_idx}.pkl')
-    node_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
-                    'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
-                    'configs': {}}
-    # wait for logs
-    last_save = 0
-    pbar = tqdm(total=len(node_configs), desc='receiving logs')
-    while len(node_results['configs']) < len(node_configs):
-        msg = recv_socket.recv()
-        workerid, logs, worker_best_cfgs, worker_best_db_aucs = pa.deserialize(msg)
-        for cfg, cfg_db_aucs in logs:
-            node_results['configs'][cfg] = cfg_db_aucs
-            for problem, graph_sizes in worker_best_db_aucs.items():
-                for graph_size, seeds in graph_sizes.items():
-                    for seed, db_auc in seeds.items():
-                        if db_auc > node_results['best_db_aucs'][problem][graph_size][seed]:
-                            node_results['best_db_aucs'][problem][graph_size][seed] = worker_best_db_aucs[problem][graph_size][seed]
-                            node_results['best_configs'][problem][graph_size][seed] = worker_best_cfgs[problem][graph_size][seed]
-        pbar.update(len(logs))
-        # save to node results file every 5 configs
-        if len(node_results['configs']) - last_save > 5:
-            last_save = len(node_results['configs'])
-            with open(node_results_file, 'wb') as f:
-                pickle.dump(node_results, f)
-    # save results and exit
-    with open(node_results_file, 'wb') as f:
-        pickle.dump(node_results, f)
-    print(f'finished {len(node_results["configs"])}/{len(node_configs)} configs')
-    print(f'saved node results to {node_results_file}')
+    # node_results_dir = os.path.join(args.rootdir, f'node{args.nodeid}_results')
+    # if not os.path.exists(node_results_dir):
+    #     os.makedirs(node_results_dir)
+    # node_results_file = os.path.join(node_results_dir, f'scip_adaptive_node_results_round{round_idx}.pkl')
+    # node_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
+    #                 'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in gss.keys()} for p, gss in data.items()},
+    #                 'configs': {}}
+    # # wait for logs
+    # last_save = 0
+    # pbar = tqdm(total=len(node_configs), desc='receiving logs')
+    # while len(node_results['configs']) < len(node_configs):
+    #     msg = recv_socket.recv()
+    #     workerid, logs, worker_best_cfgs, worker_best_db_aucs = pa.deserialize(msg)
+    #     for cfg, cfg_db_aucs in logs:
+    #         node_results['configs'][cfg] = cfg_db_aucs
+    #         for problem, graph_sizes in worker_best_db_aucs.items():
+    #             for graph_size, seeds in graph_sizes.items():
+    #                 for seed, db_auc in seeds.items():
+    #                     if db_auc > node_results['best_db_aucs'][problem][graph_size][seed]:
+    #                         node_results['best_db_aucs'][problem][graph_size][seed] = worker_best_db_aucs[problem][graph_size][seed]
+    #                         node_results['best_configs'][problem][graph_size][seed] = worker_best_cfgs[problem][graph_size][seed]
+    #     pbar.update(len(logs))
+    #     # save to node results file every 5 configs
+    #     if len(node_results['configs']) - last_save > 5:
+    #         last_save = len(node_results['configs'])
+    #         with open(node_results_file, 'wb') as f:
+    #             pickle.dump(node_results, f)
+    # # save results and exit
+    # with open(node_results_file, 'wb') as f:
+    #     pickle.dump(node_results, f)
+    # print(f'finished {len(node_results["configs"])}/{len(node_configs)} configs')
+    # print(f'saved node results to {node_results_file}')
 
 
 def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
@@ -250,21 +256,36 @@ def main(args):
         main_results = {'best_db_aucs': {p: {gs: {seed: 0 for seed in SEEDS} for gs in insts.keys()} for p, insts in data.items()},
                         'best_configs': {p: {gs: {seed: None for seed in SEEDS} for gs in insts.keys()} for p, insts in data.items()},
                         'configs': {}}
-    for path in tqdm(Path(args.rootdir).rglob(f'scip_adaptive_node_results_round{round_idx}.pkl'), desc='Loading node files'):
-        with open(path, 'rb') as f:
-            node_results = pickle.load(f)
-            main_results['configs'].update(node_results['configs'])
-            for problem, instances in node_results['best_db_aucs'].items():
-                for graph_size, db_aucs in instances.items():
-                    for seed, db_auc in db_aucs.items():
+
+    # read all worker results from the previous run, update main results and remove the files.
+    for worker_file in tqdm(glob(f'{ROOTDIR}/scip_adaptive_worker_results*.pkl'), desc='loading worker results'):
+    # for path in tqdm(Path(args.rootdir).rglob(f'scip_adaptive_node_results_round{round_idx}.pkl'), desc='Loading node files'):
+        with open(worker_file, 'rb') as f:
+            logs, worker_best_configs, worker_best_db_aucs = pickle.load(f)
+        # todo continue
+        for cfg, cfg_db_aucs in logs:
+            main_results['configs'][cfg] = cfg_db_aucs
+            for problem, graph_sizes in worker_best_db_aucs.items():
+                for graph_size, seeds in graph_sizes.items():
+                    for seed, db_auc in seeds.items():
                         if db_auc > main_results['best_db_aucs'][problem][graph_size][seed]:
-                            main_results['best_db_aucs'][problem][graph_size][seed] = node_results['best_db_aucs'][problem][graph_size][seed]
-                            main_results['best_configs'][problem][graph_size][seed] = node_results['best_configs'][problem][graph_size][seed]
+                            main_results['best_db_aucs'][problem][graph_size][seed] = worker_best_db_aucs[problem][graph_size][seed]
+                            main_results['best_configs'][problem][graph_size][seed] = worker_best_configs[problem][graph_size][seed]
+
+        # main_results['configs'].update(worker_results['configs'])
+        # for problem, instances in worker_results['best_db_aucs'].items():
+        #     for graph_size, db_aucs in instances.items():
+        #         for seed, db_auc in db_aucs.items():
+        #             if db_auc > main_results['best_db_aucs'][problem][graph_size][seed]:
+        #                 main_results['best_db_aucs'][problem][graph_size][seed] = worker_results['best_db_aucs'][problem][graph_size][seed]
+        #                 main_results['best_configs'][problem][graph_size][seed] = worker_results['best_configs'][problem][graph_size][seed]
 
     # save updated results to main results file
     with open(main_results_file, 'wb') as f:
         pickle.dump(main_results, f)
         print(f'saved main results to {main_results_file}')
+    # remove all worker files
+    os.system("find $SCRATCH/room4improvement -type f -name 'scip_adaptive_worker_results*' -delete")
 
     # check for missing results:
     missing_configs = set(all_configs) - set(main_results['configs'].keys())
