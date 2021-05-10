@@ -174,7 +174,8 @@ def run_node(args):
     worker_handles = []
     for workerid in range(nworkers):
         worker_configs = [node_configs[idx] for idx in range(workerid, len(node_configs), nworkers)]
-        worker_handles.append(run_worker.remote(data, worker_configs, port, f'{args.nodeid}_{workerid}'))
+        if len(worker_configs) > 0:
+            worker_handles.append(run_worker.remote(data, worker_configs, port, f'{args.nodeid}_{workerid}'))
     # wait for all workers to finish
     ray.get(worker_handles)
     print('finished')
