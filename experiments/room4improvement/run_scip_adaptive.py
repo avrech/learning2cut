@@ -84,7 +84,8 @@ def run_worker(data, configs, workerid):
                     adaptive_cfg[k][round_idx] = cfg[k]
                 sepa_params.update(adaptive_cfg)
                 # set the best tuned params for using after the adapted ones:
-                sepa_params['default_separating_params'] = TUNED_SEPARATING_PARAMS[problem][graph_size][seed]
+                if TUNED_SEPARATING_PARAMS is not None:
+                    sepa_params['default_separating_params'] = TUNED_SEPARATING_PARAMS[problem][graph_size][seed]
                 sepa = CSBaselineSepa(hparams=sepa_params)
                 model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)
                 reset_sepa = CSResetSepa(hparams=sepa_params)
@@ -251,7 +252,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines(f'python run_scip_adaptive.py --rootdir {args.rootdir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
+        fh.writelines(f'python run_scip_adaptive.py --rootdir {args.rootdir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node --default_separating_params_file {args.default_separating_params_file}\n')
 
     os.system("sbatch {}".format(job_file))
 
