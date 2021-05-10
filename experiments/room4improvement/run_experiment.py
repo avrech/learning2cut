@@ -2,8 +2,8 @@ from utils.scip_models import mvc_model, CSBaselineSepa, set_aggresive_separatio
 import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
-from itertools import combinations
-from utils.functions import get_normalized_areas
+from scipy.interpolate import interp1d
+from utils.functions import get_normalized_areas, truncate
 from tqdm import tqdm
 import pickle
 import pandas as pd
@@ -167,31 +167,67 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
+
 for problem, baselines in results.items():
     columns = [gs for gs in data[problem].keys()]
     summary = {baseline: [] for baseline in baselines.keys()}
     for baseline, baseline_results in baselines.items():
         for graph_size, seeds in baseline_results.items():
-            db_aucs = np.array([stats['db_auc'] for stats in seeds.values()])
-            summary[baseline].append('{:.4f}{}{:.4f}'.format(db_aucs.mean(), u"\u00B1", db_aucs.std()))
+            # for MVC shorten the support to 100 lp iters.
+            if problem == 'mvc':
+                lpiter_support = 700
+                db_aucs = []
+                db_auc_imps = []
+                for seed, stats in seeds.items():
+                    lpiter, db = truncate(t=stats['lp_iterations'], ft=stats['dualbound'], support=lpiter_support, interpolate=True)
+                    db_auc = sum(get_normalized_areas(t=lpiter, ft=db, t_support=lpiter_support, reference=data[problem][graph_size][1]['optval']))
+                    db_aucs.append(db_auc)
+                    default_lpiter, default_db = truncate(t=baselines['default'][graph_size][seed]['lp_iterations'], ft=baselines['default'][graph_size][seed]['dualbound'], support=lpiter_support, interpolate=True)
+                    db_auc_imps.append(db_auc / sum(get_normalized_areas(t=default_lpiter, ft=default_db, t_support=lpiter_support, reference=data[problem][graph_size][1]['optval'])))
+                db_aucs = np.array(db_aucs)
+                db_auc_imps = np.array(db_auc_imps)
+            else:
+                db_aucs = np.array([stats['db_auc'] for stats in seeds.values()])
+                db_auc_imps = db_aucs / np.array([baselines['default'][graph_size][seed]['db_auc'] for seed in seeds.keys()])
+            summary[baseline].append('{:.4f}{}{:.4f}({:.3f})'.format(db_aucs.mean(), u"\u00B1", db_aucs.std(), db_auc_imps.mean()))
     df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
-    print(f'{"#"*30} {problem} {"#"*30}')
+    print(f'{"#"*40} {problem} {"#"*40}')
     print(df)
     csvfile = f'{ROOTDIR}/{problem}_baselines.csv'
     df.to_csv(csvfile)
     print(f'saved {problem} csv to: {csvfile}')
 
-    # fig, ax = plt.subplots(1)
-    # discounted_rewards = last_training_episode_stats['discounted_rewards']
-    # selected_q_avg = np.array(last_training_episode_stats['selected_q_avg'])
-    # selected_q_std = np.array(last_training_episode_stats['selected_q_std'])
-    # bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
-    # x_axis = np.arange(len(discounted_rewards))
-    # ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
-    # ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
-    # ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
-    # ax.fill_between(x_axis, selected_q_avg + selected_q_std, selected_q_avg - selected_q_std, facecolor='red',
-    #                 alpha=0.5)
-    # ax.legend()
-    # ax.set_xlabel('step')
-    # ax.grid()
+
+colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'orange', 'all_cuts': 'red', 'tuned': 'yellow', 'adaptive': 'green'}
+for problem in results.keys():
+    fig1, axes1 = plt.subplots(3, 3, sharex='col')
+    fig2, axes2 = plt.subplots(3, 3, sharex='col')
+    for col, graph_size in enumerate(data[problem].keys()):
+        for row, seed in enumerate(SEEDS):
+            for baseline in results[problem].keys():
+                if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
+                    label = baseline
+                else:
+                    label = None
+                stats = results[problem][baseline][graph_size][seed]
+                axes1[row, col].plot(stats['lp_iterations'], stats['dualbound'], colors[baseline], label=label)
+                axes2[row, col].plot(stats['solving_time'], stats['dualbound'], colors[baseline], label=label)
+    for row, gs in enumerate(SEEDS):
+        axes1[row, 0].set_ylabel(f'Seed={seed}')
+        axes2[row, 0].set_ylabel(f'Seed={seed}')
+    for col, gs in enumerate(data[problem].keys()):
+        axes1[0, col].set_title(f'Size={gs}')
+        axes2[0, col].set_title(f'Size={gs}')
+        axes1[2, col].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=1, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes2[2, col].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=1, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+    # axes1[2, 1].set_xlabel('LP Iterations')
+    # axes2[2, 1].set_xlabel('Solving Time')
+
+    fig1.suptitle('Dual Bound vs. LP Iterations')
+    fig2.suptitle('Dual Bound vs. Solving Time')
+    fig2.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig1.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig1.savefig(f'{ROOTDIR}/{problem}_db_vs_lpiters.png')
+    fig2.savefig(f'{ROOTDIR}/{problem}_db_vs_soltime.png')
+
+print('finished')
