@@ -133,6 +133,7 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                             for k in adapted_params.keys():
                                 adapted_params[k][round_idx] = param_dict[k]
                         sepa_params.update(adapted_params)
+                        sepa_params['default_separating_params'] = scip_tuned_best_config[problem][graph_size][seed]
 
                     sepa = CSBaselineSepa(hparams=sepa_params)
                     model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)

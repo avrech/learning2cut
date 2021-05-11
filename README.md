@@ -54,14 +54,29 @@ Inside `learning2cut/experiments/room4improvement` run:
 > python run_experiment.py  
 
 The script will generate `data.pkl` file for the whole experiment. This can take a long time since we solve hard maxcut instances to optimality.  
-After finishing, log in to Niagara, copy `data.pkl` to `$SCRATCH/room4improvement`.  
+After finishing, log in to Niagara and copy `data.pkl` to `$SCRATCH/room4improvement`.   
+
 ### Find `scip_tuned` baseline
-On Niagara,  
+On Niagara, inside `learning2cut/experiments/room4improvement` run:   
 > python run_scip_tuned.py --rootdir $SCRATCH/room4improvement --nnodes 20 --ncpus_per_node 80  
 
-This first run will submit jobs for finding `scip_tuned` policy. After all jobs have finished, run the same command line again to finalize stuff.  
-### Find `scip_adaptive` baseline
+Jobs for finding `scip_tuned` policy will be submitted. After all jobs have finished, run the same command line again to finalize stuff. 
+In a case something went wrong in the first run, the script should be invoked again until it finishes the work.      
 
+### Find `scip_adaptive` baseline
+On Niagara, inside `learning2cut/experiments/room4improvement` run:  
+> python run_scip_adaptive.py --rootdir $SCRATCH/room4improvement --nnodes 20 --ncpus_per_node 80  
+
+Running this command line `K` times will generate adaptive policy for `K` lp rounds. 
+The adaptive policies per problem, graph size and seed are stored as a list of key-vals. 
+
+### Run all baselines ###
+To compare all baselines in terms of solving time, 
+run again `run_experiment` pointing to the rootdir where
+scip tuned and adaptive results are stored. 
+The script will test all baselines on the local machine one by one
+without multiprocessing. 
+Results will be saved to a csv and png files. 
 
 
 
