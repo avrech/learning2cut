@@ -1449,3 +1449,66 @@ class CutSelectionModel(torch.nn.Module):
         return y, probs
 
 
+# Q network for SCIP separating parameters tuning
+class SCIPTuningQnet(torch.nn.Module):
+    def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
+        super(TQnet, self).__init__()
+        self.hparams = hparams
+        cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
+        self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
+        ###########
+        # Encoder #
+        ###########
+        # stack lp conv layers todo consider skip connections
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+                                                                edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
+                                                                emb_dim=hparams.get('emb_dim', 32),                   # default
+                                                                aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
+                                                                cuts_only=False))
+                                        for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
+
+        # cut conv edge attributes are the pairwise cuts orthogonality
+        cutconv_edge_attr_dim = 1
+        self.cut_conv = CutConv(channels=hparams.get('emb_dim', 32),
+                                edge_attr_dim=cutconv_edge_attr_dim,
+                                aggr=hparams.get('cut_conv_aggr', 'mean'))
+
+        ###########
+        # Q heads #
+        ###########
+        self.q_heads = {k: Lin(hparams.get('emb_dim', 32) * 3, len(vals)) for k, vals in hparams['action_set'].items()}
+
+    def forward(self,
+                x_c,
+                x_v,
+                x_a,
+                edge_index_c2v,
+                edge_index_a2v,
+                edge_attr_c2v,
+                edge_attr_a2v,
+                edge_index_a2a,
+                edge_attr_a2a,
+                x_c_batch,
+                x_v_batch,
+                x_a_batch
+                ):
+        """
+        """
+        ###########
+        # Encoder #
+        ###########
+        lp_conv_inputs = x_c, x_v, x_a, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v
+        f_c_out, f_v_out, f_a_out, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v = self.lp_conv(lp_conv_inputs)
+        # cut conv
+        f_a_out, _, _ = self.cut_conv((f_a_out, edge_index_a2a, edge_attr_a2a))
+        # pooling
+        f_c_out = scatter_mean(src=f_c_out, index=x_c_batch, dim=0)
+        f_v_out = scatter_mean(src=f_v_out, index=x_v_batch, dim=0)
+        f_a_out = scatter_mean(src=f_a_out, index=x_a_batch, dim=0)
+        # concatenate features to a single global feature vector
+        graph_emb = torch.cat([f_c_out, f_v_out, f_a_out], dim=-1)
+        # decode q values for each action in action set
+        q_values = {k: q_head(graph_emb) for k, q_head in self.q_heads.items()}
+        return q_values
