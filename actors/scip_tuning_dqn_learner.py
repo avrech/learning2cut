@@ -7,7 +7,7 @@ import time
 import numpy as np
 from utils.data import Transition
 import os
-from gnn.models import Qnet, TQnet
+from gnn.models import SCIPTuningQnet
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -30,7 +30,7 @@ DemonstrationBatch = namedtuple('DemonstrationBatch', (
 ))
 
 
-class DQNLearner:
+class SCIPTuningDQNLearner:
     """
     This actor executes in parallel two tasks:
         a. receiving batches, sending priorities and publishing params.
@@ -48,18 +48,10 @@ class DQNLearner:
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
         self.batch_size = hparams.get('batch_size', 64)
         self.gamma = hparams.get('gamma', 0.999)
-        if hparams.get('dqn_arch', 'TQNet'):
-            # todo - consider support also mean value aggregation.
-            assert hparams.get('value_aggr') == 'max', "TQNet v3 supports only value_aggr == max"
-            assert hparams.get('tqnet_version',
-                               'v3') == 'v3', 'v1 and v2 are no longer supported. need to adapt to new decoder context'
-        self.policy_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get(
-            'dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
-        self.target_net = TQnet(hparams=hparams, use_gpu=use_gpu, gpu_id=gpu_id).to(self.device) if hparams.get(
-            'dqn_arch', 'TQNet') == 'TQNet' else Qnet(hparams=hparams).to(self.device)
+        self.policy_net = SCIPTuningQnet(hparams, use_gpu, gpu_id).to(self.device)
+        self.target_net = SCIPTuningQnet(hparams, use_gpu, gpu_id).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
-        self.tqnet_version = hparams.get('tqnet_version', 'v3')
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=hparams.get('lr', 0.001),
                                     weight_decay=hparams.get('weight_decay', 0.0001))
         # value aggregation method for the target Q values
@@ -69,7 +61,6 @@ class DQNLearner:
             self.value_aggr = scatter_mean
         self.nstep_learning = hparams.get('nstep_learning', 1)
         self.dqn_objective = hparams.get('dqn_objective', 'db_auc')
-        self.use_transformer = hparams.get('dqn_arch', 'TQNet') == 'TQNet'
         self.use_per = True
 
         # training stuff
@@ -87,7 +78,6 @@ class DQNLearner:
         self.run_dir = hparams['run_dir']
 
         self.n_step_loss_moving_avg = 0
-        self.demonstration_loss_moving_avg = 0
 
         # idle time monitor
         self.idle_time_sec = 0
@@ -328,6 +318,7 @@ class DQNLearner:
             self.prepare_new_params_to_workers()
 
     def preprocess_batch(self, transitions, weights, idxes, data_ids):
+        # todo can be removed since scip tuning doesn't support demonstrations
         # sort demonstration transitions first:
         is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
         argsort_demonstrations_first = is_demonstration.argsort()[::-1]
@@ -377,23 +368,6 @@ class DQNLearner:
 
         # Compute Q(s, a):
         # the model computes Q(s,:), then we select the columns of the actions taken, i.e action_batch.
-        # TODO: transformer & learning from demonstrations:
-        #  for each cut, we need to compute the supervising expert loss
-        #  J_E = max( Q(s,a) + l(a,a_E) ) - Q(s,a_E).
-        #  in order to compute the max term
-        #  we need to compute the whole sequence of q_values as done in inference,
-        #  and at each decoder iteration, to compute J_E.
-        #  How can we do it efficiently?
-        #  The cuts encoding are similar for all those cut-decisions, and can be computed only once.
-        #  In order to have the full set of Q values,
-        #  we can replicate the cut encodings |selected|+1 times and
-        #  expand the decoder context to the full sequence of edge attributes accordingly.
-        #  Each encoding replication with its corresponding context, can define a separate graph,
-        #  batched together, and fed in parallel into the decoder.
-        #  For the first |selected| replications we need to compute a single J_E for the corresponding
-        #  selected cut, and for the last replication representing the q values of all the discarded cuts,
-        #  we need to compute the |discarded| J_E losses for all the discarded cuts.
-        #  Note: each one of those J_E losses should consider only the "remaining" cuts.
         policy_output = self.policy_net(
             x_c=batch.x_c,
             x_v=batch.x_v,
@@ -404,16 +378,11 @@ class DQNLearner:
             edge_attr_a2v=batch.edge_attr_a2v,
             edge_index_a2a=batch.edge_index_a2a,
             edge_attr_a2a=batch.edge_attr_a2a,
-            mode='batch'
+            x_c_batch=batch.x_c_batch,
+            x_v_batch=batch.x_v_batch,
+            x_a_batch=batch.x_a_batch
         )
         q_values = policy_output['q_values'].gather(1, action_batch.unsqueeze(1))
-
-        # demonstration loss:
-        # TODO - currently implemented only for tqnet v3
-        if is_demonstration.any():
-            demonstration_loss = self.compute_demonstration_loss(batch, policy_output['cut_encoding'], is_demonstration, demonstration_batch, importance_sampling_correction_weights)
-        else:
-            demonstration_loss = 0
 
         # Compute the Bellman target for all next states.
         # Expected values of actions for non_terminal_next_states are computed based
@@ -425,7 +394,7 @@ class DQNLearner:
 
         # for each graph in the next state batch, and for each cut, compute the q_values
         # using the target network.
-        target_next_output = self.target_net(
+        target_next_q_values = self.target_net(
             x_c=batch.ns_x_c,
             x_v=batch.ns_x_v,
             x_a=batch.ns_x_a,
@@ -435,70 +404,41 @@ class DQNLearner:
             edge_attr_a2v=batch.ns_edge_attr_a2v,
             edge_index_a2a=batch.ns_edge_index_a2a,
             edge_attr_a2a=batch.ns_edge_attr_a2a,
-            mode='batch'
+            x_c_batch=batch.ns_x_c_batch,
+            x_v_batch=batch.ns_x_v_batch,
+            x_a_batch=batch.ns_x_a_batch
         )
-        target_next_q_values = target_next_output['q_values']
         # compute the target using either DQN or DDQN formula
-        # todo: TQNet v3:
-        #  compute the argmax across the "select" q values only.
-        if self.use_transformer:
-            assert self.tqnet_version == 'v3', 'v1 and v2 are no longer supported'
-            if self.hparams.get('update_rule', 'DQN') == 'DQN':
-                # y = r + gamma max_a' target_net(s', a')
-                max_target_next_q_values_aggr, _ = scatter_max(target_next_q_values[:, 1],  # find max across the "select" q values only
-                                                               batch.ns_x_a_batch,
-                                                               # target index of each element in source
-                                                               dim=0,  # scattering dimension
-                                                               dim_size=self.batch_size)
-            elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
-                # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-                policy_next_output = self.policy_net(
-                    x_c=batch.ns_x_c,
-                    x_v=batch.ns_x_v,
-                    x_a=batch.ns_x_a,
-                    edge_index_c2v=batch.ns_edge_index_c2v,
-                    edge_index_a2v=batch.ns_edge_index_a2v,
-                    edge_attr_c2v=batch.ns_edge_attr_c2v,
-                    edge_attr_a2v=batch.ns_edge_attr_a2v,
-                    edge_index_a2a=batch.ns_edge_index_a2a,
-                    edge_attr_a2a=batch.ns_edge_attr_a2a,
-                    mode='batch'
-                )
-                policy_next_q_values = policy_next_output['q_values']
-                # compute the argmax over 'select' for each graph in batch
-                _, argmax_policy_next_q_values = scatter_max(policy_next_q_values[:, 1], # find max across the "select" q values only
-                                                             batch.ns_x_a_batch, # target index of each element in source
-                                                             dim=0,  # scattering dimension
-                                                             dim_size=self.batch_size)
-                max_target_next_q_values_aggr = target_next_q_values[argmax_policy_next_q_values, 1].detach()
-
+        if self.hparams.get('update_rule', 'DQN') == 'DQN':
+            # y = r + gamma max_a' target_net(s', a')
+            max_target_next_q_values = target_next_q_values.max(1)[0].detach()
+        elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
+            # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
+            policy_next_q_values = self.policy_net(
+                x_c=batch.ns_x_c,
+                x_v=batch.ns_x_v,
+                x_a=batch.ns_x_a,
+                edge_index_c2v=batch.ns_edge_index_c2v,
+                edge_index_a2v=batch.ns_edge_index_a2v,
+                edge_attr_c2v=batch.ns_edge_attr_c2v,
+                edge_attr_a2v=batch.ns_edge_attr_a2v,
+                edge_index_a2a=batch.ns_edge_index_a2a,
+                edge_attr_a2a=batch.ns_edge_attr_a2a,
+                x_c_batch=batch.ns_x_c_batch,
+                x_v_batch=batch.ns_x_v_batch,
+                x_a_batch=batch.ns_x_a_batch
+            )
+            argmax_policy_next_q_values = policy_next_q_values.max(1)[1].detach()
+            max_target_next_q_values = target_next_q_values.gather(1, argmax_policy_next_q_values).detach()
         else:
-            if self.hparams.get('update_rule', 'DQN') == 'DQN':
-                # y = r + gamma max_a' target_net(s', a')
-                max_target_next_q_values = target_next_q_values.max(1)[0].detach()
-            elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
-                # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-                policy_next_output = self.policy_net(
-                    x_c=batch.ns_x_c,
-                    x_v=batch.ns_x_v,
-                    x_a=batch.ns_x_a,
-                    edge_index_c2v=batch.ns_edge_index_c2v,
-                    edge_index_a2v=batch.ns_edge_index_a2v,
-                    edge_attr_c2v=batch.ns_edge_attr_c2v,
-                    edge_attr_a2v=batch.ns_edge_attr_a2v,
-                    edge_index_a2a=batch.ns_edge_index_a2a,
-                    edge_attr_a2a=batch.ns_edge_attr_a2a,
-                )
-                policy_next_q_values = policy_next_output['q_values']
-                argmax_policy_next_q_values = policy_next_q_values.max(1)[1].detach()
-                max_target_next_q_values = target_next_q_values.gather(1, argmax_policy_next_q_values).detach()
+            raise ValueError
 
-            # aggregate the action-wise values using mean or max,
-            # and generate for each graph in the batch a single value
-            max_target_next_q_values_aggr = self.value_aggr(max_target_next_q_values,  # source vector
-                                                            batch.ns_x_a_batch,  # target index of each element in source
-                                                            dim=0,  # scattering dimension
-                                                            dim_size=self.batch_size)   # output tensor size in dim after scattering
+        # aggregate the action-wise values using mean or max,
+        # and generate for each graph in the batch a single value
+        max_target_next_q_values_aggr = self.value_aggr(max_target_next_q_values,  # source vector
+                                                        batch.ns_x_a_batch,  # target index of each element in source
+                                                        dim=0,  # scattering dimension
+                                                        dim_size=self.batch_size)   # output tensor size in dim after scattering
 
         # override with zeros the values of terminal states which are zero by convention
         max_target_next_q_values_aggr[batch.ns_terminal] = 0

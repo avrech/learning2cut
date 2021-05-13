@@ -168,7 +168,7 @@ pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
-
+adaptive_params_dict = {}
 for problem, baselines in results.items():
     columns = [gs for gs in data[problem].keys()]
     summary = {baseline: [] for baseline in baselines.keys()}
@@ -198,12 +198,53 @@ for problem, baselines in results.items():
     df.to_csv(csvfile)
     print(f'saved {problem} csv to: {csvfile}')
 
+    # print adaptive and tuned params to csv
+    adaptive_params_dict[problem] = {}
+    for graph_size, seeds in baselines['adaptive'].items():
+        adaptive_params_dict[problem][graph_size] = {}
+        for seed in seeds.keys():
+            adapted_param_list = scip_adaptive_params[problem][graph_size][seed]
+            adapted_params = {
+                'objparalfac': {},
+                'dircutoffdistfac': {},
+                'efficacyfac': {},
+                'intsupportfac': {},
+                'maxcutsroot': {},
+                'minorthoroot': {}
+            }
+            for round_idx, kvlist in enumerate(adapted_param_list):
+                param_dict = {k: v for k, v in kvlist}
+                for k in adapted_params.keys():
+                    adapted_params[k][round_idx] = param_dict[k]
+            adaptive_params_dict[problem][graph_size][seed] = adapted_params
+        columns = ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot', 'minorthoroot']
+        summary = {}
+        for round_idx in range(len(adapted_param_list)):
+            row = []
+            for col in columns:
+                for seed in seeds.keys():
+                    row.append(adaptive_params_dict[problem][graph_size][seed][col][round_idx])
+            summary[round_idx] = row
+        # append last row for the tuned params
+        tuned_params_row = []
+        for col in columns:
+            for seed in seeds.keys():
+                tuned_params_row.append(scip_tuned_best_config[problem][graph_size][seed][col])
+        summary['tuned'] = tuned_params_row
+        columns *= 3
+        df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
+        csvfile = f'{ROOTDIR}/{problem}_{graph_size}_adaptive_tuned_params.csv'
+        df.to_csv(csvfile)
+        print(f'saved {problem}-{graph_size} adaptive and tuned params table to: {csvfile}')
 
-colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'orange', 'all_cuts': 'red', 'tuned': 'yellow', 'adaptive': 'green'}
+
+colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'tuned': 'r', 'adaptive': 'g'}
 for problem in results.keys():
-    fig1, axes1 = plt.subplots(3, 3, sharex='col')
-    fig2, axes2 = plt.subplots(3, 3, sharex='col')
+    fig1, axes1 = plt.subplots(3, 3, sharex='col')  # dual bound vs. lp iterations
+    fig2, axes2 = plt.subplots(3, 3, sharex='col')  # dual bound vs. solving time
+
     for col, graph_size in enumerate(data[problem].keys()):
+        fig3, axes3 = plt.subplots(3, 1)  # ncuts_applied vs. round idx
         for row, seed in enumerate(SEEDS):
             for baseline in results[problem].keys():
                 if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
@@ -213,6 +254,31 @@ for problem in results.keys():
                 stats = results[problem][baseline][graph_size][seed]
                 axes1[row, col].plot(stats['lp_iterations'], stats['dualbound'], colors[baseline], label=label)
                 axes2[row, col].plot(stats['solving_time'], stats['dualbound'], colors[baseline], label=label)
+                if baseline in ['default', 'tuned', 'adaptive']:
+                    ncuts_applied_cumsum = np.array(stats['ncuts_applied'])
+                    ncuts_applied = ncuts_applied_cumsum[1:] - ncuts_applied_cumsum[:-1]
+                    maxcutsroot = {'default': 2000,
+                                   'tuned': scip_tuned_best_config[problem][graph_size][seed]['maxcutsroot'],
+                                   'adaptive': adaptive_params_dict[problem][graph_size][seed]['maxcutsroot']}.get(baseline)
+                    if baseline == 'adaptive':
+                        pad_len = len(ncuts_applied) - len(maxcutsroot)
+                        if pad_len > 0:
+                            maxcutsroot = np.array(list(maxcutsroot.values()) + [scip_tuned_best_config[problem][graph_size][seed]['maxcutsroot']]*pad_len)
+                            assert len(maxcutsroot) == len(ncuts_applied)
+                        else:
+                            maxcutsroot = np.array(list(maxcutsroot.values()))[:len(ncuts_applied)]
+
+                    maxcutsroot_active = np.nonzero(ncuts_applied == maxcutsroot)[0]
+                    # plt.plot(xs, ys, '-gS', markevery=markers_on)
+                    lpiters = stats['lp_iterations'][1:]
+                    axes3[row].plot(lpiters, ncuts_applied, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
+
+        for row, seed in enumerate(SEEDS):
+            axes3[row].set_ylabel(f'Seed={seed}')
+        axes3[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        fig3.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig3.savefig(f'{ROOTDIR}/{problem}_{graph_size}_napplied.png')
+
     for row, gs in enumerate(SEEDS):
         axes1[row, 0].set_ylabel(f'Seed={seed}')
         axes2[row, 0].set_ylabel(f'Seed={seed}')
@@ -223,12 +289,12 @@ for problem in results.keys():
         axes2[2, col].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=1, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
     # axes1[2, 1].set_xlabel('LP Iterations')
     # axes2[2, 1].set_xlabel('Solving Time')
-
-    fig1.suptitle('Dual Bound vs. LP Iterations')
-    fig2.suptitle('Dual Bound vs. Solving Time')
-    fig2.tight_layout(rect=[0, 0.03, 1, 0.95])
+    # fig1.suptitle(f'{problem.upper()} Dual Bound vs. LP Iterations')
+    # fig2.suptitle(f'{problem.upper()} Dual Bound vs. Solving Time')
     fig1.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig2.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig1.savefig(f'{ROOTDIR}/{problem}_db_vs_lpiters.png')
     fig2.savefig(f'{ROOTDIR}/{problem}_db_vs_soltime.png')
+
 
 print('finished')
