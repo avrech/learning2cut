@@ -46,8 +46,8 @@ def get_img_from_fig(fig, dpi=180):
 
 
 if __name__ == '__main__':
-    # datadir = '/home/avrech/learning2cut/experiments/dqn/data/maxcut/validset25/barabasi-albert-n25-m10-weights-normal-seed36/'
-    datadir = '/home/avrech/learning2cut/experiments/dqn/data/maxcut/trainset25/barabasi-albert-n25-m10-weights-normal-seed46'
+    # datadir = '/home/avrech/learning2cut/experiments/cut_selection_dqn/data/maxcut/validset25/barabasi-albert-n25-m10-weights-normal-seed36/'
+    datadir = '/home/avrech/learning2cut/experiments/cut_selection_dqn/data/maxcut/trainset25/barabasi-albert-n25-m10-weights-normal-seed46'
     test_isomorphism(datadir)
     print('finished')
 

@@ -11,7 +11,7 @@ import wandb
 if __name__ == '__main__':
     import argparse
     import yaml
-    from experiments.dqn.default_parser import parser, get_hparams
+    from experiments.cut_selection_dqn.default_parser import parser, get_hparams
     # parser = argparse.ArgumentParser()
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')

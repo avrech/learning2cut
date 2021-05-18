@@ -220,8 +220,8 @@ class SCIPTuningDQNLearner:
         """ Prepares received data for sgd """
         transition_numpy_tuples, weights, idxes, data_ids = pa.deserialize(batch_packet)
         transitions = [Transition.from_numpy_tuple(npt) for npt in transition_numpy_tuples]
-        sgd_step_inputs = self.preprocess_batch(transitions, weights, idxes, data_ids)
-        return sgd_step_inputs
+        batch = Transition.create_batch(transitions)
+        return batch, torch.from_numpy(weights), idxes, data_ids
 
     def recv_batch(self, blocking=True):
         """
@@ -295,9 +295,9 @@ class SCIPTuningDQNLearner:
         self.idle_time_sec = idle_time_end - idle_time_start
 
         # pop one batch and perform one SGD step
-        batch, weights, idxes, data_ids, is_demonstration, demonstration_batch = self.replay_data_queue.popleft()  # thread-safe pop
+        batch, weights, idxes, data_ids = self.replay_data_queue.popleft()  # thread-safe pop
 
-        new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights, is_demonstration=is_demonstration, demonstration_batch=demonstration_batch)
+        new_priorities = self.sgd_step(batch=batch, importance_sampling_correction_weights=weights)
         packet = (idxes, new_priorities, data_ids)
         self.new_priorities_queue.append(packet)  # thread safe append
         # todo verify
@@ -317,49 +317,8 @@ class SCIPTuningDQNLearner:
             self.optimize_model()
             self.prepare_new_params_to_workers()
 
-    def preprocess_batch(self, transitions, weights, idxes, data_ids):
-        # todo can be removed since scip tuning doesn't support demonstrations
-        # sort demonstration transitions first:
-        is_demonstration = np.array([t.is_demonstration for t in transitions], dtype=np.bool)
-        argsort_demonstrations_first = is_demonstration.argsort()[::-1]
-        transitions = [transitions[idx] for idx in argsort_demonstrations_first]
-        weights, idxes, data_ids = weights[argsort_demonstrations_first], idxes[argsort_demonstrations_first], data_ids[argsort_demonstrations_first]
-        is_demonstration = is_demonstration[argsort_demonstrations_first]
-
-        # create pytorch-geometric batch
-        batch = Transition.create_batch(transitions)
-
-        # prepare demonstration data if any
-        if is_demonstration.any():
-            # filter non demonstration data
-            n_demonstrations = sum(is_demonstration)  # number of demonstration transitions in batch
-            # remove from edge_index (and corresponding edge_attr) edges which reference cuts of index greater than
-            max_demonstration_edge_index = sum(batch.x_a_batch < n_demonstrations) - 1
-            demonstration_edges = batch.demonstration_context_edge_index[0, :] < max_demonstration_edge_index
-
-            # demonstration_context_edge_index = batch.demonstration_context_edge_index[:, demonstration_edges]
-            # demonstration_context_edge_attr = batch.demonstration_context_edge_attr[demonstration_edges, :]
-            # demonstration_action = batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations]
-            # demonstration_idx = batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations]
-            # demonstration_conv_aggr_out_idx = batch.demonstration_conv_aggr_out_idx[demonstration_edges]
-            # demonstration_encoding_broadcast = batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations]
-            # demonstration_action_batch = batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations]
-
-            demonstration_batch = DemonstrationBatch(
-                batch.demonstration_context_edge_index[:, demonstration_edges],
-                batch.demonstration_context_edge_attr[demonstration_edges, :],
-                batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations],
-                batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations],
-                batch.demonstration_conv_aggr_out_idx[demonstration_edges],
-                batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations],
-                batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations])
-        else:
-            demonstration_batch = None
-        return batch, torch.from_numpy(weights), idxes, data_ids, is_demonstration, demonstration_batch
-
-    def sgd_step(self, batch, importance_sampling_correction_weights=None, is_demonstration=None, demonstration_batch=None):
+    def sgd_step(self, batch, importance_sampling_correction_weights=None):
         """ implement the basic DQN optimization step """
-
         # # old replay buffer returned transitions as separated Transition objects
         # # todo - batch before calling sgd_step to save GPU time on distributed learner
         # batch = Transition.create_batch(transitions).to(self.device)  #, follow_batch=['x_c', 'x_v', 'x_a', 'ns_x_c', 'ns_x_v', 'ns_x_a']).to(self.device)
@@ -368,7 +327,7 @@ class SCIPTuningDQNLearner:
 
         # Compute Q(s, a):
         # the model computes Q(s,:), then we select the columns of the actions taken, i.e action_batch.
-        policy_output = self.policy_net(
+        q_values_dict = self.policy_net(
             x_c=batch.x_c,
             x_v=batch.x_v,
             x_a=batch.x_a,
@@ -382,7 +341,10 @@ class SCIPTuningDQNLearner:
             x_v_batch=batch.x_v_batch,
             x_a_batch=batch.x_a_batch
         )
-        q_values = policy_output['q_values'].gather(1, action_batch.unsqueeze(1))
+        # concatenate the q_values for all heads
+        q_dim1 = len(self.hparams['action_set']['objparalfac'])
+        q_values = torch.cat(list(q_values_dict.values()), dim=1).reshape((-1, q_dim1))
+        q_values = q_values.gather(1, action_batch.unsqueeze(1))
 
         # Compute the Bellman target for all next states.
         # Expected values of actions for non_terminal_next_states are computed based
@@ -394,7 +356,7 @@ class SCIPTuningDQNLearner:
 
         # for each graph in the next state batch, and for each cut, compute the q_values
         # using the target network.
-        target_next_q_values = self.target_net(
+        target_next_q_values_dict = self.target_net(
             x_c=batch.ns_x_c,
             x_v=batch.ns_x_v,
             x_a=batch.ns_x_a,
@@ -408,13 +370,14 @@ class SCIPTuningDQNLearner:
             x_v_batch=batch.ns_x_v_batch,
             x_a_batch=batch.ns_x_a_batch
         )
+        target_next_q_values = torch.cat(list(target_next_q_values_dict.values()), dim=1).reshape((-1, q_dim1))
         # compute the target using either DQN or DDQN formula
         if self.hparams.get('update_rule', 'DQN') == 'DQN':
             # y = r + gamma max_a' target_net(s', a')
             max_target_next_q_values = target_next_q_values.max(1)[0].detach()
         elif self.hparams.get('update_rule', 'DQN') == 'DDQN':
             # y = r + gamma target_net(s', argmax_a' policy_net(s', a'))
-            policy_next_q_values = self.policy_net(
+            policy_next_q_values_dict = self.policy_net(
                 x_c=batch.ns_x_c,
                 x_v=batch.ns_x_v,
                 x_a=batch.ns_x_a,
@@ -428,6 +391,7 @@ class SCIPTuningDQNLearner:
                 x_v_batch=batch.ns_x_v_batch,
                 x_a_batch=batch.ns_x_a_batch
             )
+            policy_next_q_values = torch.cat(list(policy_next_q_values_dict.values()), dim=1).reshape((-1, q_dim1))
             argmax_policy_next_q_values = policy_next_q_values.max(1)[1].detach()
             max_target_next_q_values = target_next_q_values.gather(1, argmax_policy_next_q_values).detach()
         else:
@@ -435,20 +399,23 @@ class SCIPTuningDQNLearner:
 
         # aggregate the action-wise values using mean or max,
         # and generate for each graph in the batch a single value
+        # todo - what about terminal states?
+        a_batch = torch.cat([[idx]*len(self.hparams['action_set']) for idx in range(self.batch_size)])
         max_target_next_q_values_aggr = self.value_aggr(max_target_next_q_values,  # source vector
-                                                        batch.ns_x_a_batch,  # target index of each element in source
+                                                        a_batch,  # target index of each element in source
                                                         dim=0,  # scattering dimension
                                                         dim_size=self.batch_size)   # output tensor size in dim after scattering
 
         # override with zeros the values of terminal states which are zero by convention
         max_target_next_q_values_aggr[batch.ns_terminal] = 0
-        # broadcast the aggregated next state q_values to cut-level graph wise, to bootstrap the cut-level rewards
-        target_next_q_values_broadcast = max_target_next_q_values_aggr[batch.x_a_batch]
+        # todo broadcast later after computing the targets
+        # # broadcast the aggregated next state q_values to cut-level graph wise, to bootstrap the cut-level rewards
+        # target_next_q_values_broadcast = max_target_next_q_values_aggr[a_batch]
 
         # now compute the cut-level target
         reward_batch = batch.r
-        target_q_values = reward_batch + (self.gamma ** self.nstep_learning) * target_next_q_values_broadcast
-
+        target_q_values = reward_batch + (self.gamma ** self.nstep_learning) * max_target_next_q_values_aggr
+        target_q_values = target_q_values[a_batch]
         # Compute Huber loss
         # todo - support importance sampling correction - double check
         if self.use_per:
@@ -464,7 +431,7 @@ class SCIPTuningDQNLearner:
         self.n_step_loss_moving_avg = 0.95 * self.n_step_loss_moving_avg + 0.05 * n_step_loss.detach().cpu().numpy()
 
         # combine all losses (DQN and demonstration loss)
-        loss = self.hparams.get('n_step_loss_coef', 1.0) * n_step_loss + self.hparams.get('demonstration_loss_coef', 0.5) * demonstration_loss
+        loss = n_step_loss
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -480,7 +447,7 @@ class SCIPTuningDQNLearner:
             td_error = torch.abs(q_values - target_q_values.unsqueeze(1)).detach()
             td_error = torch.clamp(td_error, min=1e-8)
             # (to compute p,q norm take power p and compute sqrt q)
-            td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, batch.x_a_batch, # target index of each element in source
+            td_error_l2_norm = torch.sqrt(scatter_add(td_error ** 2, a_batch,         # target index of each element in source
                                                       dim=0,                          # scattering dimension
                                                       dim_size=self.batch_size))      # output tensor size in dim after scattering
 
@@ -489,84 +456,6 @@ class SCIPTuningDQNLearner:
             return new_priorities
         else:
             return None
-
-    def compute_demonstration_loss(self, batch, cut_encoding_batch, is_demonstration, demonstration_batch, importance_sampling_correction_weights):
-        # todo - continue here. verify batching and everything.
-        # filter non demonstration data
-        n_demonstrations = sum(is_demonstration)  # number of demonstration transitions in batch
-        cut_encoding_batch = cut_encoding_batch[batch.x_a_batch < n_demonstrations]
-        # remove from edge_index (and corresponding edge_attr) edges which reference cuts of index greater than
-        # max_demonstration_edge_index = cut_encoding_batch.shape[0] - 1
-        assert demonstration_batch.context_edge_index.max() == cut_encoding_batch.shape[0] - 1
-        # demonstration_edges = batch.demonstration_context_edge_index[0, :] < max_demonstration_edge_index
-        # demonstration_context_edge_index = batch.demonstration_context_edge_index[:, demonstration_edges]
-        # demonstration_context_edge_attr = batch.demonstration_context_edge_attr[demonstration_edges, :]
-        # demonstration_action = batch.demonstration_action[batch.demonstration_action_batch < n_demonstrations]
-        # demonstration_idx = batch.demonstration_idx[batch.demonstration_idx_batch < n_demonstrations]
-        # demonstration_conv_aggr_out_idx = batch.demonstration_conv_aggr_out_idx[demonstration_edges]
-        # demonstration_encoding_broadcast = batch.demonstration_encoding_broadcast[batch.demonstration_idx_batch < n_demonstrations]
-        # demonstration_action_batch = batch.demonstration_action_batch[batch.demonstration_action_batch < n_demonstrations]
-        #
-        # demonstration_batch = DemonstrationBatch(
-        #     demonstration_context_edge_index,
-        #     demonstration_context_edge_attr,
-        #     demonstration_action,
-        #     demonstration_idx,
-        #     demonstration_conv_aggr_out_idx,
-        #     demonstration_encoding_broadcast,
-        #     demonstration_action_batch)
-
-        demonstration_context_edge_index = demonstration_batch[0].to(self.device)
-        demonstration_context_edge_attr = demonstration_batch[1].to(self.device)
-        demonstration_action = demonstration_batch[2].to(self.device)
-        demonstration_idx = demonstration_batch[3].to(self.device)
-        demonstration_conv_aggr_out_idx = demonstration_batch[4].to(self.device)
-        demonstration_encoding_broadcast = demonstration_batch[5].to(self.device)
-        demonstration_action_batch = demonstration_batch[6].to(self.device)
-
-        # predict cut-level q values
-        cut_decoding = self.policy_net.decoder_conv.conv_demonstration(
-            x=cut_encoding_batch,
-            edge_index=demonstration_context_edge_index,
-            edge_attr=demonstration_context_edge_attr,
-            aggr_idx=demonstration_conv_aggr_out_idx,
-            encoding_broadcast=demonstration_encoding_broadcast
-        )
-        q_values = self.policy_net.q(cut_decoding)
-        # average "discard" q_values
-        discard_q_values = scatter_mean(q_values[:, 0], demonstration_idx, dim=0)
-        assert discard_q_values.shape[0] == demonstration_idx[-1] + 1
-
-        # interleave the "select" and "discard" q values
-        pooled_q_values = torch.empty(size=(q_values.shape[0] + discard_q_values.shape[0],), dtype=torch.float32, device=self.device)
-        pooled_q_values[torch.arange(q_values.shape[0], device=self.device) + demonstration_idx] = q_values[:, 1]  # "select" q_values
-        discard_idxes = scatter_add(torch.ones_like(demonstration_idx, device=self.device), demonstration_idx, dim=0).cumsum(0) + torch.arange(discard_q_values.shape[0], device=self.device)
-        pooled_q_values[discard_idxes] = discard_q_values
-
-        # add large margin
-        large_margin = torch.full_like(pooled_q_values,
-                                       fill_value=self.hparams.get('demonstration_large_margin', 0.1),
-                                       device=self.device)
-        large_margin[demonstration_action] = 0
-        q_plus_l = pooled_q_values + large_margin
-
-        # compute demonstration loss J_E = max [Q(s,a) + large margin] - Q(s, a_E)
-        q_a_E = pooled_q_values[demonstration_action]
-        # todo - extend demonstration_idx with the "discard" entries, then take max
-        demonstration_idx_ext = torch.empty_like(q_plus_l, dtype=torch.long, device=self.device)
-        demonstration_idx_ext[torch.arange(q_values.shape[0], device=self.device) + demonstration_idx] = demonstration_idx
-        demonstration_idx_ext[discard_idxes] = torch.arange(demonstration_idx[-1] + 1, device=self.device)
-
-        max_q_plus_l, _ = scatter_max(q_plus_l, demonstration_idx_ext, dim=0)
-        losses = max_q_plus_l - q_a_E
-
-        # broadcast transition-level importance sampling correction weights to actions
-        weights_broadcasted = importance_sampling_correction_weights[demonstration_action_batch].to(self.device)
-        loss = (losses * weights_broadcasted).mean()
-
-        # log demonstration loss moving average
-        self.demonstration_loss_moving_avg = 0.95 * self.demonstration_loss_moving_avg + 0.05 * loss.detach().cpu().numpy()
-        return loss
 
     # done
     def update_target(self):
@@ -615,11 +504,9 @@ class SCIPTuningDQNLearner:
 
         # log the average loss of the last training session
         print('{}-step Loss: {:.4f} | '.format(self.nstep_learning, self.n_step_loss_moving_avg), end='')
-        print('Demonstration Loss: {:.4f} | '.format(self.demonstration_loss_moving_avg), end='')
         print(f'SGD Step: {self.num_sgd_steps_done} | ', end='')
         # todo wandb
         log_dict['Nstep_Loss'] = self.n_step_loss_moving_avg
-        log_dict['Demonstration_Loss'] = self.demonstration_loss_moving_avg
         log_dict['SGD_Step'] = self.num_sgd_steps_done
 
         # print the additional info

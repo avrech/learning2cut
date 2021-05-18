@@ -342,14 +342,14 @@ class SCIPTuningDQNWorker(Sepa):
     # done
     def sepaexeclp(self):
         if self.hparams.get('debug_events', False):
-            self.print('DEBUG MSG: dqn separator called')
+            self.print('DEBUG MSG: cut_selection_dqn separator called')
 
         # finish with the previous step:
         # todo - in case of no cuts, we return here a second time without any new action. we shouldn't record stats twice.
         self._update_episode_stats()
 
         # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
-        # we dont want to run any further dqn steps, and therefore we return immediately.
+        # we dont want to run any further cut_selection_dqn steps, and therefore we return immediately.
         if self.terminal_state:
             # discard all the cuts in the separation storage and return
             self.model.clearCuts()
@@ -1216,7 +1216,7 @@ class SCIPTuningDQNWorker(Sepa):
     def test(self):
         """ playground for testing """
         self.load_datasets()
-        self.load_checkpoint(filepath='/home/avrech/learning2cut/experiments/dqn/results/exp5/24jo87jy/best_validset_90_100_checkpoint.pt')
+        self.load_checkpoint(filepath='/experiments/cut_selection_dqn/results/exp5/24jo87jy/best_validset_90_100_checkpoint.pt')
         # focus test on
         dataset = self.datasets['validset_90_100']
         dataset['instances'] = [dataset['instances'][idx] for idx in [3, 6]]

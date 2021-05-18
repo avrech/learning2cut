@@ -33,7 +33,7 @@ if __name__ == '__main__':
     4.  Killing zombie processes
         todo complete
     """
-    from experiments.dqn.default_parser import parser, get_hparams
+    from experiments.cut_selection_dqn.default_parser import parser, get_hparams
     # parser = argparse.ArgumentParser()
     parser.add_argument('--profile', action='store_true',
                         help='run with cProfile')

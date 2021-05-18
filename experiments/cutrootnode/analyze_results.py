@@ -106,8 +106,8 @@ def analyze_results(rootdir='results', dstdir='analysis', filepattern='experimen
             #     datasets[dataset]['optimal_values'][graph_idx] = sum([weight[e] for e in G.edges if cut[e]])
             # else:
             #     datasets[dataset]['optimal_values'][graph_idx] = 0  # default
-            datasets[dataset]['optimal_values'][graph_idx] = baseline['optimal_value']  # dqn experiment file format
-            datasets[dataset]['baseline'][graph_idx] = baseline  # dqn experiment file format
+            datasets[dataset]['optimal_values'][graph_idx] = baseline['optimal_value']  # cut_selection_dqn experiment file format
+            datasets[dataset]['baseline'][graph_idx] = baseline  # cut_selection_dqn experiment file format
 
         # set baselines policy string for plots legend:
         if s['config']['maxcutsroot'] == 2000 and \

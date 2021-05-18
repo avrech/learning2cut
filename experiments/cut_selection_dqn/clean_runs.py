@@ -1,7 +1,7 @@
 import os
 import pickle
 import signal
-from experiments.dqn.default_parser import parser
+from experiments.cut_selection_dqn.default_parser import parser
 
 args = parser.parse_args()
 run_dir = os.path.join(args.rootdir, args.run_id)

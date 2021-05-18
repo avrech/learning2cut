@@ -98,7 +98,7 @@ def collect_data(hparams):
 
 
 if __name__ == '__main__':
-    from experiments.dqn.default_parser import parser, get_hparams
+    from experiments.cut_selection_dqn.default_parser import parser, get_hparams
 
     # parser = argparse.ArgumentParser()
     parser.add_argument('--logdir', type=str, default='results',

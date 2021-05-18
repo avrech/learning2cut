@@ -25,7 +25,7 @@ if __name__ == '__main__':
         a. publish new params to workers. 
         b. each worker receives new params and update policy.
     """
-    from experiments.dqn.default_parser import parser, get_hparams
+    from experiments.cut_selection_dqn.default_parser import parser, get_hparams
     parser.add_argument('--mixed-debug', action='store_true',
                         help='set for mixed python/c debugging')
 

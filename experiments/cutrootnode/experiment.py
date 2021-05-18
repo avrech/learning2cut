@@ -61,7 +61,7 @@ def experiment(config):
     graph_idx = config['graph_idx']
     filepath = os.path.join(config['data_abspath'], "graph_idx_{}.pkl".format(graph_idx))
     with open(filepath, 'rb') as f:
-        G, baseline = pickle.load(f)  # todo this is a patch to match dqn experient graph files. need to adapt the entire code. from data generation, indexing, everywhere
+        G, baseline = pickle.load(f)  # todo this is a patch to match cut_selection_dqn experient graph files. need to adapt the entire code. from data generation, indexing, everywhere
 
     scip_seed = config['scip_seed']
     model, x, y = maxcut_mccormic_model(G, use_general_cuts=False)

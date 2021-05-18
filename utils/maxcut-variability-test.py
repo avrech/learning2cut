@@ -7,7 +7,7 @@ from utils.functions import get_normalized_areas
 from tqdm import tqdm
 import pickle
 import pandas as pd
-from experiments.dqn.default_parser import parser, get_hparams
+from experiments.cut_selection_dqn.default_parser import parser, get_hparams
 
 
 # randomize graphs

@@ -41,7 +41,7 @@ DemonstrationBatch = namedtuple('DemonstrationBatch', (
 ))
 
 
-class DQNWorker(Sepa):
+class SCIPCutSelectionDQNWorker(Sepa):
     def __init__(self,
                  worker_id,
                  hparams,
@@ -54,7 +54,7 @@ class DQNWorker(Sepa):
         Sample scip.Model state every time self.sepaexeclp is invoked.
         Store the generated data object in
         """
-        super(DQNWorker, self).__init__()
+        super(SCIPCutSelectionDQNWorker, self).__init__()
         self.name = 'DQN Worker'
         self.hparams = hparams
 
@@ -400,14 +400,14 @@ class DQNWorker(Sepa):
     # done
     def sepaexeclp(self):
         if self.hparams.get('debug_events', False):
-            self.print('DEBUG MSG: dqn separator called')
+            self.print('DEBUG MSG: cut_selection_dqn separator called')
 
         # finish with the previous step:
         # todo - in case of no cuts, we return here a second time without any new action. we shouldn't record stats twice.
         self._update_episode_stats()
 
         # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
-        # we dont want to run any further dqn steps, and therefore we return immediately.
+        # we dont want to run any further cut_selection_dqn steps, and therefore we return immediately.
         if self.terminal_state:
             # discard all the cuts in the separation storage and return
             self.model.clearCuts()
@@ -1299,11 +1299,11 @@ class DQNWorker(Sepa):
     # def add_episode_subplot(self, row, col):
     #     """
     #     plot the last episode curves to subplot in position (row, col)
-    #     plot dqn agent dualbound/gap curves together with the baseline curves.
+    #     plot cut_selection_dqn agent dualbound/gap curves together with the baseline curves.
     #     should be called after each validation/test episode with row=graph_idx, col=seed_idx
     #     """
     #     if 'Dual_Bound_vs_LP_Iterations' in self.figures.keys():
-    #         dqn = self.episode_stats
+    #         cut_selection_dqn = self.episode_stats
     #         bsl_0 = self.baseline['baselines']['default'][self.scip_seed]
     #         bsl_1 = self.baseline['10_random'][self.scip_seed]
     #         bsl_2 = self.baseline['10_most_violated'][self.scip_seed]
@@ -1335,9 +1335,9 @@ class DQNWorker(Sepa):
     #
     #         for db_label, gap_label, color, lpiter, db, gap in zip(db_labels, gap_labels,
     #                                                                ['b', 'g', 'y', 'c', 'k'],
-    #                                                                [dqn['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
-    #                                                                [dqn['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
-    #                                                                [dqn['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
+    #                                                                [cut_selection_dqn['lp_iterations'], bsl_0['lp_iterations'], bsl_1['lp_iterations'], bsl_2['lp_iterations'], [0, self.lp_iterations_limit]],
+    #                                                                [cut_selection_dqn['dualbound'], bsl_0['dualbound'], bsl_1['dualbound'], bsl_2['dualbound'], [self.baseline['optimal_value']]*2],
+    #                                                                [cut_selection_dqn['gap'], bsl_0['gap'], bsl_1['gap'], bsl_2['gap'], [0, 0]]
     #                                                                ):
     #             if lpiter[-1] < self.lp_iterations_limit:
     #                 # extend curve to the limit
@@ -1701,7 +1701,7 @@ class DQNWorker(Sepa):
     def test(self):
         """ playground for testing """
         self.load_datasets()
-        self.load_checkpoint(filepath='/home/avrech/learning2cut/experiments/dqn/results/exp5/24jo87jy/best_validset_90_100_checkpoint.pt')
+        self.load_checkpoint(filepath='/experiments/cut_selection_dqn/results/exp5/24jo87jy/best_validset_90_100_checkpoint.pt')
         # focus test on
         dataset = self.datasets['validset_90_100']
         dataset['instances'] = [dataset['instances'][idx] for idx in [3, 6]]

@@ -1,5 +1,5 @@
 # file: default_parser.py
-# description: default args for dqn & maxcut experiments
+# description: default args for cut_selection_dqn & maxcut experiments
 
 import argparse
 import yaml
@@ -29,12 +29,12 @@ parser.add_argument("--gamma", type=float, default=0.99, help="reward discount f
 parser.add_argument("--eps_start", type=float, default=0.9, help="epsilon-greedy start probability for random action")
 parser.add_argument("--eps_end", type=float, default=0.05, help="epsilon-greedy end probability for random action")
 parser.add_argument("--eps_decay", type=int, default=100000, help="number of environment steps between epsilon-greedy start and end values")
-parser.add_argument("--dqn_objective", type=str, default="db_auc", help="metric to optimize in dqn steps. options: db_auc, gap_auc")
+parser.add_argument("--dqn_objective", type=str, default="db_auc", help="metric to optimize in cut_selection_dqn steps. options: db_auc, gap_auc")
 parser.add_argument("--empty_action_penalty", type=int, default=0, help="additive penalty to empty actions")
 parser.add_argument("--select_at_least_one_cut", type=str2bool, nargs='?', const=True, default=False, help="enforce selecting at least one cut every separation round")
 parser.add_argument("--update_rule", type=str, default="DQN", help="update rule. options: DQN, DDQN")
 parser.add_argument("--discard_bad_experience", type=str2bool, nargs='?', const=True, default=False, help="discard training episodes which terminated before LP_ITERATIONS_LIMIT due to weak cuts")
-parser.add_argument("--n_step_loss_coef", type=float, default=0.0, help="dqn n_step loss coefficient in the total objective loss")
+parser.add_argument("--n_step_loss_coef", type=float, default=0.0, help="cut_selection_dqn n_step loss coefficient in the total objective loss")
 parser.add_argument("--demonstration_loss_coef", type=float, default=1.0, help="demonstration loss coefficient")
 parser.add_argument("--demonstration_large_margin", type=float, default=0.1, help="enforce margin between demonstration and other actions")
 parser.add_argument("--dqn_arch", type=str, default="TQNet", help="policy net architecture. options: QNet, TQNet")
@@ -107,6 +107,7 @@ parser.add_argument('--datadir', type=str, default='data', help='path to generat
 parser.add_argument('--data_config', type=str, default='configs/mvc_data_config.yaml', help='data config file, must match --problem')
 parser.add_argument('--problem', type=str, default='MVC', help='options: MVC, MAXCUT')
 parser.add_argument('--configfile', type=str, default='configs/experiment_config.yaml', help='general experiment settings')
+parser.add_argument('--scip_env', type=str, default='cut_selection', help='SCIP environment. options: cut_selection, tuning')
 parser.add_argument('--gpu-id', type=int, default=None, help='gpu id to use')
 parser.add_argument('--use-gpu', type=str2bool, nargs='?', const=True, default=False, help='use gpu if available')
 parser.add_argument('--wandb_offline', type=str2bool, nargs='?', const=True, default=False, help='set to run wandb offline')

@@ -1,7 +1,9 @@
 import ray
 from actors.replay_server import PrioritizedReplayServer
-from actors.dqn_worker import DQNWorker
-from actors.dqn_learner import DQNLearner
+from actors.scip_cut_selection_dqn_worker import SCIPCutSelectionDQNWorker
+from actors.scip_cut_selection_dqn_learner import SCIPCutSelectionDQNLearner
+from actors.scip_tuning_dqn_worker import SCIPTuningDQNWorker
+from actors.scip_tuning_dqn_learner import SCIPTuningDQNLearner
 import os
 import pickle
 import wandb
@@ -66,7 +68,15 @@ class ApeXDQN:
         self.use_gpu = use_gpu
         self.learner_gpu = use_gpu and self.cfg.get('learner_gpu', True)
         self.worker_gpu = use_gpu and self.cfg.get('worker_gpu', False)
-
+        # environment specific actors
+        if cfg['scip_env'] == 'cut_selection':
+            self.learner_cls = SCIPCutSelectionDQNLearner
+            self.worker_cls = SCIPCutSelectionDQNWorker
+        elif cfg['scip_env'] == 'tuning':
+            self.learner_cls = SCIPTuningDQNLearner
+            self.worker_cls = SCIPTuningDQNWorker
+        else:
+            raise ValueError(f'SCIP {cfg["scip_env"]} environment is not supported')
         # container of all ray actors
         self.actors = {f'worker_{n}': None for n in range(1, self.num_workers + 1)}
         self.actors['learner'] = None
@@ -93,7 +103,7 @@ class ApeXDQN:
         self.last_logging_step = -1
         self.all_workers_ready_for_eval = True
         self.evaluation_step = -1
-        self.datasets = DQNWorker.load_data(cfg)
+        self.datasets = self.worker_cls.load_data(cfg)
         self.stats_template_dict = {
             'training': {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []},
             'validation': {dataset_name: {inst_idx: {} for inst_idx in range(len(dataset['instances']))} for dataset_name, dataset in self.datasets.items() if 'valid' in dataset_name},
@@ -197,7 +207,7 @@ class ApeXDQN:
 
         # spawn learner
         self.print('spawning learner process')
-        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(DQNLearner)  # , num_cpus=2
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(self.learner_cls)  # , num_cpus=2
         # instantiate learner and run its io process in a background thread
         self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True, run_setup=True)
         # wait for learner's com config
@@ -221,7 +231,7 @@ class ApeXDQN:
 
         # spawn workers and tester
         self.print('spawning workers and tester processes')
-        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(DQNWorker)
+        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(self.worker_cls)
         for n in range(1, self.num_workers + 1):
             self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
 
@@ -545,8 +555,8 @@ class ApeXDQN:
         ray_running_actors = self.get_ray_running_actors(actors)
         actor_processes = self.get_actors_running_process(actors)
 
-        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(DQNWorker)
-        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(DQNLearner)  # , num_cpus=2
+        ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(self.worker_cls)
+        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(self.learner_cls)  # , num_cpus=2
         ray_replay_server = ray.remote(PrioritizedReplayServer)
         handles = []
         # restart all actors
@@ -629,7 +639,7 @@ class ApeXDQN:
 
         print(f'instantiating {actor_name} locally for debug...')
         if actor_name == 'learner':
-            learner = DQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu, gpu_id=self.cfg.get('gpu_id', None), run_io=True)
+            learner = self.learner_cls(hparams=self.cfg, use_gpu=self.learner_gpu, gpu_id=self.cfg.get('gpu_id', None), run_io=True)
             learner.run()
         elif actor_name == 'replay_server':
             replay_server = PrioritizedReplayServer(config=self.cfg)
@@ -638,7 +648,7 @@ class ApeXDQN:
             prefix, worker_id = actor_name.split('_')
             worker_id = int(worker_id)
             assert prefix == 'worker' and worker_id in range(1, self.num_workers + 1)
-            worker = DQNWorker(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu, gpu_id=self.cfg.get('gpu_id', None))
+            worker = self.worker_cls(worker_id, hparams=self.cfg, use_gpu=self.worker_gpu, gpu_id=self.cfg.get('gpu_id', None))
             worker.run()
 
     def run(self):
@@ -665,13 +675,13 @@ class ApeXDQN:
         self.print(f"binding to {apex_2_learner_port} for syncing workers")
 
         # learner
-        self.actors['learner'] = learner = DQNLearner(hparams=self.cfg, use_gpu=self.learner_gpu)
+        self.actors['learner'] = learner = self.learner_cls(hparams=self.cfg, use_gpu=self.learner_gpu)
         # replay server
         self.actors['replay_server'] = replay_server = PrioritizedReplayServer(config=self.cfg)
         # workers
         workers = []
         for n in range(1, self.num_workers + 1):
-            worker = DQNWorker(n, hparams=self.cfg, use_gpu=self.worker_gpu)
+            worker = self.worker_cls(n, hparams=self.cfg, use_gpu=self.worker_gpu)
             worker.initialize_training()
             worker.load_datasets()
             self.actors[f'worker_{n}'] = worker
@@ -808,7 +818,7 @@ def init_figures(nrows=10, ncols=3, col_labels=['seed_i']*3, row_labels=['graph_
 def add_subplot(figures, row, col, dqn_stats, inst_info, scip_seed, dataset, avg_values=None):
     """
     plot the last episode curves to subplot in position (row, col)
-    plot dqn agent dualbound/gap curves together with the baseline curves.
+    plot cut_selection_dqn agent dualbound/gap curves together with the baseline curves.
     should be called after each validation/test episode with row=graph_idx, col=seed_idx
     """
     dataset_stats = dataset['stats']

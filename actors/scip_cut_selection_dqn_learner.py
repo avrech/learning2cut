@@ -30,7 +30,7 @@ DemonstrationBatch = namedtuple('DemonstrationBatch', (
 ))
 
 
-class DQNLearner:
+class SCIPCutSelectionDQNLearner:
     """
     This actor executes in parallel two tasks:
         a. receiving batches, sending priorities and publishing params.
