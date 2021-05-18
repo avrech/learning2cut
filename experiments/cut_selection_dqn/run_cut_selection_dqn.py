@@ -10,7 +10,7 @@ if __name__ == '__main__':
     Run Ape-X DQN
     Examples:
     1.  Standard run:
-        > python run_apex_dqn.py 
+        > python run_scip_tuning_dqn.py 
         will create a new run_id on wandb server. ApexDQN will setup all actors, binding to free random ports. 
         the communication config will be saved to rootdir/run_id
         ApexDQN central controller will run on the current python driver,
@@ -21,12 +21,12 @@ if __name__ == '__main__':
     
     2.  Restart some of the actors:
         while the main ApexDQN process is running, one can restart some of the actors in a separate shell. 
-        > python run_apex_dqn.py --resume --run_id <run_id> --restart [--restart-actors <list of actors>] [--force-restart]
+        > python run_scip_tuning_dqn.py --resume --run_id <run_id> --restart [--restart-actors <list of actors>] [--force-restart]
         will instantiate ApexDQN, loading the existing communication config from run dir,
         restart must follow an active standard run.
        
     3.  Debug an actor:
-        > python run_apex_dqn.py --resume --run_id <run_id> --restart --debug-actor <actor_name> [--restart-actors <list of actors>] [--force-restart]
+        > python run_scip_tuning_dqn.py --resume --run_id <run_id> --restart --debug-actor <actor_name> [--restart-actors <list of actors>] [--force-restart]
         will run the specified actor locally (killing the exiting one).
         debug must follow an active standard run.  
         
