@@ -1452,7 +1452,7 @@ class CutSelectionModel(torch.nn.Module):
 # Q network for SCIP separating parameters tuning
 class SCIPTuningQnet(torch.nn.Module):
     def __init__(self, hparams={}, use_gpu=True, gpu_id=None):
-        super(TQnet, self).__init__()
+        super(SCIPTuningQnet, self).__init__()
         self.hparams = hparams
         cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")

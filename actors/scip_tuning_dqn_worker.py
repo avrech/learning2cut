@@ -477,7 +477,7 @@ class SCIPTuningDQNWorker(Sepa):
     def _select_action(self, scip_state):
         # TODO - move all models to return dict with everything needed.
         # transform scip_state into GNN data type
-        batch = Transition.create(scip_state, tqnet_version=self.tqnet_version).as_batch().to(self.device)
+        batch = Transition.create(scip_state, tqnet_version='none').as_batch().to(self.device)
 
         if self.training:
             # take epsilon-greedy action
@@ -490,7 +490,7 @@ class SCIPTuningDQNWorker(Sepa):
                 random_action = None
             else:
                 # randomize action
-                random_action = {k: torch.randint(low=0, high=len(vals)).cpu() for k, vals in self.hparams['action_set'].items()}
+                random_action = {k: torch.randint(low=0, high=len(vals), size=(1,)).cpu() for k, vals in self.hparams['action_set'].items()}
                 self.training_n_random_actions += 1
             self.training_n_actions += 1
         else:
@@ -520,7 +520,7 @@ class SCIPTuningDQNWorker(Sepa):
             output['selected'] = random_action
         else:
             output['selected'] = {k: torch.argmax(vals) for k, vals in q_values.items()}
-        output['selected_q_values'] = torch.tensor([q_values[k][idx] for k, idx in output['selected']])
+        output['selected_q_values'] = torch.tensor([q_values[k][0][idx] for k, idx in output['selected'].items()])
         return output
 
     # done
@@ -766,14 +766,14 @@ class SCIPTuningDQNWorker(Sepa):
             bootstrapping_q = []
             discarded = False
             # assign rewards and store transitions (s,a,r,s')
-            for step, (step_info, joint_reward) in enumerate(zip(self.episode_history, R)):
-                state, action, q_values = step_info['state_info'], step_info['action_info'], step_info['selected_q_values']
+            for step, (step_info, reward) in enumerate(zip(self.episode_history, R)):
+                state, action_info, q_values = step_info['state_info'], step_info['action_info'], step_info['selected_q_values']
 
                 # get the next n-step state and q values. if the next state is terminal
                 # return 0 as q_values (by convention)
                 next_step_info = self.episode_history[step + n_steps] if step + n_steps < n_transitions else {}
                 next_state = next_step_info.get('state_info', None)
-                next_action = next_step_info.get('action_info', None)
+                next_action_info = next_step_info.get('action_info', None)
                 next_q_values = next_step_info.get('selected_q_values', None)
 
                 # verify correct normalized slack.
@@ -786,7 +786,7 @@ class SCIPTuningDQNWorker(Sepa):
                 # so we punish inactive cuts by decreasing their reward to
                 # R * (1 - slack)
                 # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
-                normalized_slack = action['normalized_slack']
+                normalized_slack = action_info['normalized_slack']
                 # todo: verify with Aleks - consider slack < 1e-10 as zero
                 approximately_zero = np.abs(normalized_slack) < self.hparams['slack_tol']
                 normalized_slack[approximately_zero] = 0
@@ -796,22 +796,21 @@ class SCIPTuningDQNWorker(Sepa):
                     discarded = True
                     break
                 # same reward for each param selection
-                selected_action = np.array(list(action['selected'].values()))
-                reward = np.full_like(selected_action, joint_reward)
+                selected_action = np.array(list(step_info['selected'].values()))
+                # reward = np.full_like(selected_action, joint_reward, dtype=np.float32)
 
                 # TODO CONTINUE FROM HERE
                 transition = Transition.create(scip_state=state,
                                                action=selected_action,
-                                               info=step_info,
                                                reward=reward,
                                                scip_next_state=next_state,
-                                               )
+                                               tqnet_version='none')
 
                 if self.use_per:
                     # todo - compute initial priority for PER based on the policy q_values.
                     #        compute the TD error for each action in the current state as we do in sgd_step,
                     #        and then take the norm of the resulting cut-wise TD-errors as the initial priority
-                    selected_action = torch.from_numpy(action['selected_by_agent']).unsqueeze(1).long()  # cut-wise action
+                    # selected_action = torch.from_numpy(action_info['selected_by_agent']).unsqueeze(1).long()  # cut-wise action
                     # q_values = q_values.gather(1, selected_action)  # gathering is done now in _select_action
                     if next_q_values is None:
                         # next state is terminal, and its q_values are 0 by convention
@@ -849,19 +848,19 @@ class SCIPTuningDQNWorker(Sepa):
         true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
         q_avg, q_std = [], []
         for info in self.episode_history:
-            action = info['action_info']
-            normalized_slack = action['normalized_slack']
+            action_info = info['action_info']
+            normalized_slack = action_info['normalized_slack']
             # todo: verify with Aleks - consider slack < 1e-10 as zero
             approximately_zero = np.abs(normalized_slack) < self.hparams['slack_tol']
             normalized_slack[approximately_zero] = 0
 
-            applied = action['applied']
+            applied = action_info['applied']
             is_active = normalized_slack[applied] == 0
             active_applied_ratio.append(sum(is_active)/sum(applied) if sum(applied) > 0 else 0)
             applied_available_ratio.append(sum(applied)/len(applied) if len(applied) > 0 else 0)
             # if self.demonstration_episode: todo verification
-            accuracy_list.append(np.mean(action['selected_by_scip'] == action['selected_by_agent']))
-            f1_score_list.append(f1_score(action['selected_by_scip'], action['selected_by_agent']))
+            accuracy_list.append(np.mean(action_info['selected_by_scip'] == action_info['selected_by_agent']))
+            f1_score_list.append(f1_score(action_info['selected_by_scip'], action_info['selected_by_agent']))
             # store for plotting later
             scip_action = info['action_info']['selected_by_scip']
             agent_action = info['action_info']['selected_by_agent']
@@ -1149,7 +1148,7 @@ class SCIPTuningDQNWorker(Sepa):
                           dataset_name=dataset_name, scip_seed=scip_seed)
 
         # include self, setting lower priority than the cycle inequalities separator
-        model.includeSepa(self, '#CS_DQN', 'Cut selection agent', priority=-100000000, freq=1)
+        model.includeSepa(self, '#CS_TuningDQN', 'Tuning agent', priority=-100000000, freq=1)
         # include reset separator for restting maxcutsroot every round
         reset_sepa = CSResetSepa(hparams)
         model.includeSepa(reset_sepa, '#CS_reset', 'reset maxcutsroot', priority=99999999, freq=1)

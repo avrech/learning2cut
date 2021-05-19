@@ -256,13 +256,13 @@ class Transition(Data):
 
         if action is not None:
             a = torch.from_numpy(action).long()
-            assert a.shape[0] == x_a.shape[0]  # n_a_nodes
+            # assert a.shape[0] == x_a.shape[0]  # n_a_nodes - correct only for cut selection but not for tuning
         else:
             # don't care
             a = torch.zeros(size=(x_a.shape[0], ), dtype=torch.long)
         if reward is not None:
             r = torch.from_numpy(reward).float()
-            assert r.shape[0] == x_a.shape[0]  # n_a_nodes
+            # assert r.shape[0] == x_a.shape[0]  # n_a_nodes - correct only for cut selection but not for tuning
         else:
             # don't care
             r = torch.zeros(size=(x_a.shape[0], ), dtype=torch.float32)

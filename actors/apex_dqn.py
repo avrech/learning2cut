@@ -784,8 +784,7 @@ class ApeXDQN:
             # subscribe new_params from learner and sync from apex
             for worker in workers:
                 received_new_params = worker.recv_messages()
-                assert worker.num_param_updates <= worker.next_eval_round or worker.next_eval_round == -1, f'missed param packet {worker.next_eval_round} for evaluation'
-                if received_new_params and worker.num_param_updates == worker.next_eval_round:  # todo simulate syncing workers?
+                if received_new_params:  # todo simulate syncing workers?
                     worker.evaluate_and_send_logs()
 
             # APEX SIDE

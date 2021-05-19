@@ -35,8 +35,7 @@ demonstration_loss_coef: 0.5 # 1.0
 demonstration_large_margin: 0.05 # 1
 
 # DQN ARCHITECTURE HPARAMS
-dqn_arch: TQNet     # options: TQNet , QNet
-tqnet_version: v3   # options: v1, v2
+dqn_arch: SCIPTuningQNet
 emb_dim: 64
 cut_conv: CutConv   # options: CutConv, CATConv
 encoder_cut_conv_layers: 1
@@ -49,6 +48,13 @@ cut_conv_aggr: mean
 
 # GENERAL
 scip_env: tuning
+action_set:
+  objparalfac: [0.1, 0.5, 1]
+  dircutoffdistfac: [0.1, 0.5, 1]
+  efficacyfac: [0.1, 0.5, 1]
+  intsupportfac: [0.1, 0.5, 1]
+  maxcutsroot: [5, 15, 2000]
+  minorthoroot: [0.5, 0.9, 1]
 seed: 259385
 hide_scip_output: True
 num_episodes: 2000000
@@ -91,7 +97,7 @@ max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters
 replay_buffer_capacity: 40000
-replay_buffer_n_demonstrations: 4000 #10k
+replay_buffer_n_demonstrations: 0 #10k
 replay_buffer_demonstration_priority_bonus: 0.0001  # todo - tune
 replay_buffer_minimum_size: 4000 #10k
 replay_buffer_max_mem: 40
