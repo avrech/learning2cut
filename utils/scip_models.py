@@ -882,8 +882,34 @@ class CSBaselineSepa(Sepa):
             'gap': [],
             'lp_rounds': [],
             'lp_iterations': [],
-            'dualbound': []
+            'dualbound': [],
         }
+        if hparams.get('cut_stats', True):
+            self.stats.update({
+                'selected_minortho_avg': [],
+                'selected_minortho_std': [],
+                'selected_efficacy_avg': [],
+                'selected_efficacy_std': [],
+                'selected_dircutoffdist_avg': [],
+                'selected_dircutoffdist_std': [],
+                'selected_objparal_avg': [],
+                'selected_objparal_std': [],
+                'selected_intsupport_avg': [],
+                'selected_intsupport_std': [],
+                'discarded_minortho_avg': [],
+                'discarded_minortho_std': [],
+                'discarded_efficacy_avg': [],
+                'discarded_efficacy_std': [],
+                'discarded_dircutoffdist_avg': [],
+                'discarded_dircutoffdist_std': [],
+                'discarded_objparal_avg': [],
+                'discarded_objparal_std': [],
+                'discarded_intsupport_avg': [],
+                'discarded_intsupport_std': [],
+            })
+            self.states_and_cuts = []
+            self.prev_cuts = None
+            self.prev_state = None
         self.stats_updated = False
         self.node_limit_reached = False
         self.terminal_state = False
@@ -897,7 +923,8 @@ class CSBaselineSepa(Sepa):
     def sepaexeclp(self):
         # finish with the previous step:
         self.update_stats()
-
+        if self.hparams.get('cut_stats', True):
+            self.update_cut_stats()
         # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
         # we dont want to run any further dqn steps, and therefore we return immediately.
         if self.terminal_state:
@@ -1030,24 +1057,67 @@ class CSBaselineSepa(Sepa):
         A corner case is when choosing "EMPTY_ACTION" (shouldn't happen if we force selecting at least one cut)
         then the function is called immediately, and we need to add 1 to the number of lp_rounds.
         """
-        if self.stats_updated:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
-            return
-        # todo verify recording initial state stats before taking any action
-        self.stats['ncuts'].append(self.prev_ncuts)
-        self.stats['ncuts_applied'].append(self.model.getNCutsApplied())
-        self.stats['solving_time'].append(self.model.getSolvingTime())
-        self.stats['processed_nodes'].append(self.model.getNNodes())
-        self.stats['gap'].append(self.model.getGap())
-        self.stats['lp_iterations'].append(self.model.getNLPIterations())
-        self.stats['dualbound'].append(self.model.getDualbound())
-        # todo - we always store the stats referring to the previous lp round action, so we need to subtract 1 from the
-        #  the current LP round counter
-        if self.terminal_state and self.terminal_state == 'EMPTY_ACTION':
-            self.stats['lp_rounds'].append(self.model.getNLPs() + 1)  # todo - check if needed to add 1 when EMPTY_ACTION
-        else:
-            self.stats['lp_rounds'].append(self.model.getNLPs())
-        self.truncate_to_lp_iterations_limit()
-        self.stats_updated = True
+        if not self.stats_updated:  # or self.prev_action is None:   <- todo: this was a bug. missed the initial stats
+            # todo verify recording initial state stats before taking any action
+            self.stats['ncuts'].append(self.prev_ncuts)
+            self.stats['ncuts_applied'].append(self.model.getNCutsApplied())
+            self.stats['solving_time'].append(self.model.getSolvingTime())
+            self.stats['processed_nodes'].append(self.model.getNNodes())
+            self.stats['gap'].append(self.model.getGap())
+            self.stats['lp_iterations'].append(self.model.getNLPIterations())
+            self.stats['dualbound'].append(self.model.getDualbound())
+            # todo - we always store the stats referring to the previous lp round action, so we need to subtract 1 from the
+            #  the current LP round counter
+            if self.terminal_state and self.terminal_state == 'EMPTY_ACTION':
+                self.stats['lp_rounds'].append(self.model.getNLPs() + 1)  # todo - check if needed to add 1 when EMPTY_ACTION
+            else:
+                self.stats['lp_rounds'].append(self.model.getNLPs())
+            self.truncate_to_lp_iterations_limit()
+            self.stats_updated = True
+
+    def update_cut_stats(self):
+        state, cuts = self.model.getState(state_format='dict', get_available_cuts=True, query=self.prev_cuts)
+
+        # compute stats related to the selected/discarded cuts at the previous round
+        if self.prev_cuts is not None and self.prev_cuts['ncuts'] > 0:
+            selected = self.prev_cuts['applied'].astype(np.bool)
+            discarded = np.logical_not(selected)
+            cut_efficacy = self.prev_state['cut']['efficacy']
+            cut_dircutoffdist = self.prev_state['cut']['dircutoffdist']
+            cut_objparal = self.prev_state['cut']['objparal']
+            cut_intsupport = self.prev_state['cut']['intsupport']
+            cuts_orthogonality = self.prev_state['cuts_orthogonality']
+            cuts_orthogonality += np.eye(len(selected))
+            # compute orthogonality w.r.t the selected group
+            cut_minortho_wrt_selected = np.array([cuts_orthogonality[idx, selected].min() for idx in range(len(selected))])
+            self.stats['selected_minortho_avg'].append(cut_minortho_wrt_selected[selected].mean())
+            self.stats['selected_minortho_std'].append(cut_minortho_wrt_selected[selected].std())
+            self.stats['selected_efficacy_avg'].append(cut_efficacy[selected].mean())
+            self.stats['selected_efficacy_std'].append(cut_efficacy[selected].std())
+            self.stats['selected_dircutoffdist_avg'].append(cut_dircutoffdist[selected].mean())
+            self.stats['selected_dircutoffdist_std'].append(cut_dircutoffdist[selected].std())
+            self.stats['selected_objparal_avg'].append(cut_objparal[selected].mean())
+            self.stats['selected_objparal_std'].append(cut_objparal[selected].std())
+            self.stats['selected_intsupport_avg'].append(cut_intsupport[selected].mean())
+            self.stats['selected_intsupport_std'].append(cut_intsupport[selected].std())
+            self.stats['discarded_minortho_avg'].append(cut_minortho_wrt_selected[discarded].mean() if any(discarded) else None)
+            self.stats['discarded_minortho_std'].append(cut_minortho_wrt_selected[discarded].std() if any(discarded) else None)
+            self.stats['discarded_efficacy_avg'].append(cut_efficacy[discarded].mean() if any(discarded) else None)
+            self.stats['discarded_efficacy_std'].append(cut_efficacy[discarded].std() if any(discarded) else None)
+            self.stats['discarded_dircutoffdist_avg'].append(cut_dircutoffdist[discarded].mean() if any(discarded) else None)
+            self.stats['discarded_dircutoffdist_std'].append(cut_dircutoffdist[discarded].std() if any(discarded) else None)
+            self.stats['discarded_objparal_avg'].append(cut_objparal[discarded].mean() if any(discarded) else None)
+            self.stats['discarded_objparal_std'].append(cut_objparal[discarded].std() if any(discarded) else None)
+            self.stats['discarded_intsupport_avg'].append(cut_intsupport[discarded].mean() if any(discarded) else None)
+            self.stats['discarded_intsupport_std'].append(cut_intsupport[discarded].std() if any(discarded) else None)
+
+        # ignore zero ncuts cases.
+        if cuts['ncuts'] > 0:
+            # append to history only if LP round was executed
+            self.states_and_cuts.append((state, cuts))
+            assert len(self.states_and_cuts) == self.model.getNLPs()
+        self.prev_cuts = cuts
+        self.prev_state = state
 
     def truncate_to_lp_iterations_limit(self):
         # enforce the lp_iterations_limit on the last two records

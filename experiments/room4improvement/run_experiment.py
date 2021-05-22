@@ -29,7 +29,7 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
         g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
         nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
         model, _ = mvc_model(g, use_random_branching=False, allow_restarts=True, use_heuristics=True)
-        # model.hideOutput(True)
+        model.hideOutput(True)
         model.optimize()
         assert model.getGap() == 0
         stats = {}
@@ -48,7 +48,7 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
         g = nx.barabasi_albert_graph(n=gs, m=m)
         nx.set_edge_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
         model, _, _ = maxcut_mccormic_model(g, use_random_branching=False, allow_restarts=True, use_cycles=False)
-        # model.hideOutput(True)
+        model.hideOutput(True)
         model.optimize()
         assert model.getGap() == 0
         stats = {}
@@ -245,6 +245,9 @@ for problem in results.keys():
 
     for col, graph_size in enumerate(data[problem].keys()):
         fig3, axes3 = plt.subplots(3, 1)  # ncuts_applied vs. round idx
+        fig4, axes4 = plt.subplots(3, 1)  # ncuts_applied fraction vs. round idx
+        fig5, axes5 = plt.subplots(3, 1)  # avg minortho vs. round idx
+        fig6, axes6 = plt.subplots(3, 1)  # avg efficacy vs. round idx
         for row, seed in enumerate(SEEDS):
             for baseline in results[problem].keys():
                 if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
@@ -255,6 +258,7 @@ for problem in results.keys():
                 axes1[row, col].plot(stats['lp_iterations'], stats['dualbound'], colors[baseline], label=label)
                 axes2[row, col].plot(stats['solving_time'], stats['dualbound'], colors[baseline], label=label)
                 if baseline in ['default', 'tuned', 'adaptive']:
+                    ncuts_generated = np.array(stats['ncuts'])[1:]
                     ncuts_applied_cumsum = np.array(stats['ncuts_applied'])
                     ncuts_applied = ncuts_applied_cumsum[1:] - ncuts_applied_cumsum[:-1]
                     maxcutsroot = {'default': 2000,
@@ -272,12 +276,49 @@ for problem in results.keys():
                     # plt.plot(xs, ys, '-gS', markevery=markers_on)
                     lpiters = stats['lp_iterations'][1:]
                     axes3[row].plot(lpiters, ncuts_applied, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
+                    axes4[row].plot(lpiters, ncuts_applied/ncuts_generated, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
+                    # plot avg min orthogonality w.r.t the selected group and avg efficacy
+                    sel_minortho_avg = np.array(stats['selected_minortho_avg'], dtype=np.float)
+                    sel_minortho_std = np.array(stats['selected_minortho_std'], dtype=np.float)
+                    sel_efficacy_avg = np.array(stats['selected_efficacy_avg'], dtype=np.float)
+                    sel_efficacy_std = np.array(stats['selected_efficacy_std'], dtype=np.float)
+                    x_axis = np.arange(len(sel_minortho_avg))
+                    axes5[row].plot(x_axis, sel_minortho_avg, lw=1, label=baseline, color=colors[baseline])
+                    axes5[row].fill_between(x_axis, sel_minortho_avg + sel_minortho_std, sel_minortho_avg - sel_minortho_std, facecolor=colors[baseline], alpha=0.4)
+                    axes6[row].plot(x_axis, sel_efficacy_avg, lw=1, label=baseline, color=colors[baseline])
+                    axes6[row].fill_between(x_axis, sel_efficacy_avg + sel_efficacy_std, sel_efficacy_avg - sel_efficacy_std, facecolor=colors[baseline], alpha=0.4)
+                    # dis_minortho_avg = np.array(stats['discarded_minortho_avg'], dtype=np.float)
+                    # dis_minortho_std = np.array(stats['discarded_minortho_std'], dtype=np.float)
+                    # dis_efficacy_avg = np.array(stats['discarded_efficacy_avg'], dtype=np.float)
+                    # dis_efficacy_std = np.array(stats['discarded_efficacy_std'], dtype=np.float)
+                    # dis_minortho_avg[dis_minortho_avg == None] = 0
+                    # dis_minortho_std[dis_minortho_std == None] = 0
+                    # dis_efficacy_avg[dis_efficacy_avg == None] = 0
+                    # dis_efficacy_std[dis_efficacy_std == None] = 0
+                    # axes5[row].plot(x_axis, dis_minortho_avg, lw=2, label=baseline, color=colors[baseline])
+                    # axes5[row].fill_between(x_axis, dis_minortho_avg + dis_minortho_std, dis_minortho_avg - dis_minortho_std, facecolor=colors[baseline], alpha=0.5)
+                    # axes6[row].plot(x_axis, dis_efficacy_avg, lw=2, label=baseline, color=colors[baseline])
+                    # axes6[row].fill_between(x_axis, dis_efficacy_avg + dis_efficacy_std, dis_efficacy_avg - dis_efficacy_std, facecolor=colors[baseline], alpha=0.5)
 
         for row, seed in enumerate(SEEDS):
             axes3[row].set_ylabel(f'Seed={seed}')
+            axes4[row].set_ylabel(f'Seed={seed}')
+            axes5[row].set_ylabel(f'Seed={seed}')
+            axes5[row].grid()
+            axes6[row].set_ylabel(f'Seed={seed}')
+            axes6[row].grid()
         axes3[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes4[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes5[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes6[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
         fig3.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig3.savefig(f'{ROOTDIR}/{problem}_{graph_size}_napplied.png')
+        fig4.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig4.savefig(f'{ROOTDIR}/{problem}_{graph_size}_frac_applied.png')
+        fig5.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig5.savefig(f'{ROOTDIR}/{problem}_{graph_size}_minortho.png')
+        fig6.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig6.savefig(f'{ROOTDIR}/{problem}_{graph_size}_efficacy.png')
 
     for row, gs in enumerate(SEEDS):
         axes1[row, 0].set_ylabel(f'Seed={seed}')
