@@ -220,23 +220,27 @@ class SCIPTuningDQNWorker(Sepa):
 
     def recv_messages(self, wait_for_new_params=False):
         """
-        Subscribe to learner and replay_server messages.
+        Subscribes to learner and replay_server messages.
         if topic == 'new_params' update model and return received_new_params.
            topic == 'generate_demonstration_data' set self.generate_demonstration_data True
            topic == 'generate_egent_data' set self.generate_demonstration_data False
         """
         new_params_packet = None
-        if wait_for_new_params:
+        # if wait_for_new_params:
+        #     while new_params_packet is None:
+        #         message = self.sub_socket.recv()
+        #         new_params_packet = self.read_message(message)
+        # else:
+        try:
             while new_params_packet is None:
-                message = self.sub_socket.recv()
+                if wait_for_new_params:
+                    message = self.sub_socket.recv()
+                else:
+                    message = self.sub_socket.recv(zmq.DONTWAIT)
                 new_params_packet = self.read_message(message)
-        else:
-            try:
-                message = self.sub_socket.recv(zmq.DONTWAIT)
-                new_params_packet = self.read_message(message)
-            except zmq.Again:
-                # no packets are waiting
-                pass
+        except zmq.Again:
+            # no packets are waiting
+            pass
 
         if new_params_packet is not None:
             self.synchronize_params(new_params_packet)
@@ -776,16 +780,6 @@ class SCIPTuningDQNWorker(Sepa):
                 next_action_info = next_step_info.get('action_info', None)
                 next_q_values = next_step_info.get('selected_q_values', None)
 
-                # verify correct normalized slack.
-
-
-                # credit assignment:
-                # R is a joint reward for all cuts applied at each step.
-                # now, assign to each cut its reward according to its slack
-                # slack == 0 if the cut is tight, and > 0 otherwise. (<0 means violated and should not happen)
-                # so we punish inactive cuts by decreasing their reward to
-                # R * (1 - slack)
-                # The slack is normalized by the cut's norm, to fairly penalizing similar cuts of different norms.
                 normalized_slack = action_info['normalized_slack']
                 # todo: verify with Aleks - consider slack < 1e-10 as zero
                 approximately_zero = np.abs(normalized_slack) < self.hparams['slack_tol']
