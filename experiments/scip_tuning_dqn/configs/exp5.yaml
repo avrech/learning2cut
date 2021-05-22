@@ -17,7 +17,7 @@ lr: 0.001
 weight_decay: 0.0001
 nstep_learning: 1 # 1, 8
 target_update_interval: 1000  # num sgd steps between target_net's parameters update
-value_aggr: max  # tqnet v2 works only with max. the other models work also with mean
+value_aggr: mean  # tqnet v2 works only with max. the other models work also with mean
 credit_assignment: True  # False, True
 gamma: 0.99
 eps_start: 0.9

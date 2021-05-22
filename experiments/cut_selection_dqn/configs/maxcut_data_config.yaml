@@ -8,7 +8,7 @@ problem: MAXCUT
 aggressive_separation: True
 use_heuristics: False
 datasets:
-  trainset_30_40:
+  trainset_40_50:
     lp_iterations_limit: 5000
     ngraphs: 10000
     barabasi_albert_m: 15
@@ -16,13 +16,13 @@ datasets:
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 30
-      max: 40
-    dataset_name: trainset.30-40
+      min: 40
+      max: 50
+    dataset_name: trainset.40-50
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: False
-  validset_30_40:
+  validset_40_50:
     lp_iterations_limit: 5000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
@@ -32,13 +32,13 @@ datasets:
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 30
-      max: 40
-    dataset_name: validset.30-40
+      min: 40
+      max: 50
+    dataset_name: validset.40-50
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
-  testset_30_40:
+  testset_40_50:
     lp_iterations_limit: 5000
     eval_interval: 1  # single-thread: 100, distributed: 1
     scip_seed: [52, 176, 223]
@@ -48,9 +48,9 @@ datasets:
     graph_type: barabasi-albert
     seed: 46
     graph_size:
-      min: 30
-      max: 40
-    dataset_name: testset.30-40
+      min: 40
+      max: 50
+    dataset_name: testset.40-50
     time_limit_sec: 600
     baseline_solver: scip
     save_all_stats: True
