@@ -884,7 +884,7 @@ class CSBaselineSepa(Sepa):
             'lp_iterations': [],
             'dualbound': [],
         }
-        if hparams.get('cut_stats', True):
+        if hparams.get('cut_stats', False):
             self.stats.update({
                 'selected_minortho_avg': [],
                 'selected_minortho_std': [],
@@ -923,7 +923,7 @@ class CSBaselineSepa(Sepa):
     def sepaexeclp(self):
         # finish with the previous step:
         self.update_stats()
-        if self.hparams.get('cut_stats', True):
+        if self.hparams.get('cut_stats', False):
             self.update_cut_stats()
         # if for some reason we terminated the episode (lp iterations limit reached / empty action etc.
         # we dont want to run any further dqn steps, and therefore we return immediately.
