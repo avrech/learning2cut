@@ -321,7 +321,7 @@ if __name__ == '__main__':
                     data[dataset_name]['instances'].append((G, info))
                 else:
                     print(filename, ' is not solved to optimality')
-                assert info['is_optimal'] or 'train' in dataset_name, 'validation/test instance not solved to optimality'
+                # assert info['is_optimal'] or 'train' in dataset_name, 'validation/test instance not solved to optimality'
         data[dataset_name]['num_instances'] = len(data[dataset_name]['instances'])
 
     print('--------------------------')
