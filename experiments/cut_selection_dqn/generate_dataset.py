@@ -317,9 +317,9 @@ if __name__ == '__main__':
         for filename in tqdm(os.listdir(dataset['datadir']), desc=f'Loading {dataset_name}'):
             with open(os.path.join(dataset['datadir'], filename), 'rb') as f:
                 G, info = pickle.load(f)
-                if info['is_optimal']:
+                if info['is_optimal'] or 'train' not in dataset_name:
                     data[dataset_name]['instances'].append((G, info))
-                else:
+                if not info['is_optimal']:
                     print(filename, ' is not solved to optimality')
                 # assert info['is_optimal'] or 'train' in dataset_name, 'validation/test instance not solved to optimality'
         data[dataset_name]['num_instances'] = len(data[dataset_name]['instances'])
