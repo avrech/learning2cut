@@ -1115,7 +1115,7 @@ class CSBaselineSepa(Sepa):
         if cuts['ncuts'] > 0:
             # append to history only if LP round was executed
             self.states_and_cuts.append((state, cuts))
-            assert len(self.states_and_cuts) == self.model.getNLPs()
+            # assert len(self.states_and_cuts) == self.model.getNLPs()
         self.prev_cuts = cuts
         self.prev_state = state
 
