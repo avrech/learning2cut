@@ -88,7 +88,7 @@ with open(f'{ROOTDIR}/scip_adaptive_params.pkl', 'rb') as f:
 # todo run here also tuned and adaptive policies
 print('############### run all baselines on local machine to compare solving time ###############')
 # run default, 15-random, 15-most-violated and all-cuts baselines
-SEEDS = [46, 72, 101]
+SEEDS = [52, 176, 223]  # [46, 72, 101]
 problems = ['mvc', 'maxcut']
 baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'tuned', 'adaptive']
 if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):

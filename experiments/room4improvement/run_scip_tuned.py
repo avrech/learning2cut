@@ -19,7 +19,7 @@ parser.add_argument('--run_local', action='store_true', help='run on the local m
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
 args = parser.parse_args()
 np.random.seed(777)
-SEEDS = [46, 72, 101]
+SEEDS = [52, 176, 223]  # [46, 72, 101]
 
 
 @ray.remote
