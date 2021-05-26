@@ -9,10 +9,10 @@
 #SBATCH --cpus-per-task=40
 
 # load modules and activate virtualenv
-module load NiaEnv/2018a\n
-module load python\n
-source $HOME/server_bashrc\n
-source $HOME/venv/bin/activate\n
+module load NiaEnv/2018a
+module load python
+source $HOME/server_bashrc
+source $HOME/venv/bin/activate
 
 # generate dataset
 srun python generate_data.py --experiment_configfile ../experiments/cut_selection_dqn/configs/exp5.yaml --data_configfile maxcut_data_config.yaml --datadir $SCRATCH/learning2cut/data --mp ray --nworkers 79
