@@ -63,13 +63,13 @@ def generate_graphs(config):
             filepath = os.path.join(dataset_dir, f"graph_{graph_idx}.pkl")
             if os.path.exists(filepath):
                 with open(filepath, 'rb') as f:
-                    g, info = pickle.load(f)
-                datasets[dataset_name][filepath] = (g, info)
+                    G, info = pickle.load(f)
+                datasets[dataset_name][filepath] = (G, info)
 
             else:
                 with open(filepath, 'wb') as f:
                     pickle.dump((G, None), f)
-                datasets[dataset_name][filepath] = (g, None)
+                datasets[dataset_name][filepath] = (G, None)
     return datasets
 
 
