@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --time=12:00:00
 #SBATCH --account=def-alodi
-#SBATCH --output=gen-maxcut-data.out
+#SBATCH --output=/scratch/a/alodi/avrech/learning2cut/data/gen-maxcut-data.out
 #SBATCH --job-name=generate_dataset-%j
 #SBATCH --mem=0
 #SBATCH --nodes=1
