@@ -15,7 +15,7 @@ source $HOME/server_bashrc
 source $HOME/venv/bin/activate
 
 # generate dataset
-srun python generate_data.py --experiment_configfile ../experiments/cut_selection_dqn/configs/exp5.yaml --data_configfile mvc_data_config.yaml --datadir $SCRATCH/learning2cut/data --mp ray --nworkers 79
+srun python generate_data.py --experiment_configfile ../experiments/cut_selection_dqn/configs/exp5.yaml --data_configfile mvc_data_config.yaml --datadir $SCRATCH/learning2cut/data --mp ray --nworkers 79 --quiet
 
 
 
