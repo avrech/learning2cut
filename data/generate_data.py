@@ -199,7 +199,7 @@ def solve_graphs(config, workerid, worker2main_port, main2worker_port):
             print('saved instance to ', filepath)
 
         # send msg to main
-        msg = pa.serialize(workerid, (dataset_name, filepath)).to_buffer()
+        msg = pa.serialize((workerid, (dataset_name, filepath))).to_buffer()
         send_socket.send(msg)
 
 
