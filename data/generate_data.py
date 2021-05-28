@@ -196,7 +196,8 @@ def solve_graphs(config, workerid, worker2main_port, main2worker_port):
 
         with open(filepath, 'wb') as f:
             pickle.dump((G, info), f)
-            print('saved instance to ', filepath)
+            if not quiet:
+                print('saved instance to ', filepath)
 
         # send msg to main
         msg = pa.serialize((workerid, (dataset_name, filepath))).to_buffer()
