@@ -77,7 +77,7 @@ def solve_graphs(config, workerid, worker2main_port, main2worker_port):
     """
     Worker thread. Solves graphs assigned to worker according to the specifications in config.
     """
-    context = zmq.context()
+    context = zmq.Context()
     recv_socket = context.socket(zmq.PULL)
     recv_socket.connect(main2worker_port)
     send_socket = context.socket(zmq.PUSH)
