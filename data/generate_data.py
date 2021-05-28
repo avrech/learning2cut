@@ -79,7 +79,7 @@ def solve_graphs(config, workerid, worker2main_port, main2worker_port):
     """
     context = zmq.Context()
     recv_socket = context.socket(zmq.PULL)
-    recv_socket.connect(main2worker_port)
+    recv_socket.connect(f'tcp://127.0.0.1:{main2worker_port}')
     send_socket = context.socket(zmq.PUSH)
     send_socket.connect(f'tcp://127.0.0.1:{worker2main_port}')
     problem = config['problem']
