@@ -84,6 +84,8 @@ def solve_graphs(config, workerid, worker2main_port, main2worker_port):
     send_socket.connect(f'tcp://127.0.0.1:{worker2main_port}')
     problem = config['problem']
     quiet = config.get('quiet', False)
+    ready_msg = pa.serialize((workerid, False)).to_buffer()
+    send_socket.send(ready_msg)
     while True:
         msg = recv_socket.recv()
         dataset_name, filepath = pa.deserialize(msg)
@@ -271,12 +273,14 @@ if __name__ == '__main__':
         ray.init()
         worker_handles = [run_worker.remote(config, worker_id, workers2main_port, main2worker_ports[worker_id]) for worker_id in range(args.nworkers)]
         pending_tasks = set()
+        pbar = tqdm(total=len(unfinished), desc='solving graphs')
         while unfinished:
             # assign graphs to ready workers
             msg = workers2main_socket.recv()
             worker_id, task_id = pa.deserialize(msg)
             if task_id:
                 pending_tasks.remove(task_id)
+                pbar.update(1)
             next_task = unfinished.pop(0)
             msg = pa.serialize(next_task).to_buffer()
             main2worker_sockets[worker_id].send(msg)
@@ -286,6 +290,8 @@ if __name__ == '__main__':
             worker_id, task_id = pa.deserialize(msg)
             if task_id:
                 pending_tasks.remove(task_id)
+                pbar.update(1)
+        pbar.close()
 
     # post processing - collect all graphs and save to a single file
     datasets = data_config['datasets']
