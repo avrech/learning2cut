@@ -300,7 +300,7 @@ if __name__ == '__main__':
     for dataset_name, dataset in datasets.items():
         dataset['datadir'] = os.path.join(
             args.datadir, data_config['problem'], dataset['dataset_name'],
-            f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{dataset['seed']}")
+            f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{args.graph_generator_seed}")
 
         # read all graphs with their baselines from disk
         for filename in tqdm(os.listdir(dataset['datadir']), desc=f'Loading {dataset_name}'):
