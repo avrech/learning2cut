@@ -11,56 +11,68 @@ from argparse import ArgumentParser
 import os
 parser = ArgumentParser()
 parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
+parser.add_argument('--datadir', type=str, default='../../data', help='rootdir to store results')
 args = parser.parse_args()
 np.random.seed(777)
 ROOTDIR = args.rootdir
+DATADIR = args.datadir
 if not os.path.isdir(ROOTDIR):
     os.makedirs(ROOTDIR)
 
 
-print('############### generating data ###############')
-# todo make it distributed
+print('############### loading data ###############')
 if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
+    # take data from cut_selection_dqn MVC and MAXCUT datasets.
     data = {'mvc': {}, 'maxcut': {}}
-    # mvc
-    graph_sizes = [60, 100, 150]
-    densities = [0.25, 0.15, 0.1]
-    for gs, density in tqdm(zip(graph_sizes, densities), desc='generating graphs for MVC'):
-        g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
-        nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
-        model, _ = mvc_model(g, use_random_branching=False, allow_restarts=True, use_heuristics=True)
-        model.hideOutput(True)
-        model.optimize()
-        assert model.getGap() == 0
-        stats = {}
-        stats['time'] = model.getSolvingTime()
-        stats['lp_iterations'] = model.getNLPIterations()
-        stats['nodes'] = model.getNNodes()
-        stats['applied'] = model.getNCutsApplied()
-        stats['lp_rounds'] = model.getNLPs()
-        stats['optval'] = model.getObjVal()
-        data['mvc'][gs] = (g, stats)
+    for problem in data.keys():
+        if not os.path.exists(os.path.join(DATADIR, problem.upper(), 'data.pkl')):
+            print(f'Generate {problem} data using learning2cut/data/generate_data.py, then run again')
+        with open(f'{DATADIR}/{problem.upper()}/data.pkl', 'rb') as f:
+            problem_data = pickle.load(f)
+        # take the first instance from each validation set
+        for dataset_name, dataset in problem_data.items():
+            if 'valid' in dataset_name:
+                G, stats = dataset['instances'][0]
+                graph_size = G.number_of_nodes()
+                data[problem][graph_size] = (G, stats)
 
-    # maxcut
-    graph_sizes = [40, 70, 100]
-    ms = [15, 15, 15]
-    for gs, m in tqdm(zip(graph_sizes, ms), desc='generating graphs for MAXCUT'):
-        g = nx.barabasi_albert_graph(n=gs, m=m)
-        nx.set_edge_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
-        model, _, _ = maxcut_mccormic_model(g, use_random_branching=False, allow_restarts=True, use_cycles=False)
-        model.hideOutput(True)
-        model.optimize()
-        assert model.getGap() == 0
-        stats = {}
-        stats['time'] = model.getSolvingTime()
-        stats['lp_iterations'] = model.getNLPIterations()
-        stats['nodes'] = model.getNNodes()
-        stats['applied'] = model.getNCutsApplied()
-        stats['lp_rounds'] = model.getNLPs()
-        stats['optval'] = model.getObjVal()
-        data['maxcut'][gs] = (g, stats)
-
-
+        # # mvc
+        # graph_sizes = [60, 100, 150]
+        # densities = [0.25, 0.15, 0.1]
+        # for gs, density in tqdm(zip(graph_sizes, densities), desc='generating graphs for MVC'):
+        #     g = nx.erdos_renyi_graph(n=gs, p=density, directed=False)
+        #     nx.set_node_attributes(g, {i: np.random.random() for i in g.nodes}, 'c')
+        #     model, _ = mvc_model(g, use_random_branching=False, allow_restarts=True, use_heuristics=True)
+        #     model.hideOutput(True)
+        #     model.optimize()
+        #     assert model.getGap() == 0
+        #     stats = {}
+        #     stats['time'] = model.getSolvingTime()
+        #     stats['lp_iterations'] = model.getNLPIterations()
+        #     stats['nodes'] = model.getNNodes()
+        #     stats['applied'] = model.getNCutsApplied()
+        #     stats['lp_rounds'] = model.getNLPs()
+        #     stats['optval'] = model.getObjVal()
+        #     data['mvc'][gs] = (g, stats)
+        #
+        # # maxcut
+        # graph_sizes = [40, 70, 100]
+        # ms = [15, 15, 15]
+        # for gs, m in tqdm(zip(graph_sizes, ms), desc='generating graphs for MAXCUT'):
+        #     g = nx.barabasi_albert_graph(n=gs, m=m)
+        #     nx.set_edge_attributes(g, {e: np.random.random() for e in g.edges}, 'weight')
+        #     model, _, _ = maxcut_mccormic_model(g, use_random_branching=False, allow_restarts=True, use_cycles=False)
+        #     model.hideOutput(True)
+        #     model.optimize()
+        #     assert model.getGap() == 0
+        #     stats = {}
+        #     stats['time'] = model.getSolvingTime()
+        #     stats['lp_iterations'] = model.getNLPIterations()
+        #     stats['nodes'] = model.getNNodes()
+        #     stats['applied'] = model.getNCutsApplied()
+        #     stats['lp_rounds'] = model.getNLPs()
+        #     stats['optval'] = model.getObjVal()
+        #     data['maxcut'][gs] = (g, stats)
     print(f'saving data to: {ROOTDIR}/data.pkl')
     with open(f'{ROOTDIR}/data.pkl', 'wb') as f:
         pickle.dump(data, f)
@@ -71,32 +83,38 @@ else:
 
 
 if not os.path.exists(f'{ROOTDIR}/scip_tuned_best_config.pkl'):
-    print('run scip tuned baseline first, then re-run again.')
+    print('run run_scip_tuned.py first, then run again.')
     exit(0)
 
 with open(f'{ROOTDIR}/scip_tuned_best_config.pkl', 'rb') as f:
     scip_tuned_best_config = pickle.load(f)
 
 if not os.path.exists(f'{ROOTDIR}/scip_adaptive_params.pkl'):
-    print('run scip adaptive baseline first, then re-run again.')
+    print('run run_scip_adaptive.py first, then run again.')
     exit(0)
 
 with open(f'{ROOTDIR}/scip_adaptive_params.pkl', 'rb') as f:
     scip_adaptive_params = pickle.load(f)
 
+if not os.path.exists(f'{ROOTDIR}/scip_tuned_avg_best_config.pkl'):
+    print('run run_scip_tuned_avg.py first, then run again.')
+    exit(0)
+
+with open(f'{ROOTDIR}/scip_tuned_avg_best_config.pkl', 'rb') as f:
+    scip_tuned_avg_best_config = pickle.load(f)
 
 # todo run here also tuned and adaptive policies
 print('############### run all baselines on local machine to compare solving time ###############')
 # run default, 15-random, 15-most-violated and all-cuts baselines
 SEEDS = [52, 176, 223]  # [46, 72, 101]
 problems = ['mvc', 'maxcut']
-baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'tuned', 'adaptive']
+baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'tuned_avg', 'tuned', 'adaptive']
 if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
     results = {p: {b: {} for b in baselines} for p in problems}
     for problem, graphs in data.items():
         for baseline in tqdm(baselines, desc='run simple baselines'):
             graphs = data[problem]
-            for graph_size, (g, info) in graphs.items():
+            for (graph_size, (g, info)), lp_iterations_limit in zip(graphs.items(), [5000, 7000, 10000]):
                 results[problem][baseline][graph_size] = {}
                 for seed in SEEDS:
                     if problem == 'mvc':
@@ -104,7 +122,7 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                         lp_iterations_limit = 1500
                     elif problem == 'maxcut':
                         model, _, _ = maxcut_mccormic_model(g)
-                        lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
+                        # lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
                     else:
                         raise ValueError
                     set_aggresive_separation(model)
@@ -116,6 +134,12 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                         # set tuned params
                         tuned_params = scip_tuned_best_config[problem][graph_size][seed]
                         sepa_params.update(tuned_params)
+                        sepa_params['policy'] = 'tuned'
+
+                    if baseline == 'tuned_avg':
+                        # set tuned params
+                        tuned_avg_params = scip_tuned_avg_best_config[problem][graph_size][seed]
+                        sepa_params.update(tuned_avg_params)
 
                     if baseline == 'adaptive':
                         # set adaptive param lists

@@ -37,14 +37,14 @@ def run_worker(data, configs, port, workerid):
         problem = cfg['problem']
         instances = data[problem]
         cfg_db_aucs = {problem: {gs: {} for gs in data[problem].keys()}}
-        for graph_size, (g, info) in instances.items():
+        for (graph_size, (g, info)), maxcut_lp_iter_limit in zip(instances.items(), [5000, 7000, 10000]):
             for seed in SEEDS:
                 if problem == 'mvc':
                     model, _ = mvc_model(g)
                     lp_iterations_limit = 1500
                 elif problem == 'maxcut':
                     model, _, _ = maxcut_mccormic_model(g)
-                    lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
+                    lp_iterations_limit = maxcut_lp_iter_limit
                 else:
                     raise ValueError
                 set_aggresive_separation(model)
