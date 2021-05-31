@@ -52,7 +52,7 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
         #     stats['nodes'] = model.getNNodes()
         #     stats['applied'] = model.getNCutsApplied()
         #     stats['lp_rounds'] = model.getNLPs()
-        #     stats['optval'] = model.getObjVal()
+        #     stats['optimal_value'] = model.getObjVal()
         #     data['mvc'][gs] = (g, stats)
         #
         # # maxcut
@@ -71,7 +71,7 @@ if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
         #     stats['nodes'] = model.getNNodes()
         #     stats['applied'] = model.getNCutsApplied()
         #     stats['lp_rounds'] = model.getNLPs()
-        #     stats['optval'] = model.getObjVal()
+        #     stats['optimal_value'] = model.getObjVal()
         #     data['maxcut'][gs] = (g, stats)
     print(f'saving data to: {ROOTDIR}/data.pkl')
     with open(f'{ROOTDIR}/data.pkl', 'wb') as f:
@@ -177,7 +177,7 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                     model.optimize()
                     sepa.update_stats()
                     stats = sepa.stats
-                    stats['db_auc'] = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'], t_support=lp_iterations_limit, reference=info['optval']))
+                    stats['db_auc'] = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'], t_support=lp_iterations_limit, reference=info['optimal_value']))
                     results[problem][baseline][graph_size][seed] = stats
     with open(f'{ROOTDIR}/all_baselines_results.pkl', 'wb') as f:
         pickle.dump(results, f)
@@ -205,10 +205,10 @@ for problem, baselines in results.items():
                 db_auc_imps = []
                 for seed, stats in seeds.items():
                     lpiter, db = truncate(t=stats['lp_iterations'], ft=stats['dualbound'], support=lpiter_support, interpolate=True)
-                    db_auc = sum(get_normalized_areas(t=lpiter, ft=db, t_support=lpiter_support, reference=data[problem][graph_size][1]['optval']))
+                    db_auc = sum(get_normalized_areas(t=lpiter, ft=db, t_support=lpiter_support, reference=data[problem][graph_size][1]['optimal_value']))
                     db_aucs.append(db_auc)
                     default_lpiter, default_db = truncate(t=baselines['default'][graph_size][seed]['lp_iterations'], ft=baselines['default'][graph_size][seed]['dualbound'], support=lpiter_support, interpolate=True)
-                    db_auc_imps.append(db_auc / sum(get_normalized_areas(t=default_lpiter, ft=default_db, t_support=lpiter_support, reference=data[problem][graph_size][1]['optval'])))
+                    db_auc_imps.append(db_auc / sum(get_normalized_areas(t=default_lpiter, ft=default_db, t_support=lpiter_support, reference=data[problem][graph_size][1]['optimal_value'])))
                 db_aucs = np.array(db_aucs)
                 db_auc_imps = np.array(db_auc_imps)
             else:
