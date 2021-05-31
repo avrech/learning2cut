@@ -75,7 +75,7 @@ def run_worker(data, configs, port, workerid):
                 sepa.update_stats()
                 stats = sepa.stats
                 db_auc = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'],
-                                                  t_support=lp_iterations_limit, reference=info['optimal_value']))
+                                                  t_support=lp_iterations_limit, reference=info['optval']))
                 cfg_db_aucs[problem][graph_size][seed] = db_auc
                 if db_auc > best_db_aucs[problem][graph_size][seed]:
                     best_configs[problem][graph_size][seed] = config
