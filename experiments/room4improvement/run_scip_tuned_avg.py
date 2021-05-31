@@ -128,7 +128,10 @@ def get_data_and_configs():
     kv_list = []
     for k, vals in search_space.items():
         kv_list.append([(k, v) for v in vals])
-
+    for d in training_data.values():
+        for k in list(d.keys()):
+            if 'valid' not in k:
+                d.pop(k)
     configs = list(product(*kv_list))
     return data, training_data, configs
 
