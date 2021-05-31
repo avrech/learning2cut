@@ -20,6 +20,7 @@ parser.add_argument('--run_node', action='store_true', help='run on the local ma
 args = parser.parse_args()
 np.random.seed(777)
 SEEDS = [52, 176, 223]  # [46, 72, 101]
+ROOTDIR = args.rootdir
 
 
 @ray.remote
@@ -132,10 +133,15 @@ def run_node(args):
     with open(main_results_file, 'rb') as f:
         main_results = pickle.load(f)
     missing_configs = list(set(all_configs) - set(main_results['configs'].keys()))
-    # assign configs to current machine
-    node_configs = []
-    for idx in range(args.nodeid, len(missing_configs), args.nnodes):
-        node_configs.append(missing_configs[idx])
+
+    # # assign configs to current machine
+    # node_configs = []
+    # for idx in range(args.nodeid, len(missing_configs), args.nnodes):
+    #     node_configs.append(missing_configs[idx])
+    with open(f'{ROOTDIR}/scip_tuned_node{args.nodeid}_configs.pkl', 'rb') as f:
+        node_configs = pickle.load(f)
+        print(f'[node {args.nodeid}] loaded configs from: {ROOTDIR}/scip_tuned_node{args.nodeid}_configs.pkl')
+
     # assign configs to workers
     nworkers = args.ncpus_per_node-1
     ray.init()
@@ -256,6 +262,17 @@ def main(args):
             time_limit_minutes = time_limit_minutes % 60
             assert 24 > time_limit_hours >= 0
             assert 60 > time_limit_minutes > 0
+
+            # save node configs to pkls
+            all_node_configs = []
+            for nodeid in range(nnodes):
+                node_configs = []
+                for idx in range(nodeid, len(missing_configs), nnodes):
+                    node_configs.append(missing_configs[idx])
+                with open(f'{ROOTDIR}/scip_tuned_node{nodeid}_configs.pkl', 'wb') as f:
+                    pickle.dump(node_configs, f)
+                all_node_configs += node_configs
+            assert set(all_node_configs) == set(missing_configs)
 
             for nodeid in range(nnodes):
                 submit_job(f'scip_tuned{nodeid}', nnodes, nodeid, time_limit_hours, time_limit_minutes)
