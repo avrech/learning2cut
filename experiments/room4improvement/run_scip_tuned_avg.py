@@ -39,10 +39,15 @@ def run_worker(data, training_data, configs, port, workerid):
         problem = cfg['problem']
         cfg_db_aucs = {problem: {gs: [] for gs in data[problem].keys()}}
         for graph_size, maxcut_lp_iter_limit in zip(data[problem].keys(), [5000, 7000, 10000]):
+            instances = None
             for k, d in training_data.items():
-                if 'valid' in k and graph_size >= int(k.split('_')[-2]) and graph_size <= int(k.split('_')[-1]):
+                if 'valid' in k and int(k.split('_')[-2]) <= graph_size <= int(k.split('_')[-1]):
                     instances = d['instances'][1:]
+                    print('match', k, graph_size)
                     break
+                else:
+                    print('mismatch', k, graph_size)
+            assert instances is not None
             for g, info in instances:
                 for seed in SEEDS:
                     if problem == 'mvc':
