@@ -235,7 +235,7 @@ def main(args):
         print(f'saved main results to {main_results_file}')
 
     # check for missing results:
-    missing_configs = set(all_configs) - set(main_results['configs'].keys())
+    missing_configs = list(set(all_configs) - set(main_results['configs'].keys()))
 
     # filter configs which were already executed
     # resultsfile = f'{args.rootdir}/scip_tuned_results.pkl'
