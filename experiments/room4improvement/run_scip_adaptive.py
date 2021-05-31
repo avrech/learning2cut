@@ -42,7 +42,7 @@ def run_worker(data, configs, workerid):
     print(f'[worker {workerid}] loading adapted params from: {SCIP_ADAPTIVE_PARAMS_FILE}')
     with open(SCIP_ADAPTIVE_PARAMS_FILE, 'rb') as f:
         scip_adaptive_params = pickle.load(f)
-    round_idx = len(scip_adaptive_params['mvc'][60][SEEDS[0]])
+    round_idx = len(list(scip_adaptive_params['mvc'].values())[0][SEEDS[0]])
     worker_results_file = f'{ROOTDIR}/scip_adaptive_worker_results_{workerid}_{round_idx}.pkl'
 
     logs = []
@@ -105,7 +105,7 @@ def run_worker(data, configs, workerid):
                 sepa.update_stats()
                 stats = sepa.stats
                 db_auc = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'],
-                             t_support=lp_iterations_limit, reference=info['optval']))
+                             t_support=lp_iterations_limit, reference=info['optimal_value']))
 
                 if db_auc > best_db_aucs[problem][graph_size][seed]:
                     best_configs[problem][graph_size][seed] = config
@@ -166,7 +166,7 @@ def run_node(args):
     # load adapted params:
     with open(SCIP_ADAPTIVE_PARAMS_FILE, 'rb') as f:
         scip_adaptive_params = pickle.load(f)
-    round_idx = len(scip_adaptive_params['mvc'][60][SEEDS[0]])
+    round_idx = len(list(scip_adaptive_params['mvc'].values())[0][SEEDS[0]])
 
     # get missing configs:
     data, all_configs = get_data_and_configs()
@@ -267,7 +267,7 @@ def main(args):
     else:
         with open(SCIP_ADAPTIVE_PARAMS_FILE, 'rb') as f:
             scip_adaptive_params = pickle.load(f)
-    round_idx = len(scip_adaptive_params['mvc'][60][SEEDS[0]])
+    round_idx = len(list(scip_adaptive_params['mvc'].values())[0][SEEDS[0]])
 
     # update main_results
     main_results_file = os.path.join(args.rootdir, f'scip_adaptive_round{round_idx}_results.pkl')
