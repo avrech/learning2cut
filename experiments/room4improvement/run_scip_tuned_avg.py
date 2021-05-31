@@ -80,7 +80,7 @@ def run_worker(data, training_data, configs, port, workerid):
                     sepa.update_stats()
                     stats = sepa.stats
                     db_auc = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'],
-                                                      t_support=lp_iterations_limit, reference=info['optval']))
+                                                      t_support=lp_iterations_limit, reference=info['optimal_value']))
                     cfg_db_aucs[problem][graph_size].append(db_auc)
             cfg_db_aucs[problem][graph_size] = db_auc_avg = np.mean(cfg_db_aucs[problem][graph_size])
             if db_auc > best_db_aucs[problem][graph_size]:

@@ -287,12 +287,12 @@ def main(args):
         # todo continue
         for cfg, cfg_db_aucs in logs:
             main_results['configs'][cfg] = cfg_db_aucs
-            for problem, graph_sizes in worker_best_db_aucs.items():
-                for graph_size, seeds in graph_sizes.items():
-                    for seed, db_auc in seeds.items():
-                        if db_auc > main_results['best_db_aucs'][problem][graph_size][seed]:
-                            main_results['best_db_aucs'][problem][graph_size][seed] = worker_best_db_aucs[problem][graph_size][seed]
-                            main_results['best_configs'][problem][graph_size][seed] = worker_best_configs[problem][graph_size][seed]
+        for problem, graph_sizes in worker_best_db_aucs.items():
+            for graph_size, seeds in graph_sizes.items():
+                for seed, db_auc in seeds.items():
+                    if db_auc > main_results['best_db_aucs'][problem][graph_size][seed]:
+                        main_results['best_db_aucs'][problem][graph_size][seed] = worker_best_db_aucs[problem][graph_size][seed]
+                        main_results['best_configs'][problem][graph_size][seed] = worker_best_configs[problem][graph_size][seed]
 
         # main_results['configs'].update(worker_results['configs'])
         # for problem, instances in worker_results['best_db_aucs'].items():
