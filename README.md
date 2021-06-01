@@ -84,15 +84,18 @@ In a case something went wrong in the first run, the script should be invoked ag
 On Niagara, inside `learning2cut/experiments/room4improvement` run:  
 > python run_scip_adaptive.py --rootdir $SCRATCH/room4improvement --nnodes 20 --ncpus_per_node 80  
 
-Running this command line `K` times will generate adaptive policy for `K` lp rounds. 
+Running this command line `2K` times will generate adaptive policy for `K` lp rounds. 
 
 ### Compute `scip_tuned_avg` baseline 
+On Niagara, inside `learning2cut/experiments/room4improvement` run:    
+> python run_scip_tuned_avg.py --rootdir $SCRATCH/room4improvement --datadir $SCRATCH/learning2cut/data --nnodes 20 --ncpus_per_node 60  
 
+After all jobs finish run again to finalize stuff. 
 
 ### Evaluate all baselines ###
 To compare all baselines in terms of solving time, 
 run again `run_experiment` pointing to the rootdir where
-scip tuned and adaptive results are stored. 
+`scip_tuned`, `scip_tuned_avg` and `scip_adaptive` results are stored. 
 The script will test all baselines on the local machine one by one
 without multiprocessing. 
 Results will be saved to a csv and png files. 
