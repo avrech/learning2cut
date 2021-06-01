@@ -22,7 +22,7 @@ credit_assignment: True  # False, True
 gamma: 0.99
 eps_start: 0.9
 eps_end: 0.05
-eps_decay: 50000 #100000
+eps_decay: 50000  # 100000
 dqn_objective: db_auc  # options: db_auc, gap_auc
 dqn_objective_norm: True  # normalizes the db/gap auc by the default policy auc. enabled iff training seed is fixed to 223
 empty_action_penalty: 0
