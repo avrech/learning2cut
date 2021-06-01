@@ -48,7 +48,7 @@ lp_conv_aggr: mean
 cut_conv_aggr: mean
 
 # GENERAL
-scip_env: cut_selection
+scip_env: cut_selection_mdp
 seed: 259385
 hide_scip_output: True
 num_episodes: 2000000

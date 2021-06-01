@@ -47,7 +47,7 @@ lp_conv_aggr: mean
 cut_conv_aggr: mean
 
 # GENERAL
-scip_env: tuning
+scip_env: tuning_mdp
 action_set:
   objparalfac: [0.1, 0.5, 1]
   dircutoffdistfac: [0.1, 0.5, 1]

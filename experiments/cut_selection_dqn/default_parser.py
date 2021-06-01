@@ -100,7 +100,7 @@ parser.add_argument('--datadir', type=str, default='data', help='path to generat
 parser.add_argument('--data_config', type=str, default='configs/mvc_data_config.yaml', help='data config file, must match --problem')
 parser.add_argument('--problem', type=str, default='MVC', help='options: MVC, MAXCUT')
 parser.add_argument('--configfile', type=str, default='configs/exp5.yaml', help='general experiment settings')
-parser.add_argument('--scip_env', type=str, default='cut_selection', help='SCIP environment. options: cut_selection, tuning')
+parser.add_argument('--scip_env', type=str, default='cut_selection_mdp', help='SCIP environment. options: cut_selection, tuning')
 parser.add_argument('--gpu-id', type=int, default=None, help='gpu id to use')
 parser.add_argument('--use-gpu', type=str2bool, nargs='?', const=True, default=False, help='use gpu if available')
 parser.add_argument('--wandb_offline', type=str2bool, nargs='?', const=True, default=False, help='set to run wandb offline')

@@ -4,6 +4,7 @@ from actors.scip_cut_selection_dqn_worker import SCIPCutSelectionDQNWorker
 from actors.scip_cut_selection_dqn_learner import SCIPCutSelectionDQNLearner
 from actors.scip_tuning_dqn_worker import SCIPTuningDQNWorker
 from actors.scip_tuning_dqn_learner import SCIPTuningDQNLearner
+from actors.scip_tuning_dqn_ccmab_worker import SCIPTuningDQNCCMABWorker
 import os
 import pickle
 import wandb
@@ -69,12 +70,15 @@ class ApeXDQN:
         self.learner_gpu = use_gpu and self.cfg.get('learner_gpu', True)
         self.worker_gpu = use_gpu and self.cfg.get('worker_gpu', False)
         # environment specific actors
-        if cfg['scip_env'] == 'cut_selection':
+        if cfg['scip_env'] == 'cut_selection_mdp':
             self.learner_cls = SCIPCutSelectionDQNLearner
             self.worker_cls = SCIPCutSelectionDQNWorker
-        elif cfg['scip_env'] == 'tuning':
+        elif cfg['scip_env'] == 'tuning_mdp':
             self.learner_cls = SCIPTuningDQNLearner
             self.worker_cls = SCIPTuningDQNWorker
+        elif cfg['scip_env'] == 'tuning_ccmab':
+            self.learner_cls = SCIPTuningDQNLearner
+            self.worker_cls = SCIPTuningDQNCCMABWorker
         else:
             raise ValueError(f'SCIP {cfg["scip_env"]} environment is not supported')
         # container of all ray actors
