@@ -134,12 +134,12 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                         # set tuned params
                         tuned_params = scip_tuned_best_config[problem][graph_size][seed]
                         sepa_params.update(tuned_params)
-                        sepa_params['policy'] = 'tuned'
 
                     if baseline == 'tuned_avg':
-                        # set tuned params
-                        tuned_avg_params = scip_tuned_avg_best_config[problem][graph_size][seed]
+                        # set tuned_avg params
+                        tuned_avg_params = scip_tuned_avg_best_config[problem][graph_size]
                         sepa_params.update(tuned_avg_params)
+                        sepa_params['policy'] = 'tuned'
 
                     if baseline == 'adaptive':
                         # set adaptive param lists
@@ -249,12 +249,19 @@ for problem, baselines in results.items():
                 for seed in seeds.keys():
                     row.append(adaptive_params_dict[problem][graph_size][seed][col][round_idx])
             summary[round_idx] = row
-        # append last row for the tuned params
+        # append a row for the tuned params
         tuned_params_row = []
         for col in columns:
             for seed in seeds.keys():
                 tuned_params_row.append(scip_tuned_best_config[problem][graph_size][seed][col])
         summary['tuned'] = tuned_params_row
+        # append a row for the tuned avg params
+        tuned_avg_params_row = []
+        for col in columns:
+            for seed in seeds.keys():
+                tuned_avg_params_row.append(scip_tuned_avg_best_config[problem][graph_size][col])
+        summary['tuned_avg'] = tuned_avg_params_row
+
         columns *= 3
         df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
         csvfile = f'{ROOTDIR}/{problem}_{graph_size}_adaptive_tuned_params.csv'
@@ -262,7 +269,7 @@ for problem, baselines in results.items():
         print(f'saved {problem}-{graph_size} adaptive and tuned params table to: {csvfile}')
 
 
-colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'tuned': 'r', 'adaptive': 'g'}
+colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'tuned_avg': 'pink', 'tuned': 'r', 'adaptive': 'g'}
 for problem in results.keys():
     fig1, axes1 = plt.subplots(3, 3, sharex='col')  # dual bound vs. lp iterations
     fig2, axes2 = plt.subplots(3, 3, sharex='col')  # dual bound vs. solving time
@@ -274,7 +281,7 @@ for problem in results.keys():
         fig6, axes6 = plt.subplots(3, 1)  # avg efficacy vs. round idx
         for row, seed in enumerate(SEEDS):
             for baseline in results[problem].keys():
-                if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
+                if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated', 'tuned_avg'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
                     label = baseline
                 else:
                     label = None
