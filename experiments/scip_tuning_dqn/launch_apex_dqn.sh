@@ -7,13 +7,13 @@
 #SBATCH --job-name=apex-cut_selection_dqn-%j
 #SBATCH --gres=gpu:1
 #SBATCH --mail-user=avrech@campus.tecnion.ac.il
-python run_apex_dqn.py \
-  --configfile configs/exp5.yaml \
-  --rootdir $SCRATCH/dqn/results/exp5 \
-  --datadir $SCRATCH/dqn/data \
-  --data_config configs/mvc_data_config.yaml \
-  --problem MVC \
-  --tags exp5 MVC \
+python run_scip_tuning_dqn.py \
+  --configfile configs/scip_tuning_mdp.yaml \
+  --rootdir $SCRATCH/learning2cut/results/scip_tuning_mdp \
+  --datadir $SCRATCH/learning2cut/data \
+  --data_config configs/maxcut_data_config.yaml \
+  --problem MAXCUT \
+  --tags exp5 MAXCUT \
   --use-gpu \
   --num_workers 15 \
   --wandb_offline
