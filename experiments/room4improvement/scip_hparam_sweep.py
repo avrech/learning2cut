@@ -16,26 +16,26 @@ import hyperopt
 
 parser = ArgumentParser()
 parser.add_argument('--num_trials', type=int, default=1000, help='number of instances to solve in each trial')
-parser.add_argument('--batch_size', type=int, default=50, help='number of instances to solve in each trial')
-parser.add_argument('--trainset_size', type=int, default=500, help='trainset size')
+parser.add_argument('--batch_size', type=int, default=100, help='number of instances to solve in each trial')
+parser.add_argument('--trainset_size', type=int, default=100, help='trainset size')
 parser.add_argument('--problem', type=str, default='maxcut', help='mvc | maxcut')
 parser.add_argument('--local', action='store_true', help='run local wandb sweep controller')
 parser.add_argument('--rootdir', type=str, default='results/wandb_sweep', help='rootdir to store results')
 parser.add_argument('--datadir', type=str, default='/home/avrech/learning2cut/data', help='data path')
 args = parser.parse_args()
-os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
-os.environ['WANDB_MODE'] = 'dryrun'
+# os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
+# os.environ['WANDB_MODE'] = 'dryrun'
 SEEDS = [52, 176, 223]  # [46, 72, 101]
 ROOTDIR = args.rootdir
-WANDB_RUN_DIR = wandb.util.generate_id()
+# WANDB_RUN_DIR = wandb.util.generate_id()
 
 
 def eval_db_auc_avg(config):
-    wandb.init(dir=f'{args.rootdir}/{WANDB_RUN_DIR}',
-               config=config,
-               project='learning2cut',
-               tags=['hyperopt']
-               )
+    # wandb.init(dir=f'{args.rootdir}/{WANDB_RUN_DIR}',
+    #            config=config,
+    #            project='learning2cut',
+    #            tags=['hyperopt']
+    #            )
     # load trainset
     print(f'loading training data from: {args.datadir}/{args.problem.upper()}')
     with open(f'{args.datadir}/{args.problem.upper()}/data.pkl', 'rb') as f:
@@ -83,7 +83,7 @@ def eval_db_auc_avg(config):
                                               t_support=lp_iterations_limit, reference=info['optimal_value']))
             db_auc_list.append(db_auc)
     db_auc_avg = np.mean(db_auc_list)
-    wandb.log({'db_auc_avg': db_auc_avg})
+    # wandb.log({'db_auc_avg': db_auc_avg})
     print('finished')
     tune.report(db_auc_avg=db_auc_avg)
     return db_auc_avg

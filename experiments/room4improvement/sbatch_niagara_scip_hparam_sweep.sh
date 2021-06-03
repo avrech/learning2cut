@@ -15,7 +15,7 @@ source $HOME/server_bashrc
 source $HOME/venv/bin/activate
 
 # generate dataset
-srun python scip_hparam_sweep.py --datadir $SCRATCH/learning2cut/data --num_trials 1000 --rootdir $SCRATCH/learning2cut/tuning
+srun python scip_hparam_sweep.py --datadir $SCRATCH/learning2cut/data --num_trials 1000 --rootdir $SCRATCH/learning2cut/tune_100
 
 
 
