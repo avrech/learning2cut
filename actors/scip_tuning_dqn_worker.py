@@ -285,6 +285,10 @@ class SCIPTuningDQNWorker(Sepa):
             # sample graph randomly
             graph_idx = self.graph_indices[(self.i_episode + 1) % len(self.graph_indices)]
             G, instance_info = trainset['instances'][graph_idx]
+            if self.hparams.get('overfit', False):
+                lp_iter_limit = trainset['overfit_lp_iter_limits'][graph_idx]
+            else:
+                lp_iter_limit = trainset['lp_iterations_limit']
             # fix training scip_seed for debug purpose
             if self.hparams['fix_training_scip_seed']:
                 scip_seed = self.hparams['fix_training_scip_seed']
@@ -293,7 +297,7 @@ class SCIPTuningDQNWorker(Sepa):
                 scip_seed = np.random.randint(1000000000)
             self.cur_graph = f'trainset graph {graph_idx} seed {scip_seed}'
             # execute episodes, collect experience and append to local_buffer
-            trajectory, _ = self.execute_episode(G, instance_info, trainset['lp_iterations_limit'],
+            trajectory, _ = self.execute_episode(G, instance_info, lp_iter_limit,
                                                  dataset_name=trainset['dataset_name'],
                                                  demonstration_episode=self.generate_demonstration_data)
 
@@ -875,7 +879,7 @@ class SCIPTuningDQNWorker(Sepa):
             self.training_stats['db_auc'].append(db_auc)
             self.training_stats['db_auc_improvement'].append(db_auc / self.instance_info['baselines']['default'][223]['db_auc'])
             self.training_stats['gap_auc'].append(gap_auc)
-            self.training_stats['gap_auc_improvement'].append(gap_auc / self.instance_info['baselines']['default'][223]['gap_auc'])
+            self.training_stats['gap_auc_improvement'].append(gap_auc / self.instance_info['baselines']['default'][223]['gap_auc'] if self.instance_info['baselines']['default'][223]['gap_auc'] > 0 else -1)
             self.training_stats['active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
@@ -892,7 +896,7 @@ class SCIPTuningDQNWorker(Sepa):
                      'db_auc': db_auc,
                      'db_auc_improvement': db_auc / self.instance_info['baselines']['default'][self.scip_seed]['db_auc'],
                      'gap_auc': gap_auc,
-                     'gap_auc_improvement': gap_auc / self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'],
+                     'gap_auc_improvement': gap_auc / self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'] if self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'] > 0 else -1,
                      'active_applied_ratio': np.mean(active_applied_ratio),
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
@@ -1010,38 +1014,11 @@ class SCIPTuningDQNWorker(Sepa):
         # datasets and baselines
         datasets = deepcopy(hparams['datasets'])
 
-        # todo - in overfitting sanity check consider only the first instance of the overfitted dataset
-        overfit_dataset_name = hparams.get('overfit', False)
-        if overfit_dataset_name in datasets.keys():
-            for dataset_name in hparams['datasets'].keys():
-                if dataset_name != overfit_dataset_name:
-                    datasets.pop(dataset_name)
-
-        # load maxcut instances:
+        # load instances:
         with open(os.path.join(hparams['datadir'], hparams['problem'], 'data.pkl'), 'rb') as f:
             instances = pickle.load(f)
         for dataset_name, dataset in datasets.items():
             dataset.update(instances[dataset_name])
-
-        # for dataset_name, dataset in datasets.items():
-        #     datasets[dataset_name]['datadir'] = os.path.join(
-        #         hparams['datadir'], dataset['dataset_name'],
-        #         f"barabasi-albert-nmin{dataset['graph_size']['min']}-nmax{dataset['graph_size']['max']}-m{dataset['barabasi_albert_m']}-weights-{dataset['weights']}-seed{dataset['seed']}")
-        #
-        #     # read all graphs with their baselines from disk
-        #     dataset['instances'] = []
-        #     for filename in tqdm(os.listdir(datasets[dataset_name]['datadir']), desc=f'{self.print_prefix}Loading {dataset_name}'):
-        #         # todo - overfitting sanity check consider only graph_0_0.pkl
-        #         if overfit_dataset_name and filename != 'graph_0_0.pkl':
-        #             continue
-        #
-        #         with open(os.path.join(datasets[dataset_name]['datadir'], filename), 'rb') as f:
-        #             G, baseline = pickle.load(f)
-        #             if baseline['is_optimal']:
-        #                 dataset['instances'].append((G, baseline))
-        #             else:
-        #                 print(filename, ' is not solved to optimality')
-        #     dataset['num_instances'] = len(dataset['instances'])
 
         # for the validation and test datasets compute average performance of all baselines:
         # this should be done in the logger process only
@@ -1095,18 +1072,21 @@ class SCIPTuningDQNWorker(Sepa):
         """
         hparams = self.hparams
         self.datasets = datasets = self.load_data(hparams)
+        self.trainset = [v for k, v in self.datasets.items() if 'trainset' in k][0]
 
-        # todo - overfitting sanity check -
-        #  change 'testset100' to 'validset100' to enable logging stats collected only for validation sets.
-        #  set trainset and validset100
-        #  remove all the other datasets from database
-        overfit_dataset_name = hparams.get('overfit', False)
-        if overfit_dataset_name:
-            self.trainset = deepcopy(self.datasets[overfit_dataset_name])
-            self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
-            # todo update to new struct: self.trainset['instances'][0][1].pop('rootonly_stats')
-        else:
-            self.trainset = [v for k, v in self.datasets.items() if 'trainset' in k][0]
+        if hparams.get('overfit', False):
+            instances = []
+            overfit_lp_iter_limits = []
+            trainset_name = 'trainset_overfit'
+            for dataset_name in hparams['overfit']:
+                instances += datasets[dataset_name]['instances']
+                overfit_lp_iter_limits += [datasets[dataset_name]['lp_iterations_limit']]*len(datasets[dataset_name]['instances'])
+                trainset_name += f'_{dataset_name}'
+            self.trainset['instances'] = instances
+            self.trainset['num_instances'] = len(instances)
+            self.trainset['dataset_name'] = trainset_name
+            self.trainset['overfit_lp_iter_limits'] = overfit_lp_iter_limits
+
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 
@@ -1114,8 +1094,8 @@ class SCIPTuningDQNWorker(Sepa):
     def initialize_training(self):
         # fix random seed for all experiment
         if self.hparams.get('seed', None) is not None:
-            np.random.seed(self.hparams['seed'])
-            torch.manual_seed(self.hparams['seed'])
+            np.random.seed(self.hparams['seed'] + int(self.worker_id))
+            torch.manual_seed(self.hparams['seed'] + int(self.worker_id))
 
         # initialize agent
         self.set_training_mode()
