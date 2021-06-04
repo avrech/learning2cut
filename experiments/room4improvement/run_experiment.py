@@ -129,7 +129,8 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                     sepa_params = {'lp_iterations_limit': lp_iterations_limit,
                                    'policy': baseline,
                                    'reset_maxcuts': 100,
-                                   'reset_maxcutsroot': 100}
+                                   'reset_maxcutsroot': 100,
+                                   'cut_stats': True}
                     if baseline == 'tuned':
                         # set tuned params
                         tuned_params = scip_tuned_best_config[problem][graph_size][seed]
@@ -220,6 +221,12 @@ for problem, baselines in results.items():
     print(df)
     csvfile = f'{ROOTDIR}/{problem}_baselines.csv'
     df.to_csv(csvfile)
+    df.to_latex(f'{ROOTDIR}/{problem}-room4imp-baseline-results.tex',
+                column_format='lccc',
+                caption=f'{problem.upper()} Dual Bound AUC for All Baselines',
+                label=f'tab:{problem}-room-for-improvemnt-results',
+                )
+
     print(f'saved {problem} csv to: {csvfile}')
 
     # print adaptive and tuned params to csv
@@ -257,9 +264,10 @@ for problem, baselines in results.items():
         summary['tuned'] = tuned_params_row
         # append a row for the tuned avg params
         tuned_avg_params_row = []
+        scip_tuned_avg_best_config[problem][graph_size] = tuned_avg_param_dict = {k:v for k, v in scip_tuned_avg_best_config[problem][graph_size]}
         for col in columns:
             for seed in seeds.keys():
-                tuned_avg_params_row.append(scip_tuned_avg_best_config[problem][graph_size][col])
+                tuned_avg_params_row.append(tuned_avg_param_dict[col])
         summary['tuned_avg'] = tuned_avg_params_row
 
         columns *= 3
@@ -288,12 +296,13 @@ for problem in results.keys():
                 stats = results[problem][baseline][graph_size][seed]
                 axes1[row, col].plot(stats['lp_iterations'], stats['dualbound'], colors[baseline], label=label)
                 axes2[row, col].plot(stats['solving_time'], stats['dualbound'], colors[baseline], label=label)
-                if baseline in ['default', 'tuned', 'adaptive']:
+                if baseline in ['default', 'tuned', 'adaptive', 'tuned_avg']:
                     ncuts_generated = np.array(stats['ncuts'])[1:]
                     ncuts_applied_cumsum = np.array(stats['ncuts_applied'])
                     ncuts_applied = ncuts_applied_cumsum[1:] - ncuts_applied_cumsum[:-1]
                     maxcutsroot = {'default': 2000,
                                    'tuned': scip_tuned_best_config[problem][graph_size][seed]['maxcutsroot'],
+                                   'tuned_avg': scip_tuned_avg_best_config[problem][graph_size]['maxcutsroot'],
                                    'adaptive': adaptive_params_dict[problem][graph_size][seed]['maxcutsroot']}.get(baseline)
                     if baseline == 'adaptive':
                         pad_len = len(ncuts_applied) - len(maxcutsroot)

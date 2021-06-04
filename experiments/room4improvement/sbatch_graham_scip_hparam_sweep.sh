@@ -9,6 +9,3 @@
 #SBATCH --cpus-per-task=44
 
 srun python scip_hparam_sweep.py --datadir $SCRATCH/learning2cut/data --num_trials 1000 --rootdir $SCRATCH/learning2cut/tuning
-
-
-
