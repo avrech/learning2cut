@@ -586,9 +586,9 @@ class MccormickCycleSeparator(Sepa):
         if self.criterion == 'most_violated_cycle':
             # sort the violated cycles, most violated first (lower cost):
             most_violated_cycles = np.argsort(costs)
-            return np.array(violated_cycles)[most_violated_cycles[:num_cycles_to_add]]
+            return np.array(violated_cycles, dtype=object)[most_violated_cycles[:num_cycles_to_add]]
         elif self.criterion == 'most_infeasible_var':
-            return np.array(violated_cycles)[:num_cycles_to_add]
+            return np.array(violated_cycles, dtype=object)[:num_cycles_to_add]
         elif self.criterion == 'random':
             # choose random cycles
             random_cycles = np.array(violated_cycles)

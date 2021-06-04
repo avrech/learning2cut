@@ -1062,7 +1062,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
             self.training_stats['db_auc'].append(db_auc)
             self.training_stats['db_auc_improvement'].append(db_auc / self.instance_info['baselines']['default'][223]['db_auc'])
             self.training_stats['gap_auc'].append(gap_auc)
-            self.training_stats['gap_auc_improvement'].append(gap_auc / self.instance_info['baselines']['default'][223]['gap_auc'])
+            self.training_stats['gap_auc_improvement'].append(gap_auc / self.instance_info['baselines']['default'][223]['gap_auc'] if self.instance_info['baselines']['default'][223]['gap_auc'] > 0 else -1)
             self.training_stats['active_applied_ratio'] += active_applied_ratio  # .append(np.mean(active_applied_ratio))
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
@@ -1079,7 +1079,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
                      'db_auc': db_auc,
                      'db_auc_improvement': db_auc / self.instance_info['baselines']['default'][self.scip_seed]['db_auc'],
                      'gap_auc': gap_auc,
-                     'gap_auc_improvement': gap_auc / self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'],
+                     'gap_auc_improvement': gap_auc / self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'] if self.instance_info['baselines']['default'][self.scip_seed]['gap_auc'] > 0 else -1,
                      'active_applied_ratio': np.mean(active_applied_ratio),
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
