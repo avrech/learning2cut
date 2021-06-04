@@ -48,7 +48,8 @@ lp_conv_aggr: mean
 cut_conv_aggr: mean
 
 # GENERAL
-scip_env: tuning_mdp
+scip_env: tuning_ccmab
+problem: MAXCUT
 action_set:
   objparalfac: [0.1, 0.5, 1]
   dircutoffdistfac: [0.1, 0.5, 1]
@@ -69,7 +70,7 @@ slack_tol: 0.000001
 # DEBUG FLAGS
 debug: False
 debug_cuda: False
-overfit: []  # dataset names to overfit. maxcut options = [validset_40_50, validset_60_70, validset_90_100], mvc options = [validset_100_110, validset_150_160, validset_200_210]
+overfit: [validset_40_50]  # dataset names to overfit. maxcut options = [validset_40_50, validset_60_70, validset_90_100], mvc options = [validset_100_110, validset_150_160, validset_200_210]
 sanity_check: False  # True - todo - make it working with demonstrations. currently it doesn't.
 fix_training_scip_seed: 223  # 0 -> use random seed, 0 < int -> fix the specified seed. 223 is scip seed used in solving trainset for default baselines. useful for comparing agent on trainset.
 
