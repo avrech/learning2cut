@@ -261,6 +261,7 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
             if not discarded:
+                self.last_training_episode_stats['bootstrapped_returns'] = discounted_rewards  # for compatibility - not really interesting
                 self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
                 self.last_training_episode_stats['selected_q_avg'] = selected_q_avg
                 self.last_training_episode_stats['selected_q_std'] = selected_q_std
