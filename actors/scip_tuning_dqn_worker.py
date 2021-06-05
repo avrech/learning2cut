@@ -131,6 +131,8 @@ class SCIPTuningDQNWorker(Sepa):
         for dataset_name, dataset in datasets.items():
             if 'train' in dataset_name or 'test' in dataset_name:
                 continue
+            if hparams['overfit'] and dataset_name not in hparams['overfit']:
+                continue
             for inst_idx in range(dataset['ngraphs']):
                 for scip_seed in dataset['scip_seed']:
                     flat_instances.append((dataset_name, inst_idx, scip_seed))
