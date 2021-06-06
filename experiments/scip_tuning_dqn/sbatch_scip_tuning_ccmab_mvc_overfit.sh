@@ -7,7 +7,7 @@
 #SBATCH --job-name=apex-cut_selection_dqn-%j
 #SBATCH --gres=gpu:1
 #SBATCH --mail-user=avrech@campus.tecnion.ac.il
-python run_scip_tuning_dqn.py \
+srun python run_scip_tuning_dqn.py \
   --configfile configs/scip_tuning_ccmab_maxcut_overfit_40_50.yaml \
   --rootdir $SCRATCH/learning2cut/results/scip_tuning_ccmab_mvc_overfit \
   --datadir $SCRATCH/learning2cut/data \
@@ -17,4 +17,8 @@ python run_scip_tuning_dqn.py \
   --num_workers 15 \
   --wandb_offline \
   --problem MVC \
-  --overfit validset_100_110 validset_150_160 validset_200_210
+  --overfit validset_100_110 validset_150_160 validset_200_210 \
+  --eps_decay 500 \
+  --eps_end 0.1
+
+
