@@ -100,6 +100,7 @@ The script will test all baselines on the local machine one by one
 without multiprocessing. 
 Results will be saved to a csv and png files. 
 
+## Experiment 2 - Contextual Bandits
 
 ## Running Experiments
 ### Single run 
