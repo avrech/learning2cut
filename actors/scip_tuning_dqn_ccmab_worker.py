@@ -1,4 +1,5 @@
 """ Worker class copied and modified from https://github.com/cyoon1729/distributedRL """
+import wandb
 from sklearn.metrics import f1_score
 from pyscipopt import Sepa, SCIP_RESULT
 import numpy as np
@@ -287,6 +288,26 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
                      'discounted_rewards': discounted_rewards,
                      'selected_q_avg': selected_q_avg,
                      'selected_q_std': selected_q_std,
-                     }
+                     'q_values': torch.cat(list(self.episode_history[0]['q_values'].values())).numpy(),
+                     'q_keys': list(self.episode_history[0]['q_values'].keys())}
 
         return trajectory, stats
+
+    @staticmethod
+    def get_custom_wandb_logs(validation_stats, dataset_name, best=False):
+        # add table of q values avg+-std across seeds
+        columns = ['Instance', 'Op. Id'] + list(validation_stats[0])[0]['q_keys']
+        table = wandb.Table(columns=columns)
+        for inst_idx, seed_stats in validation_stats.items():
+            q_vals = []
+            for stats in seed_stats.values():
+                q_vals.append(stats['q_values'])
+            q_vals_stack = np.stack(q_vals)
+            avg = q_vals_stack.mean(axis=0).astype(str).T
+            std = q_vals_stack.std(axis=0).astype(str).T
+            avg_pm_std = np.char.add(np.char.add(avg, u"\u00B1"), std)
+            for op_idx, row in enumerate(avg_pm_std):
+                table.add_data([str(inst_idx), str(op_idx)]+row.tolist())
+
+        return {f'{dataset_name}/q_stats': table}
+

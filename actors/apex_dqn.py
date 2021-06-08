@@ -496,6 +496,9 @@ class ApeXDQN:
                         figures[figname]['fig'].savefig(os.path.join(self.cfg['run_dir'], f'best_{dataset_name}_{figname}.png'))
                     with open(os.path.join(self.cfg['run_dir'], f'best_{dataset_name}_params.pkl'), 'wb') as f:
                         pickle.dump(stats['params'], f)
+                # add env custom relevant plots
+                custom_log_dict = self.worker_cls.get_custom_wandb_logs(dataset_stats, dataset_name, best=cur_perf > self.best_performance[dataset_name])
+                log_dict.update(custom_log_dict)
         self.print(print_msg)
         return log_dict
 

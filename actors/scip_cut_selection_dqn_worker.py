@@ -1713,3 +1713,6 @@ class SCIPCutSelectionDQNWorker(Sepa):
     def print(self, expr):
         print(self.print_prefix, expr)
 
+    @staticmethod
+    def get_custom_wandb_logs(validation_stats, dataset_name, best=False):
+        return {}
