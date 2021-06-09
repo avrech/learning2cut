@@ -275,7 +275,7 @@ def main(args):
             time_limit_hours = int(np.floor(time_limit_minutes / 60))
             time_limit_minutes = time_limit_minutes % 60
             assert 24 > time_limit_hours >= 0
-            assert 60 > time_limit_minutes > 0
+            assert 60 > time_limit_minutes >= 0
 
             # save node configs to pkls
             all_node_configs = []
