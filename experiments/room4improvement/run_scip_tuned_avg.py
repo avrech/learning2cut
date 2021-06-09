@@ -17,6 +17,7 @@ parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus availab
 parser.add_argument('--nodeid', type=int, default=0, help='node id for running on compute canada')
 parser.add_argument('--rootdir', type=str, default='results/large_action_space', help='rootdir to store results')
 parser.add_argument('--configfile', type=str, default='configs/large_action_space.yaml', help='path to config yaml file')
+parser.add_argument('--cluster', type=str, default='niagara', help='niagara or anything else')
 parser.add_argument('--datadir', type=str, default='../../data', help='path to all data')
 parser.add_argument('--run_local', action='store_true', help='run on the local machine')
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
@@ -200,16 +201,20 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines(f'#SBATCH --time={time_limit_hours}:{time_limit_minutes}:00\n')
         fh.writelines('#SBATCH --account=def-alodi\n')
         fh.writelines(f'#SBATCH --output={args.rootdir}/{jobname}.out\n')
-        fh.writelines('#SBATCH --mem=0\n')
-        fh.writelines('#SBATCH --nodes=1\n')
         fh.writelines(f'#SBATCH --job-name={jobname}\n')
-        fh.writelines('#SBATCH --ntasks-per-node=1\n')
         fh.writelines(f'#SBATCH --cpus-per-task={args.ncpus_per_node}\n')
-        fh.writelines('module load NiaEnv/2018a\n')
-        fh.writelines('module load python\n')
-        fh.writelines('source $HOME/server_bashrc\n')
-        fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines(f'python run_scip_tuned_avg.py --configfile {args.configfile} --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
+        if args.cluster == 'niagara':
+            fh.writelines('#SBATCH --mem=0\n')
+            fh.writelines('#SBATCH --nodes=1\n')
+            fh.writelines('#SBATCH --ntasks-per-node=1\n')
+            fh.writelines('module load NiaEnv/2018a\n')
+            fh.writelines('module load python\n')
+            fh.writelines('source $HOME/server_bashrc\n')
+            fh.writelines('source $HOME/venv/bin/activate\n')
+
+        else:
+            fh.writelines(f'#SBATCH --mem={int(4 * args.ncpus_per_node)}G')
+        fh.writelines(f'srun python run_scip_tuned_avg.py --configfile {args.configfile} --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
 
     os.system("sbatch {}".format(job_file))
 
