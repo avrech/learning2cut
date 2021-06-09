@@ -149,7 +149,6 @@ def get_data_and_configs():
         kv_list.append([(k, v) for v in vals])
 
     configs = list(product(*kv_list))
-    assert len(set(configs)) == 2*3**6
     return data, configs
 
 
