@@ -11,11 +11,13 @@ import zmq
 from itertools import product
 import os
 from glob import glob
+import yaml
 parser = ArgumentParser()
 parser.add_argument('--nnodes', type=int, default=1, help='number of machines')
 parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus available on each node')
 parser.add_argument('--nodeid', type=int, default=0, help='node id for running on compute canada')
-parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
+parser.add_argument('--rootdir', type=str, default='results/large_action_space', help='rootdir to store results')
+parser.add_argument('--configfile', type=str, default='configs/large_action_space.yaml', help='path to config yaml file')
 parser.add_argument('--default_separating_params_file', type=str, default=None, help='path to default params pkl. if None, uses SCIP defaults')
 parser.add_argument('--run_local', action='store_true', help='run on the local machine')
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
@@ -24,6 +26,8 @@ np.random.seed(777)
 SEEDS = [52, 176, 223]  # [46, 72, 101]
 SCIP_ADAPTIVE_PARAMS_FILE = f'{args.rootdir}/scip_adaptive_params.pkl'
 ROOTDIR = args.rootdir
+with open(args.configfile) as f:
+    action_space = yaml.load(f, Loader=yaml.FullLoader)
 if args.default_separating_params_file is not None:
     with open(args.default_separating_params_file, 'rb') as f:
         TUNED_SEPARATING_PARAMS = pickle.load(f)
@@ -72,7 +76,7 @@ def run_worker(data, configs, workerid):
                                }
                 # set the adapted params for the previous rounds and the current cfg for the next round.
                 adapted_params = scip_adaptive_params[problem][graph_size][seed]
-                adaptive_cfg = {k: {} for k in ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot', 'minorthoroot']}
+                adaptive_cfg = {k: {} for k in action_space.keys()}
                 # for k in ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot', 'minorthoroot']:
                 #     cfg[k] = {}  #{idx: v for idx, v in enumerate(vals + [cfg[k]])}
                 for round, adapted_cfg in enumerate(adapted_params):
@@ -138,15 +142,7 @@ def get_data_and_configs():
     with open(f'{args.rootdir}/data.pkl', 'rb') as f:
         data = pickle.load(f)
 
-    search_space = {
-        'objparalfac': [0.1, 0.5, 1],
-        'dircutoffdistfac': [0.1, 0.5, 1],
-        'efficacyfac': [0.1, 0.5, 1],
-        'intsupportfac': [0.1, 0.5, 1],
-        'maxcutsroot': [5, 15, 2000],
-        'minorthoroot': [0.5, 0.9, 1],
-        'problem': ['mvc', 'maxcut']
-    }
+    search_space = {**action_space, 'problem': ['mvc', 'maxcut']}
     # seeds = [46, 72, 101]
     kv_list = []
     for k, vals in search_space.items():
@@ -252,7 +248,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines(f'python run_scip_adaptive.py --rootdir {args.rootdir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node --default_separating_params_file {args.default_separating_params_file}\n')
+        fh.writelines(f'python run_scip_adaptive.py --configfile {args.configfile} --rootdir {args.rootdir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node --default_separating_params_file {args.default_separating_params_file}\n')
 
     os.system("sbatch {}".format(job_file))
 

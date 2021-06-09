@@ -1,0 +1,6 @@
+objparalfac: [0.1]
+dircutoffdistfac: [0.5]
+efficacyfac: [1]
+intsupportfac: [0.1]
+maxcutsroot: [5, 15, 2000]
+minorthoroot: [0.5, 0.9, 1]

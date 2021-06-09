@@ -10,11 +10,13 @@ import ray
 import zmq
 from itertools import product
 import os
+import yaml
 parser = ArgumentParser()
 parser.add_argument('--nnodes', type=int, default=1, help='number of machines')
 parser.add_argument('--ncpus_per_node', type=int, default=6, help='ncpus available on each node')
 parser.add_argument('--nodeid', type=int, default=0, help='node id for running on compute canada')
-parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
+parser.add_argument('--rootdir', type=str, default='results/large_action_space', help='rootdir to store results')
+parser.add_argument('--configfile', type=str, default='configs/large_action_space.yaml', help='path to config yaml file')
 parser.add_argument('--datadir', type=str, default='../../data', help='path to all data')
 parser.add_argument('--run_local', action='store_true', help='run on the local machine')
 parser.add_argument('--run_node', action='store_true', help='run on the local machine')
@@ -22,6 +24,8 @@ args = parser.parse_args()
 np.random.seed(777)
 SEEDS = [52, 176, 223]  # [46, 72, 101]
 ROOTDIR = args.rootdir
+with open(args.configfile) as f:
+    action_space = yaml.load(f, Loader=yaml.FullLoader)
 
 
 @ray.remote
@@ -115,15 +119,7 @@ def get_data_and_configs():
     with open(f'{args.datadir}/MAXCUT/data.pkl', 'rb') as f:
         training_data['maxcut'] = pickle.load(f)
 
-    search_space = {
-        'objparalfac': [0.1, 0.5, 1],
-        'dircutoffdistfac': [0.1, 0.5, 1],
-        'efficacyfac': [0.1, 0.5, 1],
-        'intsupportfac': [0.1, 0.5, 1],
-        'maxcutsroot': [5, 15, 2000],
-        'minorthoroot': [0.5, 0.9, 1],
-        'problem': ['mvc', 'maxcut']
-    }
+    search_space = {**action_space, 'problem': ['mvc', 'maxcut']}
 
     kv_list = []
     for k, vals in search_space.items():
@@ -213,7 +209,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
         fh.writelines('module load python\n')
         fh.writelines('source $HOME/server_bashrc\n')
         fh.writelines('source $HOME/venv/bin/activate\n')
-        fh.writelines(f'python run_scip_tuned_avg.py --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
+        fh.writelines(f'python run_scip_tuned_avg.py --configfile {args.configfile} --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
 
     os.system("sbatch {}".format(job_file))
 

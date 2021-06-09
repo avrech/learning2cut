@@ -9,16 +9,19 @@ import pickle
 import pandas as pd
 from argparse import ArgumentParser
 import os
+import yaml
 parser = ArgumentParser()
-parser.add_argument('--rootdir', type=str, default='results', help='rootdir to store results')
+parser.add_argument('--rootdir', type=str, default='results/large_action_space', help='rootdir to store results')
 parser.add_argument('--datadir', type=str, default='../../data', help='rootdir to store results')
+parser.add_argument('--configfile', type=str, default='configs/large_action_space.yaml', help='path to config yaml file')
 args = parser.parse_args()
 np.random.seed(777)
 ROOTDIR = args.rootdir
 DATADIR = args.datadir
 if not os.path.isdir(ROOTDIR):
     os.makedirs(ROOTDIR)
-
+with open(args.configfile) as f:
+    action_space = yaml.load(f, Loader=yaml.FullLoader)
 
 print('############### loading data ###############')
 if not os.path.exists(os.path.join(ROOTDIR, 'data.pkl')):
@@ -145,14 +148,15 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                     if baseline == 'adaptive':
                         # set adaptive param lists
                         adapted_param_list = scip_adaptive_params[problem][graph_size][seed]
-                        adapted_params = {
-                            'objparalfac': {},
-                            'dircutoffdistfac': {},
-                            'efficacyfac': {},
-                            'intsupportfac': {},
-                            'maxcutsroot': {},
-                            'minorthoroot': {}
-                        }
+                        # adapted_params = {
+                        #     'objparalfac': {},
+                        #     'dircutoffdistfac': {},
+                        #     'efficacyfac': {},
+                        #     'intsupportfac': {},
+                        #     'maxcutsroot': {},
+                        #     'minorthoroot': {}
+                        # }
+                        adapted_params = {k: {} for k in action_space.keys()}
                         for round_idx, kvlist in enumerate(adapted_param_list):
                             param_dict = {k: v for k, v in kvlist}
                             for k in adapted_params.keys():
