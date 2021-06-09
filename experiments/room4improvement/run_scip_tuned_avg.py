@@ -263,7 +263,7 @@ def main(args):
         else:
             # submit up to nnodes jobs
             nnodes = int(min(args.nnodes, np.ceil(len(missing_configs) / (args.ncpus_per_node-1))))
-            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 120 / nnodes / (args.ncpus_per_node - 1))), 16)
+            time_limit_minutes = max(int(np.ceil(len(missing_configs) * 120 / nnodes / (args.ncpus_per_node - 1))), 40)
             time_limit_hours = int(np.floor(time_limit_minutes / 60))
             time_limit_minutes = time_limit_minutes % 60
             assert 24 > time_limit_hours >= 0
