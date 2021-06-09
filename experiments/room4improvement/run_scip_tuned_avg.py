@@ -109,17 +109,19 @@ def run_worker(data, training_data, configs, port, workerid):
     print(f'[worker {workerid}] finished')
 
 
-def get_data_and_configs():
+def get_data_and_configs(training=True):
     print(f'loading data from: {args.rootdir}/data.pkl')
     with open(f'{args.rootdir}/data.pkl', 'rb') as f:
         data = pickle.load(f)
     print(f'loading training data from: {args.datadir}')
-    training_data = {}
-    with open(f'{args.datadir}/MVC/data.pkl', 'rb') as f:
-        training_data['mvc'] = pickle.load(f)
-    with open(f'{args.datadir}/MAXCUT/data.pkl', 'rb') as f:
-        training_data['maxcut'] = pickle.load(f)
-
+    if training:
+        training_data = {}
+        with open(f'{args.datadir}/MVC/data.pkl', 'rb') as f:
+            training_data['mvc'] = pickle.load(f)
+        with open(f'{args.datadir}/MAXCUT/data.pkl', 'rb') as f:
+            training_data['maxcut'] = pickle.load(f)
+    else:
+        training_data = None
     search_space = {**action_space, 'problem': ['mvc', 'maxcut']}
 
     kv_list = []
@@ -220,7 +222,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
 
 
 def main(args):
-    data, training_data, all_configs = get_data_and_configs()
+    data, _, all_configs = get_data_and_configs(training=False)
     # update main_results
     main_results_file = os.path.join(args.rootdir, 'scip_tuned_avg_main_results.pkl')
     if os.path.exists(main_results_file):
