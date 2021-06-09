@@ -213,7 +213,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
             fh.writelines('source $HOME/venv/bin/activate\n')
 
         else:
-            fh.writelines(f'#SBATCH --mem={int(4 * args.ncpus_per_node)}G')
+            fh.writelines(f'#SBATCH --mem={int(4 * args.ncpus_per_node)}G\n')
         fh.writelines(f'srun python run_scip_tuned_avg.py --configfile {args.configfile} --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
 
     os.system("sbatch {}".format(job_file))
