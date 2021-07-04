@@ -489,22 +489,22 @@ class SCIPTuningDQNWorker(Sepa):
         # transform scip_state into GNN data type
         batch = Transition.create(scip_state, tqnet_version='none').as_batch().to(self.device)
 
-        if self.training:
-            # take epsilon-greedy action
-            sample = random.random()
-            eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
-                            math.exp(-1. * self.num_env_steps_done / self.eps_decay)
-            self.num_env_steps_done += 1
-
-            if sample > eps_threshold:
-                random_action = None
-            else:
-                # randomize action
-                random_action = {k: torch.randint(low=0, high=len(vals), size=(1,)).cpu() for k, vals in self.hparams['action_set'].items()}
-                self.training_n_random_actions += 1
-            self.training_n_actions += 1
-        else:
-            random_action = None
+        # if self.training:
+        #     # take epsilon-greedy action
+        #     sample = random.random()
+        #     eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
+        #                     math.exp(-1. * self.num_env_steps_done / self.eps_decay)
+        #     self.num_env_steps_done += 1
+        #
+        #     if sample > eps_threshold:
+        #         random_action = None
+        #     else:
+        #         # randomize action
+        #         random_action = {k: torch.randint(low=0, high=len(vals), size=(1,)).cpu() for k, vals in self.hparams['action_set'].items()}
+        #         self.training_n_random_actions += 1
+        #     self.training_n_actions += 1
+        # else:
+        #     random_action = None
 
         # take greedy action
         with torch.no_grad():
@@ -525,11 +525,26 @@ class SCIPTuningDQNWorker(Sepa):
             )
 
         # output: qvals, params
-        output = {'q_values': q_values}
-        if random_action is not None:
-            output['selected'] = random_action
-        else:
-            output['selected'] = {k: torch.argmax(vals) for k, vals in q_values.items()}
+        output = {'q_values': q_values, 'selected': {}}
+
+        # select e-greedy action for each action dimension
+        eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
+                        math.exp(-1. * self.num_env_steps_done / self.eps_decay)
+        self.num_env_steps_done += self.training
+        for k, vals in q_values.items():
+            # take epsilon-greedy action
+            sample = random.random()
+            if sample < eps_threshold and self.training:
+                output['selected'][k] = torch.randint(low=0, high=len(vals), size=(1,)).cpu()
+                self.training_n_random_actions += 1
+            else:
+                # greedy
+                output['selected'][k] = torch.argmax(vals)
+            self.training_n_actions += self.training
+        # if random_action is not None:
+        #     output['selected'] = random_action
+        # else:
+        #     output['selected'] = {k: torch.argmax(vals) for k, vals in q_values.items()}
         output['selected_q_values'] = torch.tensor([q_values[k][0][idx] for k, idx in output['selected'].items()])
         return output
 
