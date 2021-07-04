@@ -291,6 +291,9 @@ for problem in results.keys():
         fig4, axes4 = plt.subplots(3, 1)  # ncuts_applied fraction vs. round idx
         fig5, axes5 = plt.subplots(3, 1)  # avg minortho vs. round idx
         fig6, axes6 = plt.subplots(3, 1)  # avg efficacy vs. round idx
+        fig7, axes7 = plt.subplots(3, 1)  # scip cuts coverage vs. round idx
+        fig8, axes8 = plt.subplots(3, 1)  # scip cuts frac vs. round idx
+        fig9, axes9 = plt.subplots(3, 1)  # jaccard similarity vs. round idx
         for row, seed in enumerate(SEEDS):
             for baseline in results[problem].keys():
                 if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated', 'tuned_avg'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
@@ -319,8 +322,8 @@ for problem in results.keys():
                     maxcutsroot_active = np.nonzero(ncuts_applied == maxcutsroot)[0]
                     # plt.plot(xs, ys, '-gS', markevery=markers_on)
                     lpiters = stats['lp_iterations'][1:]
-                    axes3[row].plot(lpiters, ncuts_applied, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
-                    axes4[row].plot(lpiters, ncuts_applied/ncuts_generated, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
+                    axes3[row].step(lpiters, ncuts_applied, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
+                    axes4[row].step(lpiters, ncuts_applied/ncuts_generated, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
                     # plot avg min orthogonality w.r.t the selected group and avg efficacy
                     sel_minortho_avg = np.array(stats['selected_minortho_avg'], dtype=np.float)
                     sel_minortho_std = np.array(stats['selected_minortho_std'], dtype=np.float)
@@ -331,6 +334,20 @@ for problem in results.keys():
                     axes5[row].fill_between(x_axis, sel_minortho_avg + sel_minortho_std, sel_minortho_avg - sel_minortho_std, facecolor=colors[baseline], alpha=0.4)
                     axes6[row].plot(x_axis, sel_efficacy_avg, lw=1, label=baseline, color=colors[baseline])
                     axes6[row].fill_between(x_axis, sel_efficacy_avg + sel_efficacy_std, sel_efficacy_avg - sel_efficacy_std, facecolor=colors[baseline], alpha=0.4)
+
+                    # plot cutting plane selection similarity metrics
+                    if baseline != 'default':
+                        scip_cuts = stats['scip_selected_cuts']
+                        policy_cuts = stats['policy_selected_cuts'][1:]
+                        intersections = np.array([len(set(sc).intersection(pc)) for sc, pc in zip(scip_cuts, policy_cuts)], dtype=np.float)
+                        scip_ncuts_applied = np.array([len(sc) for sc in scip_cuts])
+                        policy_ncuts_applied = np.array([len(pc) for pc in policy_cuts])
+                        jaccard_similarity = intersections / (scip_ncuts_applied + policy_ncuts_applied - intersections)
+                        scip_cuts_coverage = intersections / scip_ncuts_applied
+                        scip_frac = intersections / policy_ncuts_applied
+                        axes7[row].step(lpiters, scip_cuts_coverage, label=baseline)
+                        axes8[row].step(lpiters, scip_frac, label=baseline)
+                        axes9[row].step(lpiters, jaccard_similarity, label=baseline)
                     # dis_minortho_avg = np.array(stats['discarded_minortho_avg'], dtype=np.float)
                     # dis_minortho_std = np.array(stats['discarded_minortho_std'], dtype=np.float)
                     # dis_efficacy_avg = np.array(stats['discarded_efficacy_avg'], dtype=np.float)
@@ -351,10 +368,17 @@ for problem in results.keys():
             axes5[row].grid()
             axes6[row].set_ylabel(f'Seed={seed}')
             axes6[row].grid()
+            axes7[row].set_ylabel(f'Seed={seed}')
+            axes8[row].set_ylabel(f'Seed={seed}')
+            axes9[row].set_ylabel(f'Seed={seed}')
+
         axes3[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
         axes4[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
         axes5[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
         axes6[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes7[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes8[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
+        axes9[2].legend(loc='upper center', bbox_to_anchor=(0.5, -0.5), ncol=3, borderaxespad=0.).get_frame().set_linewidth(0.0) # fancybox=True, shadow=True,
         fig3.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig3.savefig(f'{ROOTDIR}/{problem}_{graph_size}_napplied.png')
         fig4.tight_layout(rect=[0, 0.03, 1, 0.95])
@@ -363,6 +387,12 @@ for problem in results.keys():
         fig5.savefig(f'{ROOTDIR}/{problem}_{graph_size}_minortho.png')
         fig6.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig6.savefig(f'{ROOTDIR}/{problem}_{graph_size}_efficacy.png')
+        fig7.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig7.savefig(f'{ROOTDIR}/{problem}_{graph_size}_scip_cuts_coverage.png')
+        fig8.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig8.savefig(f'{ROOTDIR}/{problem}_{graph_size}_scip_cuts_frac.png')
+        fig9.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig9.savefig(f'{ROOTDIR}/{problem}_{graph_size}_cuts_jaccard_similarity.png')
 
     for row, gs in enumerate(SEEDS):
         axes1[row, 0].set_ylabel(f'Seed={seed}')
