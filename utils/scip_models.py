@@ -906,6 +906,8 @@ class CSBaselineSepa(Sepa):
                 'discarded_objparal_std': [],
                 'discarded_intsupport_avg': [],
                 'discarded_intsupport_std': [],
+                'scip_selected_cuts': [],
+                'policy_selected_cuts': [],
             })
             self.states_and_cuts = []
             self.prev_cuts = None
@@ -969,6 +971,9 @@ class CSBaselineSepa(Sepa):
         assert self.model.getNCuts() == len(available_cuts['cuts']), "cuts duplicated with same name"
         # print('n pool cuts ', self.model.getNPoolCuts())
         if available_cuts['ncuts'] > 0:
+            if self.hparams.get('cut_stats', False):
+                self.stats['scip_selected_cuts'].append(self.prob_scip_cut_selection())
+
             # prob what scip cut selection algorithm would do in this state
             if self.policy == 'default':
                 # use SCIP's cut selection (don't do anything)
@@ -1049,6 +1054,22 @@ class CSBaselineSepa(Sepa):
             assert self.model.getParam('separating/maxcuts') == self.hparams.get('reset_maxcuts', 100)
             assert self.model.getParam('separating/maxcutsroot') == self.hparams.get('reset_maxcutsroot', 2000)
 
+    def prob_scip_cut_selection(self):
+        available_cuts = self.model.getCuts()
+        lp_iter = self.model.getNLPIterations()
+        self.model.startProbing()
+        for cut in available_cuts:
+            self.model.addCut(cut)
+        self.model.applyCutsProbing()
+        cut_names = self.model.getSelectedCutsNames()
+        self.model.endProbing()
+        if self.model.getNLPIterations() != lp_iter:
+            # todo - investigate why with scip_seed = 562696653 probing increments lp_iter by one.
+            #  it seems not to make any damage, however.
+            print('Warning! SCIP probing mode changed num lp iterations.')
+        # assert self.model.getNLPIterations() == lp_iter
+        return cut_names
+
     # done
     def update_stats(self):
         """ Collect statistics related to the action taken at the previous round.
@@ -1074,6 +1095,8 @@ class CSBaselineSepa(Sepa):
                 self.stats['lp_rounds'].append(self.model.getNLPs())
             self.truncate_to_lp_iterations_limit()
             self.stats_updated = True
+            if self.hparams.get('cut_stats', False):
+                self.stats['policy_selected_cuts'].append(self.model.getSelectedCutsNames())
 
     def update_cut_stats(self):
         state, cuts = self.model.getState(state_format='dict', get_available_cuts=True, query=self.prev_cuts)
