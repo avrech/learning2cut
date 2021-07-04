@@ -205,7 +205,7 @@ for problem, baselines in results.items():
         for graph_size, seeds in baseline_results.items():
             # for MVC shorten the support to 100 lp iters.
             if problem == 'mvc':
-                lpiter_support = 700
+                lpiter_support = 1500
                 db_aucs = []
                 db_auc_imps = []
                 for seed, stats in seeds.items():
@@ -253,7 +253,7 @@ for problem, baselines in results.items():
                     adapted_params[k][round_idx] = param_dict[k]
             adaptive_params_dict[problem][graph_size][seed] = adapted_params
         columns = ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot', 'minorthoroot']
-        summary = {}
+        summary = {'Seed': [seed for seed in seeds.keys() for _ in range(len(seeds.keys()))]}
         for round_idx in range(len(adapted_param_list)):
             row = []
             for col in columns:
@@ -274,7 +274,7 @@ for problem, baselines in results.items():
                 tuned_avg_params_row.append(tuned_avg_param_dict[col])
         summary['tuned_avg'] = tuned_avg_params_row
 
-        columns *= 3
+        columns = [col for col in columns for _ in range(3)]
         df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
         csvfile = f'{ROOTDIR}/{problem}_{graph_size}_adaptive_tuned_params.csv'
         df.to_csv(csvfile)

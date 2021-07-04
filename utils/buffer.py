@@ -225,7 +225,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
         weights = np.array(weights, dtype=np.float32)
         # encoded_sample = self._encode_sample(idxes, weights) - old code
-        transitions = [self.storage[idx] for idx in idxes]  # todo isn't there any efficient sampling way not list comprehension?
+        transitions = [self.storage[idx] for idx in idxes]
         self.num_sgd_steps_done += 1  # increment global counter to decay beta across training
 
         data_ids = self._data_unique_ids[idxes]
