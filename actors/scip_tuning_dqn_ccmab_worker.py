@@ -307,7 +307,7 @@ def ccmab_env_custom_logs(validation_stats, dataset_name, best=False):
         std = q_vals_stack.std(axis=0).astype(str).T
         avg_pm_std = np.char.add(np.char.add(avg, u"\u00B1"), std)  # u"\u00B1" is non-ascii and doesn't work with ray.
         for op_idx, row in enumerate(avg_pm_std):
-            table.add_data([str(inst_idx), str(op_idx)]+row.tolist())
+            table.add_data(*([str(inst_idx), str(op_idx)]+row.tolist()))
 
     return {f'{dataset_name}/q_stats': table}
 
