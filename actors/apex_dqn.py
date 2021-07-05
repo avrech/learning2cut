@@ -4,7 +4,7 @@ from actors.scip_cut_selection_dqn_worker import SCIPCutSelectionDQNWorker
 from actors.scip_cut_selection_dqn_learner import SCIPCutSelectionDQNLearner
 from actors.scip_tuning_dqn_worker import SCIPTuningDQNWorker
 from actors.scip_tuning_dqn_learner import SCIPTuningDQNLearner
-from actors.scip_tuning_dqn_ccmab_worker import SCIPTuningDQNCCMABWorker
+from actors.scip_tuning_dqn_ccmab_worker import SCIPTuningDQNCCMABWorker, ccmab_env_custom_logs
 import os
 import pickle
 import wandb
@@ -69,7 +69,8 @@ class ApeXDQN:
         self.use_gpu = use_gpu
         self.learner_gpu = use_gpu and self.cfg.get('learner_gpu', True)
         self.worker_gpu = use_gpu and self.cfg.get('worker_gpu', False)
-        # environment specific actors
+        # environment specific actors and logs
+        self.custom_logs = lambda *args: {}
         if cfg['scip_env'] == 'cut_selection_mdp':
             self.learner_cls = SCIPCutSelectionDQNLearner
             self.worker_cls = SCIPCutSelectionDQNWorker
@@ -79,6 +80,7 @@ class ApeXDQN:
         elif cfg['scip_env'] == 'tuning_ccmab':
             self.learner_cls = SCIPTuningDQNLearner
             self.worker_cls = SCIPTuningDQNCCMABWorker
+            self.custom_logs = ccmab_env_custom_logs
         else:
             raise ValueError(f'SCIP {cfg["scip_env"]} environment is not supported')
         # container of all ray actors
@@ -237,7 +239,7 @@ class ApeXDQN:
         self.print('spawning workers and tester processes')
         ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(self.worker_cls)
         for n in range(1, self.num_workers + 1):
-            self.actors[f'worker_{n}'] = ray_worker.options(name=f'worker_{n}').remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
+            self.actors[f'worker_{n}'] = ray_worker.options(name=f"worker_{n}").remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
 
         # pickle com config to experiment dir
         with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
@@ -497,7 +499,7 @@ class ApeXDQN:
                     with open(os.path.join(self.cfg['run_dir'], f'best_{dataset_name}_params.pkl'), 'wb') as f:
                         pickle.dump(stats['params'], f)
                 # add env custom relevant plots
-                custom_log_dict = self.worker_cls.get_custom_wandb_logs(dataset_stats, dataset_name, best=cur_perf > self.best_performance[dataset_name])
+                custom_log_dict = self.custom_logs(dataset_stats, dataset_name, best=cur_perf > self.best_performance[dataset_name])
                 log_dict.update(custom_log_dict)
         self.print(print_msg)
         return log_dict
