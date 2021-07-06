@@ -97,7 +97,7 @@ param_sync_interval: 1 # 100  # number of learner.sgd_steps between workers poli
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters
-replay_buffer_capacity: 20000
+replay_buffer_capacity: 10000
 replay_buffer_n_demonstrations: 0 #10k
 replay_buffer_demonstration_priority_bonus: 0.0001  # todo - tune
 replay_buffer_minimum_size: 4000 #10k

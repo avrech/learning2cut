@@ -21,8 +21,8 @@ value_aggr: mean  # tqnet v2 works only with max. the other models work also wit
 credit_assignment: True  # False, True
 gamma: 0.99
 eps_start: 0.9
-eps_end: 0.05
-eps_decay: 50000  # 100000
+eps_end: 0.1
+eps_decay: 500  # 100000
 dqn_objective: db_auc  # options: db_auc, gap_auc
 dqn_objective_norm: True  # normalizes the db/gap auc by the default policy auc. enabled iff training seed is fixed to 223
 empty_action_penalty: 0
@@ -46,6 +46,7 @@ decoder_conv: RemainingCutsConv
 attention_heads: 4
 lp_conv_aggr: mean
 cut_conv_aggr: mean
+conditional_q_heads: True
 
 # GENERAL
 scip_env: tuning_ccmab
@@ -98,7 +99,7 @@ param_sync_interval: 1 # 100  # number of learner.sgd_steps between workers poli
 max_num_updates: 100000  # relevant to PER to increase beta across time
 
 # Buffer parameters
-replay_buffer_capacity: 20000
+replay_buffer_capacity: 10000
 replay_buffer_n_demonstrations: 0 #10k
 replay_buffer_demonstration_priority_bonus: 0.0001  # todo - tune
 replay_buffer_minimum_size: 100 #10k

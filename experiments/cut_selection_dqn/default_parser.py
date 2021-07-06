@@ -48,6 +48,7 @@ parser.add_argument("--decoder_conv", type=str, default="RemainingCutsConv", hel
 parser.add_argument("--attention_heads", type=int, default=4, help="GATConv heads")
 parser.add_argument("--lp_conv_aggr", type=str, default="mean", help="lp conv aggregation")
 parser.add_argument("--cut_conv_aggr", type=str, default="mean", help="betwwen-cuts gnn aggregation")
+parser.add_argument("--conditional_q_heads", type=str2bool, nargs='?', const=True, default=False, help="predict tuning q values one by one conditioning on prev preds each time")
 parser.add_argument("--seed", type=int, default=259385, help="not in use")
 parser.add_argument("--hide_scip_output", type=str2bool, nargs='?', const=True, default=True, help="avoids printing scip messages to the console")
 parser.add_argument("--num_episodes", type=int, default=2000000, help="number of episodes to play")
