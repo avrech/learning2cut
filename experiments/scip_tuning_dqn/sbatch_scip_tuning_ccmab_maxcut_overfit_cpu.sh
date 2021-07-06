@@ -15,5 +15,5 @@ srun python run_scip_tuning_dqn.py \
   --tags tuning maxcut ccmab overfit \
   --num_workers 28 \
   --wandb_offline \
-  --eps_decay 500 \
+  --eps_decay 200 \
   --eps_end 0.1

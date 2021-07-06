@@ -20,9 +20,9 @@ srun python run_scip_tuning_dqn.py \
   --data_config ../../data/maxcut_data_config.yaml \
   --problem MAXCUT \
   --tags tuning maxcut ccmab \
-  --num_workers 36 \
+  --num_workers 76 \
   --wandb_offline \
-  --eps_decay 500 \
+  --eps_decay 200 \
   --eps_end 0.1 \
   --replay_buffer_minimum_size 300 \
   --local_buffer_size 10 \

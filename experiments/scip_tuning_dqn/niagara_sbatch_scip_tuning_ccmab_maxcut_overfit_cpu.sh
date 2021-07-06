@@ -21,8 +21,8 @@ srun python run_scip_tuning_dqn.py \
   --problem MAXCUT \
   --tags tuning maxcut ccmab overfit \
   --overfit validset_40_50 validset_60_70 validset_90_100 \
-  --num_workers 36 \
+  --num_workers 76 \
   --wandb_offline \
-  --eps_decay 500 \
+  --eps_decay 200 \
   --eps_end 0.1 \
   --conditional_q_heads True
