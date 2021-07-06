@@ -3,8 +3,9 @@ from argparse import ArgumentParser
 
 parser = ArgumentParser()
 parser.add_argument('--job_ids', type=str, nargs='+', default=[], help='list of job ids to search in their "*<job_id>.out file')
+parser.add_argument('--dir', type=str, default='.', help='directory to search for out files')
 args = parser.parse_args()
-
+os.chdir(args.dir)
 out_files = [f for f in os.listdir() if f.endswith('.out')]
 if args.job_ids:
     out_files = [f for f in out_files if any([j in f for j in args.job_ids])]
