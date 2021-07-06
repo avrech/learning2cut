@@ -1,5 +1,5 @@
 import torch
-from torch.nn import Sequential as Seq, Linear as Lin, ReLU
+from torch.nn import Sequential as Seq, Linear as Lin, ReLU, GELU
 from torch_scatter import scatter_mean, scatter_add
 from torch_geometric.nn.conv import MessagePassing, GCNConv, GATConv
 import torch.nn.functional as F
@@ -389,8 +389,8 @@ class CutConv(MessagePassing):
         self.out_channels = channels
         self.edge_attr_dim = edge_attr_dim
 
-        self.f = Lin(2 * channels, channels)
         self.g = Lin(2 * channels + edge_attr_dim, channels)
+        self.f = Lin(2 * channels, channels)
 
         self.reset_parameters()
 
@@ -405,7 +405,7 @@ class CutConv(MessagePassing):
 
     def message(self, x_i, x_j, edge_attr):
         z_ij = torch.cat([x_i, x_j, edge_attr], dim=-1)
-        return self.g(z_ij)
+        return self.g(z_ij).relu()
 
     def update(self, aggr_out, x):
         x = torch.cat([x, aggr_out], dim=-1)
@@ -1456,29 +1456,41 @@ class SCIPTuningQnet(torch.nn.Module):
         self.hparams = hparams
         cuda_id = 'cuda' if gpu_id is None else f'cuda:{gpu_id}'
         self.device = torch.device(cuda_id if use_gpu and torch.cuda.is_available() else "cpu")
+        emb_dim =  hparams.get('emb_dim', 32)
         ###########
         # Encoder #
         ###########
         # stack lp conv layers todo consider skip connections
-        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
-                                                                x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
-                                                                x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM) if i==0 else hparams.get('emb_dim', 32),   # mandatory - derived from state features
+        self.lp_conv = Seq(OrderedDict([(f'lp_conv_{i}', LPConv(x_v_channels=hparams.get('state_x_v_channels', SCIP_STATE_V_DIM) if i==0 else emb_dim,   # mandatory - derived from state features
+                                                                x_c_channels=hparams.get('state_x_c_channels', SCIP_STATE_C_DIM) if i==0 else emb_dim,   # mandatory - derived from state features
+                                                                x_a_channels=hparams.get('state_x_a_channels', SCIP_STATE_A_DIM) if i==0 else emb_dim,   # mandatory - derived from state features
                                                                 edge_attr_dim=hparams.get('state_edge_attr_dim', 1),  # mandatory - derived from state features
-                                                                emb_dim=hparams.get('emb_dim', 32),                   # default
+                                                                emb_dim=emb_dim,                                      # default
                                                                 aggr=hparams.get('lp_conv_aggr', 'mean'),             # default
                                                                 cuts_only=False))
                                         for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
 
         # cut conv edge attributes are the pairwise cuts orthogonality
         cutconv_edge_attr_dim = 1
-        self.cut_conv = CutConv(channels=hparams.get('emb_dim', 32),
+        self.cut_conv = CutConv(channels=emb_dim,
                                 edge_attr_dim=cutconv_edge_attr_dim,
                                 aggr=hparams.get('cut_conv_aggr', 'mean'))
+
+        self.g_emb = Seq(Lin(emb_dim * 3, emb_dim), ReLU())
 
         ###########
         # Q heads #
         ###########
-        self.q_heads = {k: Lin(hparams.get('emb_dim', 32) * 3, len(vals)) for k, vals in hparams['action_set'].items()}
+        if hparams.get('conditional_q_heads', False):
+            # start from minorthoroot to objparalfac:
+            q_heads = []
+            context_size = 0
+            for k, vals in reversed(list(hparams['action_set'].items())):
+                q_heads.insert(0, (k, Lin(emb_dim + context_size, len(vals))))
+                context_size += len(vals)
+            self.q_heads = torch.nn.ModuleDict(q_heads)
+        else:
+            self.q_heads = torch.nn.ModuleDict({k: Lin(emb_dim, len(vals)) for k, vals in hparams['action_set'].items()})
 
     def forward(self,
                 x_c,
@@ -1503,12 +1515,22 @@ class SCIPTuningQnet(torch.nn.Module):
         f_c_out, f_v_out, f_a_out, edge_index_c2v, edge_index_a2v, edge_attr_c2v, edge_attr_a2v = self.lp_conv(lp_conv_inputs)
         # cut conv
         f_a_out, _, _ = self.cut_conv((f_a_out, edge_index_a2a, edge_attr_a2a))
+        f_a_out.relu_()
         # pooling
         f_c_out = scatter_mean(src=f_c_out, index=x_c_batch, dim=0)
         f_v_out = scatter_mean(src=f_v_out, index=x_v_batch, dim=0)
         f_a_out = scatter_mean(src=f_a_out, index=x_a_batch, dim=0)
-        # concatenate features to a single global feature vector
-        graph_emb = torch.cat([f_c_out, f_v_out, f_a_out], dim=-1)
-        # decode q values for each action in action set
-        q_values = {k: q_head(graph_emb) for k, q_head in self.q_heads.items()}
+        # concatenate features to a single global feature vector todo apply seq(lin, relu, lin, relu)
+        graph_emb = self.g_emb(torch.cat([f_c_out, f_v_out, f_a_out], dim=-1))
+        # decode q values for each action dimension
+        if self.hparams.get('conditional_q_heads', False):
+            q_values = {}
+            for k, q_head in reversed(list(self.q_heads.items())):
+                q_vals = q_head(graph_emb)
+                q_values[k] = q_vals
+                # concatenate the context q_values for predicting the next action dimension
+                graph_emb = torch.cat([graph_emb, q_vals], dim=1)
+
+        else:
+            q_values = {k: q_head(graph_emb) for k, q_head in self.q_heads.items()}
         return q_values
