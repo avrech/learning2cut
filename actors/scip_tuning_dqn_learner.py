@@ -400,7 +400,7 @@ class SCIPTuningDQNLearner:
         # aggregate the action-wise values using mean or max,
         # and generate for each graph in the batch a single value
         # todo - what about terminal states?
-        a_batch = torch.cat([torch.full((len(self.hparams['action_set']),), idx, dtype=torch.long) for idx in range(self.batch_size)])
+        a_batch = torch.cat([torch.full((len(self.hparams['action_set']),), idx, dtype=torch.long) for idx in range(self.batch_size)]).to(self.device)
         max_target_next_q_values_aggr = self.value_aggr(max_target_next_q_values,  # source vector
                                                         a_batch,  # target index of each element in source
                                                         dim=0,  # scattering dimension

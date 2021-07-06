@@ -1179,9 +1179,12 @@ class SCIPTuningDQNWorker(Sepa):
             # wait until the model starts learning
             return None, None
         global_step = self.num_param_updates
+        test_summary = []
+        # for workers which hasn't been assigned eval instances
+        if len(self.eval_instances) == 0:
+            return global_step, test_summary
 
         self.set_eval_mode()
-        test_summary = []
         avg_times = {k: [] for k in set([tup[0] for tup in self.eval_instances])}
         for dataset_name, inst_idx, scip_seed in self.eval_instances:
             t0 = time()
