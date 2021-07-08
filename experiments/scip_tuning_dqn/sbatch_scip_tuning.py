@@ -47,16 +47,16 @@ for problem in ['MAXCUT', 'MVC']:
                             # command
                             fh.writelines(f"srun python run_scip_tuning_dqn.py ")
                             fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
-                            fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/{sbatch_file.split('.')[0]} ")
+                            fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/ ")
                             fh.writelines(f"  --datadir $SCRATCH/learning2cut/data ")
                             fh.writelines(f"  --data_config ../../data/{problem.lower()}_data_config.yaml ")
                             fh.writelines(f"  --problem {problem} ")
                             fh.writelines(f"  --tags tuning v0 ")
                             if overfit:
                                 if problem == 'MAXCUT':
-                                    fh.writelines(f"  --overfit validset_40_50 validset_60_70 validset_90_100 ")
+                                    fh.writelines(f"  --overfit validset_40_50 validset_60_70 ")
                                 else:
-                                    fh.writelines(f"  --overfit validset_100_110 validset_150_160 validset_200_210 ")
+                                    fh.writelines(f"  --overfit validset_100_110 validset_150_160 ")
                             if args.cluster == 'niagara':
                                 fh.writelines(f"  --num_workers 76 ")
                             else:
