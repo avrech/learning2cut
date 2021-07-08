@@ -113,7 +113,7 @@ class SCIPTuningDQNWorker(Sepa):
         self.run_dir = hparams['run_dir']
         self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
         # training logs
-        self.training_stats = {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
+        self.training_stats = {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': [], 'jaccard_similarity': []}
         self.last_training_episode_stats = {}
         # tmp buffer for holding cutting planes statistics
         self.sepa_stats = None
@@ -764,11 +764,14 @@ class SCIPTuningDQNWorker(Sepa):
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.instance_info['optimal_value'])
         gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
         if self.dqn_objective == 'db_auc':
-            objective_area = dualbound_area
+            immediate_rewards = dualbound_area
         elif self.dqn_objective == 'gap_auc':
-            objective_area = gap_area
+            immediate_rewards = gap_area
         else:
             raise NotImplementedError
+
+        if self.hparams.get('square_reward', False):
+            immediate_rewards = immediate_rewards ** 2  # todo verification
 
         trajectory = []
         if self.training:
@@ -781,10 +784,10 @@ class SCIPTuningDQNWorker(Sepa):
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
             # in case of n_steps > 1, pad objective_area with zeros only for avoiding overflow
             max_index = np.max(indices)
-            if max_index >= len(objective_area):
-                objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
+            if max_index >= len(immediate_rewards):
+                immediate_rewards = np.pad(immediate_rewards, (0, max_index+1-len(immediate_rewards)), 'constant', constant_values=0)
             # take sliding windows of width n_step from objective_area
-            n_step_rewards = objective_area[indices]
+            n_step_rewards = immediate_rewards[indices]
             # compute returns
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
@@ -859,7 +862,7 @@ class SCIPTuningDQNWorker(Sepa):
 
         active_applied_ratio = []
         applied_available_ratio = []
-        accuracy_list, f1_score_list = [], []
+        accuracy_list, f1_score_list, jaccard_sim_list = [], [], []
         true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
         q_avg, q_std = [], []
         for info in self.episode_history:
@@ -876,6 +879,9 @@ class SCIPTuningDQNWorker(Sepa):
             # if self.demonstration_episode: todo verification
             accuracy_list.append(np.mean(action_info['selected_by_scip'] == action_info['selected_by_agent']))
             f1_score_list.append(f1_score(action_info['selected_by_scip'], action_info['selected_by_agent']))
+            intersection = len(set(action_info['selected_by_scip']).intersection(action_info['selected_by_agent']))
+            jaccard_sim_list.append(intersection / (len(action_info['selected_by_scip']) + len(action_info['selected_by_agent']) - intersection))
+
             # store for plotting later
             scip_action = info['action_info']['selected_by_scip']
             agent_action = info['action_info']['selected_by_agent']
@@ -901,6 +907,7 @@ class SCIPTuningDQNWorker(Sepa):
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
+            self.training_stats['jaccard_similarity'] += jaccard_sim_list
             if not discarded:
                 self.last_training_episode_stats['bootstrapped_returns'] = bootstrapped_returns
                 self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
@@ -918,6 +925,7 @@ class SCIPTuningDQNWorker(Sepa):
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
                      'f1_score': np.mean(f1_score_list),
+                     'jaccard_similarity': np.mean(jaccard_sim_list),
                      'tot_solving_time': self.episode_stats['solving_time'][-1],
                      'tot_lp_iterations': self.episode_stats['lp_iterations'][-1],
                      'terminal_state': self.terminal_state,

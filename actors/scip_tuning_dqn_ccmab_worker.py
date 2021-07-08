@@ -162,8 +162,10 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
             # # compute returns
             # # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             reward = np.array(objective_area).sum(keepdims=True)  # n_step_rewards @ gammas
-            if self.hparams.get('dqn_objective_norm', False) and self.hparams['fix_training_scip_seed'] == 223:
+            if self.hparams.get('norm_reward', False) and self.hparams['fix_training_scip_seed'] == 223:
                 reward /= self.instance_info['baselines']['default'][223][self.dqn_objective]
+            if self.hparams.get('square_reward', False):
+                reward = reward**2
 
             bootstrapping_q = []
             discarded = False
@@ -218,7 +220,7 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
 
         active_applied_ratio = []
         applied_available_ratio = []
-        accuracy_list, f1_score_list = [], []
+        accuracy_list, f1_score_list, jaccard_sim_list = [], [], []
         true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
         q_avg, q_std = [], []
         for step_idx, info in enumerate(self.episode_history):
@@ -235,6 +237,8 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
             # if self.demonstration_episode: todo verification
             accuracy_list.append(np.mean(action_info['selected_by_scip'] == action_info['selected_by_agent']))
             f1_score_list.append(f1_score(action_info['selected_by_scip'], action_info['selected_by_agent']))
+            intersection = len(set(action_info['selected_by_scip']).intersection(action_info['selected_by_agent']))
+            jaccard_sim_list.append( intersection / (len(action_info['selected_by_scip']) + len(action_info['selected_by_agent']) - intersection))
             # store for plotting later
             scip_action = info['action_info']['selected_by_scip']
             agent_action = info['action_info']['selected_by_agent']
@@ -261,6 +265,7 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
+            self.training_stats['jaccard_similarity'] += jaccard_sim_list
             if not discarded:
                 self.last_training_episode_stats['bootstrapped_returns'] = discounted_rewards  # for compatibility - not really interesting
                 self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
@@ -278,6 +283,7 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
                      'f1_score': np.mean(f1_score_list),
+                     'jaccard_similarity': np.mean(jaccard_sim_list),
                      'tot_solving_time': self.episode_stats['solving_time'][-1],
                      'tot_lp_iterations': self.episode_stats['lp_iterations'][-1],
                      'terminal_state': self.terminal_state,

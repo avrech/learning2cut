@@ -111,7 +111,7 @@ class ApeXDQN:
         self.evaluation_step = -1
         self.datasets = self.worker_cls.load_data(cfg)
         self.stats_template_dict = {
-            'training': {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []},
+            'training': {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': [], 'jaccard_similarity': []},
             'validation': {dataset_name: {inst_idx: {} for inst_idx in range(len(dataset['instances']))} for dataset_name, dataset in self.datasets.items() if 'valid' in dataset_name},
             'debugging': {},
             'last_training_episode_stats': {}
@@ -451,6 +451,7 @@ class ApeXDQN:
                 'applied_available_ratio': [],
                 'accuracy': [],
                 'f1_score': [],
+                'jaccard_similarity': [],
                 'tot_solving_time': [],
                 'tot_lp_iterations': [],
             }
@@ -498,6 +499,7 @@ class ApeXDQN:
                         figures[figname]['fig'].savefig(os.path.join(self.cfg['run_dir'], f'best_{dataset_name}_{figname}.png'))
                     with open(os.path.join(self.cfg['run_dir'], f'best_{dataset_name}_params.pkl'), 'wb') as f:
                         pickle.dump(stats['params'], f)
+                    log_dict[f"{dataset_name}/best_{self.cfg['dqn_objective']}"] = cur_perf
                 # add env custom relevant plots
                 custom_log_dict = self.custom_logs(dataset_stats, dataset_name, cur_perf > self.best_performance[dataset_name])
                 log_dict.update(custom_log_dict)
