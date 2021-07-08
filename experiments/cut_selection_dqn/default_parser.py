@@ -34,6 +34,8 @@ parser.add_argument("--empty_action_penalty", type=int, default=0, help="additiv
 parser.add_argument("--select_at_least_one_cut", type=str2bool, nargs='?', const=True, default=False, help="enforce selecting at least one cut every separation round")
 parser.add_argument("--update_rule", type=str, default="DQN", help="update rule. options: DQN, DDQN")
 parser.add_argument("--discard_bad_experience", type=str2bool, nargs='?', const=True, default=False, help="discard training episodes which terminated before LP_ITERATIONS_LIMIT due to weak cuts")
+parser.add_argument("--norm_reward", type=str2bool, nargs='?', const=True, default=False, help="normalize the agent auc by SCIP auc. applicapble when fixing training seed to 223, and fotr tuning envs only")
+parser.add_argument("--square_reward", type=str2bool, nargs='?', const=True, default=False, help="square the objective auc areas")
 parser.add_argument("--n_step_loss_coef", type=float, default=0.0, help="cut_selection_dqn n_step loss coefficient in the total objective loss")
 parser.add_argument("--demonstration_loss_coef", type=float, default=1.0, help="demonstration loss coefficient")
 parser.add_argument("--demonstration_large_margin", type=float, default=0.1, help="enforce margin between demonstration and other actions")
