@@ -45,31 +45,31 @@ for problem in ['MAXCUT', 'MVC']:
                             else:
                                 raise ValueError
                             # command
-                            fh.writelines(f"srun python run_scip_tuning_dqn.py \ \n")
-                            fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml \ \n")
-                            fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/{sbatch_file.split('.')[0]} \ \n")
-                            fh.writelines(f"  --datadir $SCRATCH/learning2cut/data \ \n")
-                            fh.writelines(f"  --data_config ../../data/{problem.lower()}_data_config.yaml \ \n")
-                            fh.writelines(f"  --problem {problem} \ \n")
-                            fh.writelines(f"  --tags tuning v0 \ \n")
+                            fh.writelines(f"srun python run_scip_tuning_dqn.py \\ \n")
+                            fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml \\ \n")
+                            fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/{sbatch_file.split('.')[0]} \\ \n")
+                            fh.writelines(f"  --datadir $SCRATCH/learning2cut/data \\ \n")
+                            fh.writelines(f"  --data_config ../../data/{problem.lower()}_data_config.yaml \\ \n")
+                            fh.writelines(f"  --problem {problem} \\ \n")
+                            fh.writelines(f"  --tags tuning v0 \\ \n")
                             if overfit:
                                 if problem == 'MAXCUT':
-                                    fh.writelines(f"  --overfit validset_40_50 validset_60_70 validset_90_100 \ \n")
+                                    fh.writelines(f"  --overfit validset_40_50 validset_60_70 validset_90_100 \\ \n")
                                 else:
-                                    fh.writelines(f"  --overfit validset_100_110 validset_150_160 validset_200_210 \ \n")
+                                    fh.writelines(f"  --overfit validset_100_110 validset_150_160 validset_200_210 \\ \n")
                             if args.cluster == 'niagara':
-                                fh.writelines(f"  --num_workers 76 \ \n")
+                                fh.writelines(f"  --num_workers 76 \\ \n")
                             else:
-                                fh.writelines(f"  --num_workers 28 \ \n")
-                            fh.writelines(f"  --wandb_offline True \ \n")
-                            fh.writelines(f"  --eps_decay 200 \ \n")
-                            fh.writelines(f"  --eps_end 0.1 \ \n")
-                            fh.writelines(f"  --scip_env {scip_env} \ \n")
-                            fh.writelines(f"  --replay_buffer_capacity 10000 \ \n")
-                            fh.writelines(f"  --local_buffer_size 10 \ \n")
-                            fh.writelines(f"  --replay_buffer_minimum_size 1000 \ \n")
-                            fh.writelines(f"  --conditional_q_heads {cond_q} \ \n")
-                            fh.writelines(f"  --norm_reward {norm_reward} \ \n")
+                                fh.writelines(f"  --num_workers 28 \\ \n")
+                            fh.writelines(f"  --wandb_offline True \\ \n")
+                            fh.writelines(f"  --eps_decay 200 \\ \n")
+                            fh.writelines(f"  --eps_end 0.1 \\ \n")
+                            fh.writelines(f"  --scip_env {scip_env} \\ \n")
+                            fh.writelines(f"  --replay_buffer_capacity 10000 \\ \n")
+                            fh.writelines(f"  --local_buffer_size 10 \\ \n")
+                            fh.writelines(f"  --replay_buffer_minimum_size 1000 \\ \n")
+                            fh.writelines(f"  --conditional_q_heads {cond_q} \\ \n")
+                            fh.writelines(f"  --norm_reward {norm_reward} \\ \n")
                             fh.writelines(f"  --square_reward {square_reward} \n")
 
                         print(f'submitting {sbatch_file}')
