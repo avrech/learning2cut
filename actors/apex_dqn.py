@@ -253,11 +253,15 @@ class ApeXDQN:
         if self.cfg['wandb_offline']:
             os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
             os.environ['WANDB_MODE'] = 'dryrun'
+        if not os.path.exists(f"{self.cfg['rootdir']}/wandb"):
+            os.makedirs(f"{self.cfg['rootdir']}/wandb")
+        os.environ['WANDB_DIR'] = f"{self.cfg['rootdir']}/wandb"
+
         wandb.init(resume='allow',
                    id=self.cfg['run_id'],
                    project=self.cfg['project'],
                    config=self.cfg,
-                   dir=self.cfg['rootdir'],
+                   # dir=self.cfg['rootdir'],
                    config_exclude_keys=['datasets', 'com', 'ray_info'],
                    tags=self.cfg['tags'])
 
@@ -604,11 +608,18 @@ class ApeXDQN:
                 self.apex_socket.bind(f'tcp://127.0.0.1:{self.cfg["com"]["apex_port"]}')
                 # initialize wandb logger
                 self.print('initializing wandb')
+                if self.cfg['wandb_offline']:
+                    os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
+                    os.environ['WANDB_MODE'] = 'dryrun'
+                if not os.path.exists(f"{self.cfg['rootdir']}/wandb"):
+                    os.makedirs(f"{self.cfg['rootdir']}/wandb")
+                os.environ['WANDB_DIR'] = f"{self.cfg['rootdir']}/wandb"
+
                 wandb.init(resume='allow',  # hparams['resume'],
                            id=self.cfg['run_id'],
                            project=self.cfg['project'],
                            config=self.cfg,
-                           dir=self.cfg['rootdir'],
+                           # dir=self.cfg['rootdir'],
                            config_exclude_keys=['datasets', 'com', 'ray_info'])
 
                 # save pid to run_dir
@@ -701,11 +712,15 @@ class ApeXDQN:
         if self.cfg['wandb_offline']:
             os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
             os.environ['WANDB_MODE'] = 'dryrun'
+        if not os.path.exists(f"{self.cfg['rootdir']}/wandb"):
+            os.makedirs(f"{self.cfg['rootdir']}/wandb")
+        os.environ['WANDB_DIR'] = f"{self.cfg['rootdir']}/wandb"
+
         wandb.init(resume='allow',
                    id=self.cfg['run_id'],
                    project=self.cfg['project'],
                    config=self.cfg,
-                   dir=self.cfg['rootdir'],
+                   # dir=self.cfg['rootdir'],
                    config_exclude_keys=['datasets', 'com', 'ray_info'],
                    tags=self.cfg['tags'])
         self.print('setup finished')
