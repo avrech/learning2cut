@@ -71,6 +71,7 @@ for problem in ['MAXCUT', 'MVC']:
                             fh.writelines(f"  --conditional_q_heads {cond_q} \ \n")
                             fh.writelines(f"  --norm_reward {norm_reward} \ \n")
                             fh.writelines(f"  --square_reward {square_reward} \n")
+
                         print(f'submitting {sbatch_file}')
                         os.system(f'sbatch {sbatch_file}')
                         time.sleep(1)
