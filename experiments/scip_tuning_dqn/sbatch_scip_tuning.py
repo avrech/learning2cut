@@ -61,7 +61,7 @@ for problem in ['MAXCUT', 'MVC']:
                                 fh.writelines(f"  --num_workers 76 \ \n")
                             else:
                                 fh.writelines(f"  --num_workers 28 \ \n")
-                            fh.writelines(f"  --wandb_offline \ \n")
+                            fh.writelines(f"  --wandb_offline True \ \n")
                             fh.writelines(f"  --eps_decay 200 \ \n")
                             fh.writelines(f"  --eps_end 0.1 \ \n")
                             fh.writelines(f"  --scip_env {scip_env} \ \n")
