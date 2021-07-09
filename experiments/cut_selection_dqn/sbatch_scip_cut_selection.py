@@ -63,7 +63,7 @@ for problem in ['MAXCUT', 'MVC']:
                         if args.gpu:
                             fh.writelines(f"  --num_workers 12 ")
                         else:
-                            fh.writelines(f"  --num_workers 32 ")
+                            fh.writelines(f"  --num_workers 28 ")
 
                     fh.writelines(f"  --wandb_offline True ")
                     # fh.writelines(f"  --eps_decay 1000 ")

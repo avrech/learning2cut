@@ -907,7 +907,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
             raise NotImplementedError
         if self.hparams.get('square_reward', False):
             immediate_rewards = immediate_rewards ** 2  # todo verification
-            
+
         trajectory = []
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
