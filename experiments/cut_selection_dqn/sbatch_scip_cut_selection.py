@@ -19,9 +19,9 @@ for problem in ['MAXCUT', 'MVC']:
                     fh.writelines(f"#SBATCH --time={args.hours.zfill(2)}:00:00\n")
                     fh.writelines(f"#SBATCH --account=def-alodi\n")
                     fh.writelines(f"#SBATCH --job-name=cut_sel\n")
-                    fh.writelines(f"#SBATCH --mem=0\n")
-                    fh.writelines(f"#SBATCH --nodes=1\n")
                     if args.cluster == 'niagara':
+                        fh.writelines(f"#SBATCH --mem=0\n")
+                        fh.writelines(f"#SBATCH --nodes=1\n")
                         fh.writelines(f"#SBATCH --output=/scratch/a/alodi/avrech/learning2cut/tuning/{sbatch_file.split('.')[0]}-%j.out\n")
                         fh.writelines(f"#SBATCH --cpus-per-task=40\n")
                         fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
@@ -33,10 +33,15 @@ for problem in ['MAXCUT', 'MVC']:
 
                     elif args.cluster == 'graham':
                         fh.writelines(f"#SBATCH --output={sbatch_file.split('.')[0]}-%j.out\n")
-                        fh.writelines(f"#SBATCH --cpus-per-task=32\n")
-                        fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
                         if args.gpu:
-                            fh.writelines(f"# SBATCH --gres=gpu:1\n")
+                            fh.writelines(f"#SBATCH --gres=gpu:1\n")
+                            fh.writelines(f"#SBATCH --mem=60G\n")
+                            fh.writelines(f"#SBATCH --cpus-per-task=16\n")
+                        else:
+                            fh.writelines(f"#SBATCH --mem=0\n")
+                            fh.writelines(f"#SBATCH --nodes=1\n")
+                            fh.writelines(f"#SBATCH --cpus-per-task=32\n")
+                            fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
                     else:
                         raise ValueError
                     # command
@@ -55,12 +60,16 @@ for problem in ['MAXCUT', 'MVC']:
                     if args.cluster == 'niagara':
                         fh.writelines(f"  --num_workers 56 ")
                     else:
-                        fh.writelines(f"  --num_workers 28 ")
+                        if args.gpu:
+                            fh.writelines(f"  --num_workers 12 ")
+                        else:
+                            fh.writelines(f"  --num_workers 32 ")
+
                     fh.writelines(f"  --wandb_offline True ")
                     # fh.writelines(f"  --eps_decay 1000 ")
                     fh.writelines(f"  --eps_end 0.1 ")
                     fh.writelines(f"  --scip_env {scip_env} ")
-                    fh.writelines(f"  --replay_buffer_capacity 20000 ")
+                    fh.writelines(f"  --replay_buffer_capacity 9000 ")
                     fh.writelines(f"  --local_buffer_size 10 ")
                     fh.writelines(f"  --replay_buffer_minimum_size 1000 ")
                     # fh.writelines(f"  --conditional_q_heads {cond_q} ")

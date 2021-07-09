@@ -900,12 +900,14 @@ class SCIPCutSelectionDQNWorker(Sepa):
         dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.instance_info['optimal_value'])
         gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
         if self.dqn_objective == 'db_auc':
-            objective_area = dualbound_area
+            immediate_rewards = dualbound_area
         elif self.dqn_objective == 'gap_auc':
-            objective_area = gap_area
+            immediate_rewards = gap_area
         else:
             raise NotImplementedError
-
+        if self.hparams.get('square_reward', False):
+            immediate_rewards = immediate_rewards ** 2  # todo verification
+            
         trajectory = []
         if self.training:
             # compute n-step returns for each state-action pair (s_t, a_t)
@@ -917,10 +919,10 @@ class SCIPCutSelectionDQNWorker(Sepa):
             indices = np.arange(n_steps).reshape(1, -1) + np.arange(n_transitions).reshape(-1, 1)  # indices of sliding windows
             # in case of n_steps > 1, pad objective_area with zeros only for avoiding overflow
             max_index = np.max(indices)
-            if max_index >= len(objective_area):
-                objective_area = np.pad(objective_area, (0, max_index+1-len(objective_area)), 'constant', constant_values=0)
+            if max_index >= len(immediate_rewards):
+                immediate_rewards = np.pad(immediate_rewards, (0, max_index+1-len(immediate_rewards)), 'constant', constant_values=0)
             # take sliding windows of width n_step from objective_area
-            n_step_rewards = objective_area[indices]
+            n_step_rewards = immediate_rewards[indices]
             # compute returns
             # R[t] = r[t] + gamma * r[t+1] + ... + gamma^(n-1) * r[t+n-1]
             R = n_step_rewards @ gammas
