@@ -134,7 +134,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
         self.run_dir = hparams['run_dir']
         self.checkpoint_filepath = os.path.join(self.run_dir, 'learner_checkpoint.pt')
         # training logs
-        self.training_stats = {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': []}
+        self.training_stats = {'db_auc': [], 'db_auc_improvement': [], 'gap_auc': [], 'gap_auc_improvement': [], 'active_applied_ratio': [], 'applied_available_ratio': [], 'accuracy': [], 'f1_score': [], 'jaccard_similarity': []}
         self.last_training_episode_stats = {}
         # tmp buffer for holding cutting planes statistics
         self.sepa_stats = None
@@ -622,33 +622,32 @@ class SCIPCutSelectionDQNWorker(Sepa):
         # TODO - move all models to return dict with everything needed.
         # transform scip_state into GNN data type
         batch = Transition.create(scip_state, tqnet_version=self.tqnet_version).as_batch().to(self.device)
-
-        if self.training:
-            if self.demonstration_episode:
-                # take only greedy actions to compute online policy stats
-                # in demonstration mode, we don't increment num_env_steps_done,
-                # since we want to start exploration from the beginning once the demonstration phase is completed.
-                sample, eps_threshold = 1, 0
-            else:
-                # take epsilon-greedy action
-                sample = random.random()
-                eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
-                                math.exp(-1. * self.num_env_steps_done / self.eps_decay)
-                self.num_env_steps_done += 1
-
-            if sample > eps_threshold:
-                random_action = None
-            else:
-                # randomize action
-                random_action = torch.randint_like(batch.a, low=0, high=2).cpu().bool()
-                if self.select_at_least_one_cut and random_action.sum() == 0:
-                    # select a cut arbitrarily
-                    random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = True
-                self.training_n_random_actions += 1
-            self.training_n_actions += 1
-
+        if self.training and not self.demonstration_episode:
+            # take epsilon-greedy action
+            # sample = random.random()
+            eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
+                            math.exp(-1. * self.num_env_steps_done / self.eps_decay)
+            self.num_env_steps_done += 1
         else:
-            random_action = None
+            # take only greedy actions to compute online policy stats
+            # in demonstration mode, we don't increment num_env_steps_done,
+            # since we want to start exploration from the beginning once the demonstration phase is completed.
+            # sample, eps_threshold = 1, 0
+            eps_threshold = 0
+
+        #     if sample > eps_threshold:
+        #         random_action = None
+        #     else:
+        #         # randomize action
+        #         random_action = torch.randint_like(batch.a, low=0, high=2).cpu().bool()
+        #         if self.select_at_least_one_cut and random_action.sum() == 0:
+        #             # select a cut arbitrarily
+        #             random_action[torch.randint(low=0, high=len(random_action), size=(1,))] = True
+        #         self.training_n_random_actions += 1
+        #     self.training_n_actions += 1
+        #
+        # else:
+        #     random_action = None
 
         # take greedy action
         with torch.no_grad():
@@ -664,9 +663,13 @@ class SCIPCutSelectionDQNWorker(Sepa):
                 edge_index_a2a=batch.edge_index_a2a,
                 edge_attr_a2a=batch.edge_attr_a2a,
                 mode='inference',
-                query_action=random_action
+                query_action=None,  # random_action, deprecated
+                eps_threshold=eps_threshold
             )
         assert not self.select_at_least_one_cut or output['selected_by_agent'].any()
+        self.training_n_random_actions += output['n_random_actions']
+        self.training_n_actions += output['n_actions']
+
         return output
 
     # done
@@ -1025,7 +1028,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
 
         active_applied_ratio = []
         applied_available_ratio = []
-        accuracy_list, f1_score_list = [], []
+        accuracy_list, f1_score_list, jaccard_sim_list = [], [], []
         true_pos, true_neg, false_pos, false_neg = 0, 0, 0, 0
         q_avg, q_std = [], []
         for info in self.episode_history:
@@ -1042,6 +1045,10 @@ class SCIPCutSelectionDQNWorker(Sepa):
             # if self.demonstration_episode: todo verification
             accuracy_list.append(np.mean(action['selected_by_scip'] == action['selected_by_agent']))
             f1_score_list.append(f1_score(action['selected_by_scip'], action['selected_by_agent']))
+            intersection = len(set(action['selected_by_scip']).intersection(action['selected_by_agent']))
+            jaccard_sim_list.append(intersection / (
+                        len(action['selected_by_scip']) + len(action['selected_by_agent']) - intersection))
+
             # store for plotting later
             scip_action = info['action_info']['selected_by_scip']
             agent_action = info['action_info']['selected_by_agent']
@@ -1067,6 +1074,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
             self.training_stats['applied_available_ratio'] += applied_available_ratio  # .append(np.mean(applied_available_ratio))
             self.training_stats['accuracy'] += accuracy_list
             self.training_stats['f1_score'] += f1_score_list
+            self.training_stats['jaccard_similarity'] += jaccard_sim_list
             if not discarded:
                 self.last_training_episode_stats['bootstrapped_returns'] = bootstrapped_returns
                 self.last_training_episode_stats['discounted_rewards'] = discounted_rewards
@@ -1084,6 +1092,7 @@ class SCIPCutSelectionDQNWorker(Sepa):
                      'applied_available_ratio': np.mean(applied_available_ratio),
                      'accuracy': np.mean(accuracy_list),
                      'f1_score': np.mean(f1_score_list),
+                     'jaccard_similarity': np.mean(jaccard_sim_list),
                      'tot_solving_time': self.episode_stats['solving_time'][-1],
                      'tot_lp_iterations': self.episode_stats['lp_iterations'][-1],
                      'terminal_state': self.terminal_state,
@@ -1494,18 +1503,24 @@ class SCIPCutSelectionDQNWorker(Sepa):
         # datasets and baselines
         datasets = deepcopy(hparams['datasets'])
 
-        # todo - in overfitting sanity check consider only the first instance of the overfitted dataset
-        overfit_dataset_name = hparams.get('overfit', False)
-        if overfit_dataset_name in datasets.keys():
-            for dataset_name in hparams['datasets'].keys():
-                if dataset_name != overfit_dataset_name:
-                    datasets.pop(dataset_name)
-
         # load maxcut instances:
         with open(os.path.join(hparams['datadir'], hparams['problem'], 'data.pkl'), 'rb') as f:
             instances = pickle.load(f)
         for dataset_name, dataset in datasets.items():
             dataset.update(instances[dataset_name])
+
+        # # todo - in overfitting sanity check consider only the first instance of the overfitted dataset
+        # overfit_dataset_name = hparams.get('overfit', False)
+        # if overfit_dataset_name in datasets.keys():
+        #     for dataset_name in hparams['datasets'].keys():
+        #         if dataset_name != overfit_dataset_name:
+        #             datasets.pop(dataset_name)
+
+        # # load maxcut instances:
+        # with open(os.path.join(hparams['datadir'], hparams['problem'], 'data.pkl'), 'rb') as f:
+        #     instances = pickle.load(f)
+        # for dataset_name, dataset in datasets.items():
+        #     dataset.update(instances[dataset_name])
 
         # for dataset_name, dataset in datasets.items():
         #     datasets[dataset_name]['datadir'] = os.path.join(
@@ -1579,18 +1594,32 @@ class SCIPCutSelectionDQNWorker(Sepa):
         """
         hparams = self.hparams
         self.datasets = datasets = self.load_data(hparams)
+        self.trainset = [v for k, v in self.datasets.items() if 'trainset' in k][0]
 
-        # todo - overfitting sanity check -
-        #  change 'testset100' to 'validset100' to enable logging stats collected only for validation sets.
-        #  set trainset and validset100
-        #  remove all the other datasets from database
-        overfit_dataset_name = hparams.get('overfit', False)
-        if overfit_dataset_name:
-            self.trainset = deepcopy(self.datasets[overfit_dataset_name])
-            self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
-            # todo update to new struct: self.trainset['instances'][0][1].pop('rootonly_stats')
-        else:
-            self.trainset = [v for k, v in self.datasets.items() if 'trainset' in k][0]
+        # # todo - overfitting sanity check -
+        # #  change 'testset100' to 'validset100' to enable logging stats collected only for validation sets.
+        # #  set trainset and validset100
+        # #  remove all the other datasets from database
+        # overfit_dataset_name = hparams.get('overfit', False)
+        # if overfit_dataset_name:
+        #     self.trainset = deepcopy(self.datasets[overfit_dataset_name])
+        #     self.trainset['dataset_name'] = 'trainset-' + self.trainset['dataset_name'] + '[0]'
+        #     # todo update to new struct: self.trainset['instances'][0][1].pop('rootonly_stats')
+        # else:
+        #     self.trainset = [v for k, v in self.datasets.items() if 'trainset' in k][0]
+        if hparams.get('overfit', False):
+            instances = []
+            overfit_lp_iter_limits = []
+            trainset_name = 'trainset_overfit'
+            for dataset_name in hparams['overfit']:
+                instances += datasets[dataset_name]['instances']
+                overfit_lp_iter_limits += [datasets[dataset_name]['lp_iterations_limit']]*len(datasets[dataset_name]['instances'])
+                trainset_name += f'_{dataset_name}'
+            self.trainset['instances'] = instances
+            self.trainset['num_instances'] = len(instances)
+            self.trainset['dataset_name'] = trainset_name
+            self.trainset['overfit_lp_iter_limits'] = overfit_lp_iter_limits
+
         self.graph_indices = torch.randperm(self.trainset['num_instances'])
         return datasets
 

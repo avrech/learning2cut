@@ -58,7 +58,7 @@ for problem in ['MAXCUT', 'MVC']:
                                 else:
                                     fh.writelines(f"  --overfit validset_100_110 validset_150_160 ")
                             if args.cluster == 'niagara':
-                                fh.writelines(f"  --num_workers 76 ")
+                                fh.writelines(f"  --num_workers 56 ")
                             else:
                                 fh.writelines(f"  --num_workers 28 ")
                             fh.writelines(f"  --wandb_offline True ")

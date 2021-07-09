@@ -1,3 +1,5 @@
+import random
+
 import torch
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU, GELU
 from torch_scatter import scatter_mean, scatter_add
@@ -635,7 +637,8 @@ class TQnet(torch.nn.Module):
                 edge_index_a2a,
                 edge_attr_a2a,
                 mode='inference',
-                query_action=None
+                query_action=None,
+                eps_threshold=0
                 ):
         """
         """
@@ -652,8 +655,8 @@ class TQnet(torch.nn.Module):
         # decoding - inference
         if mode == 'inference':
             if query_action is None:
-                # run greedy inference
-                output = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a)
+                # run e-greedy inference
+                output = self.inference(cut_encoding, edge_index_a2a, edge_attr_a2a, eps_threshold=eps_threshold)
 
             else:
                 # construct decoder context according to random action, and generate the q_values in parallel.
@@ -696,7 +699,7 @@ class TQnet(torch.nn.Module):
         output['cut_encoding'] = cut_encoding  # store for demonstration J_E loss
         return output
 
-    def inference(self, cuts_encoding, edge_index_a2a, edge_attr_a2a):
+    def inference(self, cuts_encoding, edge_index_a2a, edge_attr_a2a, eps_threshold=0):
         ncuts = cuts_encoding.shape[0]
 
         # Build the action iteratively:
@@ -705,6 +708,7 @@ class TQnet(torch.nn.Module):
         # 3. find argmax across the n_remaining_cuts+1 q_values
         #    if argmax in 0:n_remaining_cuts - select the argmax cut,
         #    otherwise - discard all the remaining cuts.
+        #    with probability eps_threshold take random action
         #
         # A context is defined by edge_attr_a2a:
         # Each directed edge in edge_index_a2a is assigned 3 attributes [o_ij, oiS, is_selected(i)]
@@ -734,6 +738,10 @@ class TQnet(torch.nn.Module):
         remaining_cuts_idxes = torch.arange(ncuts).tolist()
         selected_cuts_idxes = []
 
+        # logs
+        n_random_actions = 0
+        n_actions = 0
+
         # run loop until all cuts are selected, or until 'discard' is selected
         for _ in range(ncuts):
             # decode
@@ -744,9 +752,16 @@ class TQnet(torch.nn.Module):
             q = self.q(remaining_cuts_decoding)
             select_q_values = q[:, 1]
 
+            # e-greedy probability
+            sample = random.random()
+
             # force selecting at least one cut
             if self.select_at_least_one_cut and len(selected_cuts_idxes) == 0:
-                argmax_action = select_q_values.argmax()
+                if sample > eps_threshold:
+                    argmax_action = select_q_values.argmax()  # greedily select a cut
+                else:
+                    argmax_action = torch.randint(ncuts, (1,))  # select a random cut
+                    n_random_actions += 1
                 action_q_values = select_q_values
                 cut_selected = 1
 
@@ -754,10 +769,15 @@ class TQnet(torch.nn.Module):
                 # append the option to discard all the remaining cuts
                 discard_q_value = q[:, 0].mean(dim=0, keepdim=True)
                 action_q_values = torch.cat([select_q_values, discard_q_value], dim=0)  # [n_remaining_cuts + 1]
-                # find argmax action
-                argmax_action = action_q_values.argmax()
+                if sample > eps_threshold:
+                    argmax_action = action_q_values.argmax()  # find argmax action - either select another cut or discard all
+                else:
+                    argmax_action = torch.randint(action_q_values.shape[0], (1,))  # select randomly a cut or discard all
+                    n_random_actions += 1
                 # a cut was selected if the argmax is in [0:n_remaining_cuts]
                 cut_selected = int(argmax_action < len(remaining_cuts_idxes))
+
+            n_actions += 1
 
             if cut_selected:
                 # the cut index in the available cuts array
@@ -832,7 +852,9 @@ class TQnet(torch.nn.Module):
         output = {
             'selected_by_agent': selected,
             'decoder_context': decoder_context,
-            'selected_q_values': selected_q_values
+            'selected_q_values': selected_q_values,
+            'n_random_actions': n_random_actions,
+            'n_actions': n_actions
         }
         return output
 
