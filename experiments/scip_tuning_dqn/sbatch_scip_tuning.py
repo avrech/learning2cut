@@ -66,7 +66,7 @@ for problem in ['MAXCUT', 'MVC']:
                         fh.writelines(f"  --replay_buffer_minimum_size 1000 ")
                         fh.writelines(f"  --encoder_lp_conv_layers {encoder_lp_conv_layers} ")
                         fh.writelines(f"  --seed {seed} ")
-                        fh.writelines(f"  --scip_seed {scip_seed} \n")
+                        fh.writelines(f"  --fix_training_scip_seed {scip_seed} \n")
 
                     print(f'submitting {sbatch_file}')
                     os.system(f'sbatch {sbatch_file}')
