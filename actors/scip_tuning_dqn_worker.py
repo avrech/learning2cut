@@ -268,7 +268,7 @@ class SCIPTuningDQNWorker(Sepa):
         log_packet = ('log', f'worker_{self.worker_id}', global_step,
                       ([(k, v) for k, v in self.training_stats.items()],
                        validation_stats,
-                       [(f'worker_{self.worker_id}_exploration', self.training_n_random_actions/self.training_n_actions)],
+                       [(f'worker_{self.worker_id}_exploration', self.training_n_random_actions/self.training_n_actions), (f'worker_{self.worker_id}_env_steps', self.num_env_steps_done)],
                        [(k, v) for k, v in self.last_training_episode_stats.items()]))
         log_packet = pa.serialize(log_packet).to_buffer()
         self.send_2_apex_socket.send(log_packet)

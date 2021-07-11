@@ -43,11 +43,11 @@ for problem in ['MAXCUT', 'MVC']:
                         # command
                         fh.writelines(f"srun python run_scip_tuning_dqn.py ")
                         fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
-                        fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/ ")
+                        fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/v1 ")
                         fh.writelines(f"  --datadir $SCRATCH/learning2cut/data ")
                         fh.writelines(f"  --data_config ../../data/{problem.lower()}_data_config.yaml ")
                         fh.writelines(f"  --problem {problem} ")
-                        fh.writelines(f"  --tags tuning v0 ")
+                        fh.writelines(f"  --tags v1 ")
                         if scip_seed:
                             if problem == 'MAXCUT':
                                 fh.writelines(f"  --overfit validset_40_50 validset_60_70 ")
@@ -58,7 +58,7 @@ for problem in ['MAXCUT', 'MVC']:
                         else:
                             fh.writelines(f"  --num_workers 28 ")
                         fh.writelines(f"  --wandb_offline True ")
-                        fh.writelines(f"  --eps_decay 1000 ")
+                        fh.writelines(f"  --eps_decay {300 if 'ccmab' in scip_env else 10000} ")
                         fh.writelines(f"  --eps_end 0.1 ")
                         fh.writelines(f"  --scip_env {scip_env} ")
                         fh.writelines(f"  --replay_buffer_capacity 10000 ")

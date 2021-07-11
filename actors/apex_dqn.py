@@ -413,9 +413,14 @@ class ApeXDQN:
             else:
                 log_dict[f'training/{k}_imp_where_imp_above1'] = 0
                 log_dict[f'training/{k}_diff_where_imp_above1'] = 0
-                
+
+        total_env_steps = 0
         for k, v in stats['debugging'].items():
             log_dict[f'debugging/{k}'] = v
+            if 'env_steps' in k:
+                total_env_steps += v
+        log_dict['training/total_env_steps'] = total_env_steps
+
         # todo add here plot of training R, boostrappedR, and Qvals+-std
         for worker_id, last_training_episode_stats in stats['last_training_episode_stats'].items():
             fig, ax = plt.subplots(1)
