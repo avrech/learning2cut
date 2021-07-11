@@ -5,10 +5,12 @@ import time
 parser = ArgumentParser()
 parser.add_argument('--cluster', type=str, default='niagara', help='graham | niagara')
 parser.add_argument('--hours', type=str, default='6', help='0<hours<24')
+parser.add_argument('--tag', type=str, default='v1', help='experiment tag for wandb')
 parser.add_argument('--gpu', action='store_true', help='use gpu')
 args = parser.parse_args()
 assert 0 < int(args.hours) < 24
-
+if args.cluster == 'graham' and not os.path.exists(f'{args.tag}_outfiles'):
+    os.makedirs(f'{args.tag}_outfiles')
 for problem in ['MAXCUT', 'MVC']:
     for scip_env in ['tuning_ccmab', 'tuning_mdp']:
         for scip_seed in [0, 223]:
@@ -20,8 +22,8 @@ for problem in ['MAXCUT', 'MVC']:
                         fh.writelines(f"#SBATCH --time={args.hours.zfill(2)}:00:00\n")
                         fh.writelines(f"#SBATCH --account=def-alodi\n")
                         fh.writelines(f"#SBATCH --job-name=ccmab-overfit\n")
-                        fh.writelines(f"#SBATCH --mem=0\n")
                         fh.writelines(f"#SBATCH --nodes=1\n")
+                        fh.writelines(f"#SBATCH --mem=0\n")
                         if args.cluster == 'niagara':
                             fh.writelines(f"#SBATCH --output=/scratch/a/alodi/avrech/learning2cut/tuning/{sbatch_file.split('.')[0]}-%j.out\n")
                             fh.writelines(f"#SBATCH --cpus-per-task=40\n")
@@ -33,7 +35,7 @@ for problem in ['MAXCUT', 'MVC']:
                             fh.writelines(f"source $HOME/venv/bin/activate\n")
 
                         elif args.cluster == 'graham':
-                            fh.writelines(f"#SBATCH --output={sbatch_file.split('.')[0]}-%j.out\n")
+                            fh.writelines(f"#SBATCH --output={args.tag}_outfiles/{sbatch_file.split('.')[0]}-%j.out\n")
                             fh.writelines(f"#SBATCH --cpus-per-task=32\n")
                             fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
                             if args.gpu:
@@ -43,11 +45,11 @@ for problem in ['MAXCUT', 'MVC']:
                         # command
                         fh.writelines(f"srun python run_scip_tuning_dqn.py ")
                         fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
-                        fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/v1 ")
+                        fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/{args.tag} ")
                         fh.writelines(f"  --datadir $SCRATCH/learning2cut/data ")
                         fh.writelines(f"  --data_config ../../data/{problem.lower()}_data_config.yaml ")
                         fh.writelines(f"  --problem {problem} ")
-                        fh.writelines(f"  --tags v1 ")
+                        fh.writelines(f"  --tags {args.tag} ")
                         if scip_seed:
                             if problem == 'MAXCUT':
                                 fh.writelines(f"  --overfit validset_40_50 validset_60_70 ")
