@@ -1498,7 +1498,7 @@ class SCIPTuningQnet(torch.nn.Module):
                                 edge_attr_dim=cutconv_edge_attr_dim,
                                 aggr=hparams.get('cut_conv_aggr', 'mean'))
 
-        self.g_emb = Seq(OrderedDict([(f'g_emb_{i}', Seq(Lin(emb_dim * 3, emb_dim), ReLU()))
+        self.g_emb = Seq(OrderedDict([(f'g_emb_{i}', Seq(Lin((emb_dim * 3) if i == 0 else emb_dim, emb_dim), ReLU()))
                                       for i in range(hparams.get('encoder_lp_conv_layers', 1))]))
 
         ###########
