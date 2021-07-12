@@ -12,11 +12,12 @@ args = parser.parse_args()
 assert 0 < int(args.hours) < 24
 
 search_space = {
-    'problem': ['MAXCUT', 'MVC'],
-    'scip_env': ['tuning_ccmab', 'tuning_mdp'],
+    'problem': ['MAXCUT'],  #, 'MVC'],
+    'scip_env': ['tuning_mdp'], #'tuning_ccmab'],
+    'reward_func': ['db_slopeXdiff', 'db_aucXslope', 'db_auc'],
     'encoder_lp_conv_layers': [1, 2],
     'fix_training_scip_seed': [0, 223],
-    'seed': [11, 21, 31],
+    'seed': [11, 21] #, 31],
 }
 cfgs = product(*search_space.values())
 if args.cluster == 'graham' and not os.path.exists(f'{args.tag}_outfiles'):
