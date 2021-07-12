@@ -74,7 +74,7 @@ for cfg in cfgs:
         else:
             fh.writelines(f"  --num_workers 28 ")
         fh.writelines(f"  --wandb_offline True ")
-        fh.writelines(f"  --eps_decay {300 if 'ccmab' in config.get('scip_env', 'tuning_ccmab') else 10000} ")
+        fh.writelines(f"  --eps_decay {250 if 'ccmab' in config.get('scip_env', 'tuning_ccmab') else 8000} ")
         fh.writelines(f"  --eps_end 0.1 ")
         fh.writelines(f"  --replay_buffer_capacity 10000 ")
         fh.writelines(f"  --local_buffer_size 10 ")
