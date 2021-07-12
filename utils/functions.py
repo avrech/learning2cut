@@ -111,7 +111,7 @@ def verify_maxcut_sol(model, x, G):
     return cut
 
 
-def get_normalized_areas(t, ft, t_support=None, reference=0):
+def get_normalized_areas(t, ft, t_support=None, reference=0, return_slope_and_diff=False):
     """
     Compute the area under f(t) vs. t on t_support.
     If the last point (t[-1], ft[-1]) is outside t_support (t[-1] > t_support),
@@ -173,13 +173,19 @@ def get_normalized_areas(t, ft, t_support=None, reference=0):
     assert all(ft_diff >= 0), f'ft_diff = {ft_diff}'
     t_diff = t[1:] - t[:-1]
     ft_areas = t_diff * (ft[:-1] + ft_diff / 2)  # t_diff *(ft[1:] - ft[:-1]) + t_diff * abs(ft[1:] - ft[:-1]) /2
+    slopes = ft_diff / t_diff
     if extended:
         # add the extension area to the last transition area
         ft_areas[-2] += ft_areas[-1]
         # truncate the extension, and leave n-areas for the n-transition done
         ft_areas = ft_areas[:-1]
+        slopes = slopes[:-1]
+        ft_diff = ft_diff[:-1]
 
-    return ft_areas
+    if return_slope_and_diff:
+        return ft_areas, slopes, ft_diff
+    else:
+        return ft_areas
 
 
 def truncate(t, ft, support, interpolate=False):
