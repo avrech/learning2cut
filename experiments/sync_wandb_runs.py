@@ -15,6 +15,8 @@ for out_file in out_files:
         for line in f.readlines():
             if line.startswith('wandb: Run data is saved locally in'):
                 run_dir = line.split(' ')[-1]
+                if '/scratch' in run_dir:
+                    run_dir = '/scratch' + run_dir.split('/scratch', 1)[-1]
                 print('syncing ', out_file)
                 os.system(f'wandb sync {run_dir}')
                 break
