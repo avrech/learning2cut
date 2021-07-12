@@ -30,6 +30,7 @@ parser.add_argument("--eps_start", type=float, default=0.9, help="epsilon-greedy
 parser.add_argument("--eps_end", type=float, default=0.05, help="epsilon-greedy end probability for random action")
 parser.add_argument("--eps_decay", type=int, default=100000, help="number of environment steps between epsilon-greedy start and end values")
 parser.add_argument("--dqn_objective", type=str, default="db_auc", help="metric to optimize in cut_selection_dqn steps. options: db_auc, gap_auc")
+parser.add_argument("--reward_func", type=str, default="db_auc", help="options: db_auc, gap_auc, db_aucXslope, db_slopeXdiff")
 parser.add_argument("--empty_action_penalty", type=int, default=0, help="additive penalty to empty actions")
 parser.add_argument("--select_at_least_one_cut", type=str2bool, nargs='?', const=True, default=False, help="enforce selecting at least one cut every separation round")
 parser.add_argument("--update_rule", type=str, default="DQN", help="update rule. options: DQN, DDQN")

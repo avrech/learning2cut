@@ -761,12 +761,16 @@ class SCIPTuningDQNWorker(Sepa):
             # print(self.episode_history)
 
         # todo - consider squaring the dualbound/gap before computing the AUC.
-        dualbound_area = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.instance_info['optimal_value'])
-        gap_area = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0)  # optimal gap is always 0
-        if self.dqn_objective == 'db_auc':
+        dualbound_area, db_slope, db_diff = get_normalized_areas(t=lp_iterations, ft=dualbound, t_support=lp_iterations_limit, reference=self.instance_info['optimal_value'], return_slope_and_diff=True)
+        gap_area, gap_slope, gap_diff = get_normalized_areas(t=lp_iterations, ft=gap, t_support=lp_iterations_limit, reference=0, return_slope_and_diff=True)  # optimal gap is always 0
+        if self.hparams['reward_func'] == 'db_auc':
             immediate_rewards = dualbound_area
-        elif self.dqn_objective == 'gap_auc':
+        elif self.hparams['reward_func'] == 'gap_auc':
             immediate_rewards = gap_area
+        elif self.hparams['reward_func'] == 'db_aucXslope':
+            immediate_rewards = dualbound_area * db_slope
+        elif self.hparams['reward_func'] == 'db_slopeXdiff':
+            immediate_rewards = db_slope * db_diff
         else:
             raise NotImplementedError
 
