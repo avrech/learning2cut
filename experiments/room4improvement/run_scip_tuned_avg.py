@@ -46,7 +46,7 @@ def run_worker(data, training_data, configs, port, workerid):
         for graph_size, maxcut_lp_iter_limit in zip(data[problem].keys(), [5000, 7000, 10000]):
             for k, d in training_data[problem].items():
                 if 'valid' in k and int(k.split('_')[-2]) <= graph_size <= int(k.split('_')[-1]):
-                    instances = d['instances'][1:]
+                    instances = d['instances']  # tune on all validation instances
                     break
             for g, info in instances:
                 for seed in SEEDS:
