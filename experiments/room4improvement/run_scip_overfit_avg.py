@@ -46,7 +46,7 @@ def run_worker(data, training_data, configs, port, workerid):
         for graph_size, maxcut_lp_iter_limit in zip(data[problem].keys(), [5000, 7000, 10000]):
             for k, d in training_data[problem].items():
                 if 'valid' in k and int(k.split('_')[-2]) <= graph_size <= int(k.split('_')[-1]):
-                    instances = d['instances'][1:]  # exclude test instance from training instances
+                    instances = d['instances']  # include test instance in training instances
                     break
             for g, info in instances:
                 for seed in SEEDS:
@@ -149,9 +149,9 @@ def run_node(args):
     # node_configs = []
     # for idx in range(args.nodeid, len(missing_configs), args.nnodes):
     #     node_configs.append(missing_configs[idx])
-    with open(f'{ROOTDIR}/scip_tuned_avg_node{args.nodeid}_configs.pkl', 'rb') as f:
+    with open(f'{ROOTDIR}/scip_overfit_avg_node{args.nodeid}_configs.pkl', 'rb') as f:
         node_configs = pickle.load(f)
-        print(f'[node {args.nodeid}] loaded configs from: {ROOTDIR}/scip_tuned_avg_node{args.nodeid}_configs.pkl')
+        print(f'[node {args.nodeid}] loaded configs from: {ROOTDIR}/scip_overfit_avg_node{args.nodeid}_configs.pkl')
 
     # assign configs to workers
     nworkers = args.ncpus_per_node-1
@@ -162,10 +162,10 @@ def run_node(args):
         worker_configs = [node_configs[idx] for idx in range(workerid, len(node_configs), nworkers)]
         worker_handles.append(run_worker.remote(data, training_data, worker_configs, port, workerid))
 
-    node_results_dir = os.path.join(args.rootdir, f'scip_tuned_avg_node{args.nodeid}_results')
+    node_results_dir = os.path.join(args.rootdir, f'scip_overfit_avg_node{args.nodeid}_results')
     if not os.path.exists(node_results_dir):
         os.makedirs(node_results_dir)
-    node_results_file = os.path.join(node_results_dir, 'scip_tuned_avg_node_results.pkl')
+    node_results_file = os.path.join(node_results_dir, 'scip_overfit_avg_node_results.pkl')
     node_results = {'best_db_aucs': {p: {gs: 0 for gs in gss.keys()} for p, gss in data.items()},
                     'best_configs': {p: {gs: None for gs in gss.keys()} for p, gss in data.items()},
                     'configs': {}}
@@ -217,7 +217,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
 
         else:
             fh.writelines(f'#SBATCH --mem={int(4 * args.ncpus_per_node)}G\n')
-        fh.writelines(f'srun python run_scip_tuned_avg.py --configfile {args.configfile} --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
+        fh.writelines(f'srun python run_scip_overfit_avg.py --configfile {args.configfile} --rootdir {args.rootdir} --datadir {args.datadir} --nnodes {nnodes} --ncpus_per_node {args.ncpus_per_node} --nodeid {nodeid} --run_node\n')
 
     os.system("sbatch {}".format(job_file))
 
@@ -225,7 +225,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
 def main(args):
     data, _, all_configs = get_data_and_configs(training=False)
     # update main_results
-    main_results_file = os.path.join(args.rootdir, 'scip_tuned_avg_main_results.pkl')
+    main_results_file = os.path.join(args.rootdir, 'scip_overfit_avg_main_results.pkl')
     if os.path.exists(main_results_file):
         with open(main_results_file, 'rb') as f:
             main_results = pickle.load(f)
@@ -233,7 +233,7 @@ def main(args):
         main_results = {'best_db_aucs': {p: {gs: 0 for gs in gss.keys()} for p, gss in data.items()},
                         'best_configs': {p: {gs: None for gs in gss.keys()} for p, gss in data.items()},
                         'configs': {}}
-    for path in tqdm(Path(args.rootdir).rglob('scip_tuned_avg_node_results.pkl'), desc='Loading node files'):
+    for path in tqdm(Path(args.rootdir).rglob('scip_overfit_avg_node_results.pkl'), desc='Loading node files'):
         with open(path, 'rb') as f:
             node_results = pickle.load(f)
             main_results['configs'].update(node_results['configs'])
@@ -283,20 +283,20 @@ def main(args):
                 node_configs = []
                 for idx in range(nodeid, len(missing_configs), nnodes):
                     node_configs.append(missing_configs[idx])
-                with open(f'{ROOTDIR}/scip_tuned_avg_node{nodeid}_configs.pkl', 'wb') as f:
+                with open(f'{ROOTDIR}/scip_overfit_avg_node{nodeid}_configs.pkl', 'wb') as f:
                     pickle.dump(node_configs, f)
                 all_node_configs += node_configs
             assert set(all_node_configs) == set(missing_configs)
 
             for nodeid in range(nnodes):
-                submit_job(f'scip_tuned_avg{nodeid}', nnodes, nodeid, time_limit_hours, time_limit_minutes)
+                submit_job(f'scip_overfit_avg{nodeid}', nnodes, nodeid, time_limit_hours, time_limit_minutes)
     else:
         # save scip tuned best config to
-        scip_tuned_avg_best_configs_file = os.path.join(args.rootdir, 'scip_tuned_avg_best_config.pkl')
-        scip_tuned_avg_best_configs = {p: {gs: cfg for gs, cfg in gss.items()} for p, gss in main_results['best_configs'].items()}
-        with open(scip_tuned_avg_best_configs_file, 'wb') as f:
-            pickle.dump(scip_tuned_avg_best_configs, f)
-        print(f'saved scip_tuned_avg_best_configs to {scip_tuned_avg_best_configs_file}')
+        scip_overfit_avg_best_configs_file = os.path.join(args.rootdir, 'scip_overfit_avg_best_config.pkl')
+        scip_overfit_avg_best_configs = {p: {gs: cfg for gs, cfg in gss.items()} for p, gss in main_results['best_configs'].items()}
+        with open(scip_overfit_avg_best_configs_file, 'wb') as f:
+            pickle.dump(scip_overfit_avg_best_configs, f)
+        print(f'saved scip_overfit_avg_best_configs to {scip_overfit_avg_best_configs_file}')
 
 
 if __name__ == '__main__':
