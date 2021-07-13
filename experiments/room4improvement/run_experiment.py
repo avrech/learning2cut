@@ -106,12 +106,19 @@ if not os.path.exists(f'{ROOTDIR}/scip_tuned_avg_best_config.pkl'):
 with open(f'{ROOTDIR}/scip_tuned_avg_best_config.pkl', 'rb') as f:
     scip_tuned_avg_best_config = pickle.load(f)
 
+if not os.path.exists(f'{ROOTDIR}/scip_overfit_avg_best_config.pkl'):
+    print('run run_scip_tuned_avg.py first, then run again.')
+    exit(0)
+
+with open(f'{ROOTDIR}/scip_overfit_avg_best_config.pkl', 'rb') as f:
+    scip_overfit_avg_best_config = pickle.load(f)
+
 # todo run here also tuned and adaptive policies
 print('############### run all baselines on local machine to compare solving time ###############')
 # run default, 15-random, 15-most-violated and all-cuts baselines
 SEEDS = [52, 176, 223]  # [46, 72, 101]
 problems = ['mvc', 'maxcut']
-baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'tuned_avg', 'tuned', 'adaptive']
+baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'overfit_avg', 'tuned_avg', 'tuned', 'adaptive']
 if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
     results = {p: {b: {} for b in baselines} for p in problems}
     for problem, graphs in data.items():
@@ -143,6 +150,12 @@ if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
                         # set tuned_avg params
                         tuned_avg_params = scip_tuned_avg_best_config[problem][graph_size]
                         sepa_params.update(tuned_avg_params)
+                        sepa_params['policy'] = 'tuned'
+
+                    if baseline == 'overfit_avg':
+                        # set tuned_avg params
+                        overfit_avg_params = scip_overfit_avg_best_config[problem][graph_size]
+                        sepa_params.update(overfit_avg_params)
                         sepa_params['policy'] = 'tuned'
 
                     if baseline == 'adaptive':
@@ -266,6 +279,13 @@ for problem, baselines in results.items():
             for seed in seeds.keys():
                 tuned_params_row.append(scip_tuned_best_config[problem][graph_size][seed][col])
         summary['tuned'] = tuned_params_row
+        # append a row for the overfit avg params
+        overfit_avg_params_row = []
+        scip_overfit_avg_best_config[problem][graph_size] = overfit_avg_param_dict = {k:v for k, v in scip_overfit_avg_best_config[problem][graph_size]}
+        for col in columns:
+            for seed in seeds.keys():
+                overfit_avg_params_row.append(overfit_avg_param_dict[col])
+        summary['overfit_avg'] = overfit_avg_params_row
         # append a row for the tuned avg params
         tuned_avg_params_row = []
         scip_tuned_avg_best_config[problem][graph_size] = tuned_avg_param_dict = {k:v for k, v in scip_tuned_avg_best_config[problem][graph_size]}
@@ -281,7 +301,7 @@ for problem, baselines in results.items():
         print(f'saved {problem}-{graph_size} adaptive and tuned params table to: {csvfile}')
 
 
-colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'tuned_avg': 'pink', 'tuned': 'r', 'adaptive': 'g'}
+colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'overfit_avg': 'k', 'tuned_avg': 'pink', 'tuned': 'r', 'adaptive': 'g'}
 for problem in results.keys():
     fig1, axes1 = plt.subplots(3, 3, sharex='col')  # dual bound vs. lp iterations
     fig2, axes2 = plt.subplots(3, 3, sharex='col')  # dual bound vs. solving time
@@ -296,20 +316,21 @@ for problem in results.keys():
         fig9, axes9 = plt.subplots(3, 1)  # jaccard similarity vs. round idx
         for row, seed in enumerate(SEEDS):
             for baseline in results[problem].keys():
-                if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated', 'tuned_avg'] and col == 1 or (baseline in ['tuned', 'adaptive'] and col == 2):
+                if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated', 'overfit_avg'] and col == 1 or (baseline in ['tuned_avg', 'tuned', 'adaptive'] and col == 2):
                     label = baseline
                 else:
                     label = None
                 stats = results[problem][baseline][graph_size][seed]
                 axes1[row, col].plot(stats['lp_iterations'], stats['dualbound'], colors[baseline], label=label)
                 axes2[row, col].plot(stats['solving_time'], stats['dualbound'], colors[baseline], label=label)
-                if baseline in ['default', 'tuned', 'adaptive', 'tuned_avg']:
+                if baseline in ['default', 'tuned', 'adaptive', 'tuned_avg', 'overfit_avg']:
                     ncuts_generated = np.array(stats['ncuts'])[1:]
                     ncuts_applied_cumsum = np.array(stats['ncuts_applied'])
                     ncuts_applied = ncuts_applied_cumsum[1:] - ncuts_applied_cumsum[:-1]
                     maxcutsroot = {'default': 2000,
                                    'tuned': scip_tuned_best_config[problem][graph_size][seed]['maxcutsroot'],
                                    'tuned_avg': scip_tuned_avg_best_config[problem][graph_size]['maxcutsroot'],
+                                   'overfit_avg': scip_overfit_avg_best_config[problem][graph_size]['maxcutsroot'],
                                    'adaptive': adaptive_params_dict[problem][graph_size][seed]['maxcutsroot']}.get(baseline)
                     if baseline == 'adaptive':
                         pad_len = len(ncuts_applied) - len(maxcutsroot)
