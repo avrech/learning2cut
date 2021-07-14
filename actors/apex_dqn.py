@@ -257,6 +257,8 @@ class ApeXDQN:
         if not os.path.exists(f"{self.cfg['rootdir']}/wandb"):
             os.makedirs(f"{self.cfg['rootdir']}/wandb")
         os.environ['WANDB_DIR'] = f"{self.cfg['rootdir']}/wandb"
+        # todo debug niagara - setting wandb dir fails for some reason, try to change working dir
+        os.chdir(f"{self.cfg['rootdir']}")
 
         wandb.init(resume='allow',
                    id=self.cfg['run_id'],

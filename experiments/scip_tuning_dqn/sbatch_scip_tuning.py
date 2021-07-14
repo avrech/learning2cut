@@ -53,7 +53,7 @@ for search_space in [search_space_mdp, search_space_ccmab]:
             fh.writelines("#!/bin/bash\n")
             fh.writelines(f"#SBATCH --time={args.hours.zfill(2)}:00:00\n")
             fh.writelines(f"#SBATCH --account=def-alodi\n")
-            fh.writelines(f"#SBATCH --job-name=ccmab-overfit\n")
+            fh.writelines(f"#SBATCH --job-name={config.get('problem', 'MAXCUT')}-{config.get('scip_env', 'tuning_ccmab')}\n")
             fh.writelines(f"#SBATCH --nodes=1\n")
             fh.writelines(f"#SBATCH --mem=0\n")
             fh.writelines(f"#SBATCH --output={outfiles_dir}/{sbatch_file.split('.')[0]}-%j.out\n")
