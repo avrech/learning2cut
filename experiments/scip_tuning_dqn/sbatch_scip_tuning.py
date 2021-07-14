@@ -90,7 +90,7 @@ for search_space in [search_space_mdp, search_space_ccmab]:
             fh.writelines(f"  --wandb_offline True ")
             fh.writelines(f"  --eps_decay {250 if 'ccmab' in config.get('scip_env', 'tuning_ccmab') else 8000} ")
             fh.writelines(f"  --eps_end 0.1 ")
-            fh.writelines(f"  --replay_buffer_capacity 10000 ")
+            fh.writelines(f"  --replay_buffer_capacity 20000 ")
             fh.writelines(f"  --local_buffer_size 10 ")
             fh.writelines(f"  --replay_buffer_minimum_size 1000 ")
             for k, v in config.items():
