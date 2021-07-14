@@ -53,7 +53,7 @@ for search_space in [search_space_mdp, search_space_ccmab]:
             fh.writelines(f"#SBATCH --nodes=1\n")
             fh.writelines(f"#SBATCH --mem=0\n")
             if args.cluster == 'niagara':
-                fh.writelines(f"#SBATCH --output=/scratch/a/alodi/avrech/learning2cut/tuning/{sbatch_file.split('.')[0]}-%j.out\n")
+                fh.writelines(f"#SBATCH --output=/scratch/a/alodi/avrech/learning2cut/scip_tuning/results/{args.tag}/{sbatch_file.split('.')[0]}-%j.out\n")
                 fh.writelines(f"#SBATCH --cpus-per-task=40\n")
                 fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
                 # load modules and activate virtualenv
