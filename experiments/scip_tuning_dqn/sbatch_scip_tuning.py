@@ -33,9 +33,13 @@ search_space_ccmab = {
 }
 for search_space in [search_space_mdp, search_space_ccmab]:
     cfgs = list(product(*search_space.values()))
+    if args.cluster == 'niagara':
+        outfiles_dir = f"{os.environ['SCRATCH']}/learning2cut/scip_tuning/results/{args.tag}/outfiles/"
+    elif args.cluster == 'graham':
+        outfiles_dir = f'{args.tag}_outfiles'
+    if not os.path.exists(outfiles_dir):
+        os.makedirs(outfiles_dir)
 
-    if args.cluster == 'graham' and not os.path.exists(f'{args.tag}_outfiles'):
-        os.makedirs(f'{args.tag}_outfiles')
     # for problem in ['MAXCUT', 'MVC']:
     #     for scip_env in ['tuning_ccmab', 'tuning_mdp']:
     #         for scip_seed in [0, 223]:
@@ -52,8 +56,10 @@ for search_space in [search_space_mdp, search_space_ccmab]:
             fh.writelines(f"#SBATCH --job-name=ccmab-overfit\n")
             fh.writelines(f"#SBATCH --nodes=1\n")
             fh.writelines(f"#SBATCH --mem=0\n")
+            fh.writelines(f"#SBATCH --output={outfiles_dir}/{sbatch_file.split('.')[0]}-%j.out\n")
             if args.cluster == 'niagara':
-                fh.writelines(f"#SBATCH --output=/scratch/a/alodi/avrech/learning2cut/scip_tuning/results/{args.tag}/{sbatch_file.split('.')[0]}-%j.out\n")
+                # fh.writelines(f"#SBATCH --output={os.environ['SCRATCH']}/learning2cut/scip_tuning/results/{args.tag}/{sbatch_file.split('.')[0]}-%j.out\n")  #/scratch/a/alodi/avrech/learning2cut/scip_tuning/results/{args.tag}/{sbatch_file.split('.')[0]}-%j.out\n")
+                # fh.writelines(f"#SBATCH --output={args.tag}_outfiles/{sbatch_file.split('.')[0]}-%j.out\n")
                 fh.writelines(f"#SBATCH --cpus-per-task=40\n")
                 fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
                 # load modules and activate virtualenv
@@ -63,7 +69,7 @@ for search_space in [search_space_mdp, search_space_ccmab]:
                 fh.writelines(f"source $HOME/venv/bin/activate\n")
 
             elif args.cluster == 'graham':
-                fh.writelines(f"#SBATCH --output={args.tag}_outfiles/{sbatch_file.split('.')[0]}-%j.out\n")
+                # fh.writelines(f"#SBATCH --output={args.tag}_outfiles/{sbatch_file.split('.')[0]}-%j.out\n")
                 fh.writelines(f"#SBATCH --cpus-per-task=32\n")
                 fh.writelines(f"#SBATCH --ntasks-per-node=1\n")
                 if args.gpu:

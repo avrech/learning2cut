@@ -201,7 +201,7 @@ def submit_job(jobname, nnodes, nodeid, time_limit_hours, time_limit_minutes):
     job_file = os.path.join(args.rootdir, jobname + '.sh')
     with open(job_file, 'w') as fh:
         fh.writelines("#!/bin/bash\n")
-        fh.writelines(f'#SBATCH --time={time_limit_hours}:{time_limit_minutes}:00\n')
+        fh.writelines(f'#SBATCH --time=02:00:00\n')
         fh.writelines('#SBATCH --account=def-alodi\n')
         fh.writelines(f'#SBATCH --output={args.rootdir}/{jobname}.out\n')
         fh.writelines(f'#SBATCH --job-name={jobname}\n')
