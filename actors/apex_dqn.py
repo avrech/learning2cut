@@ -490,15 +490,15 @@ class ApeXDQN:
                 avg_values['gap_auc_without_early_stops'] = np.mean(gap_auc_without_early_stops)
 
                 # add plots
-                if self.debug_logs:
-                    col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
-                    row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
-                    figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
-                    for (inst_idx, inst_stats), (G, inst_info) in zip(dataset_stats.items(), dataset['instances']):
-                        for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
-                            add_subplot(figures, inst_idx, seed_idx, seed_stats, inst_info, scip_seed, dataset, avg_values)
-                    finish_figures(figures)
-                    log_dict.update({f'{dataset_name}/{figname}': wandb.Image(get_img_from_fig(figures[figname]['fig'], dpi=300), caption=figname) for figname in figures['fignames']})
+                # if self.debug_logs:
+                col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
+                row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
+                figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
+                for (inst_idx, inst_stats), (G, inst_info) in zip(dataset_stats.items(), dataset['instances']):
+                    for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
+                        add_subplot(figures, inst_idx, seed_idx, seed_stats, inst_info, scip_seed, dataset, avg_values)
+                finish_figures(figures)
+                log_dict.update({f'{dataset_name}/{figname}': wandb.Image(get_img_from_fig(figures[figname]['fig'], dpi=300), caption=figname) for figname in figures['fignames']})
 
                 # update log_dict
                 log_dict.update({f'{dataset_name}/{k}': v for k, v in avg_values.items()})
