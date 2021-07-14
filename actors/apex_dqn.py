@@ -116,6 +116,7 @@ class ApeXDQN:
             'debugging': {},
             'last_training_episode_stats': {}
         }
+        self.debug_logs = cfg.get('debug_logs', False)
         self.best_performance = {dataset_name: -1 for dataset_name in self.datasets.keys() if 'valid' in dataset_name}
         self.checkpoint_filepath = os.path.join(self.cfg['run_dir'], 'apex_checkpoint.pt')
         self.print_prefix = '[Apex] '
@@ -415,28 +416,34 @@ class ApeXDQN:
                 log_dict[f'training/{k}_diff_where_imp_above1'] = 0
 
         total_env_steps = 0
+        total_episodes_done = 0
         for k, v in stats['debugging'].items():
-            log_dict[f'debugging/{k}'] = v
+            if self.debug_logs:
+                log_dict[f'debugging/{k}'] = v
             if 'env_steps' in k:
                 total_env_steps += v
+            if 'episodes_done' in k:
+                total_episodes_done += v
         log_dict['training/total_env_steps'] = total_env_steps
+        log_dict['training/total_episodes_done'] = total_env_steps
 
         # todo add here plot of training R, boostrappedR, and Qvals+-std
-        for worker_id, last_training_episode_stats in stats['last_training_episode_stats'].items():
-            fig, ax = plt.subplots(1)
-            discounted_rewards = last_training_episode_stats['discounted_rewards']
-            selected_q_avg = np.array(last_training_episode_stats['selected_q_avg'])
-            selected_q_std = np.array(last_training_episode_stats['selected_q_std'])
-            bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
-            x_axis = np.arange(len(discounted_rewards))
-            ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
-            ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
-            ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
-            ax.fill_between(x_axis, selected_q_avg + selected_q_std, selected_q_avg - selected_q_std, facecolor='red', alpha=0.5)
-            ax.legend()
-            ax.set_xlabel('step')
-            ax.grid()
-            log_dict[f'debugging/{worker_id}_last_training_episode'] = wandb.Image(get_img_from_fig(fig, dpi=300), caption=f'{worker_id}_last_training_episode')
+        if self.debug_logs:
+            for worker_id, last_training_episode_stats in stats['last_training_episode_stats'].items():
+                fig, ax = plt.subplots(1)
+                discounted_rewards = last_training_episode_stats['discounted_rewards']
+                selected_q_avg = np.array(last_training_episode_stats['selected_q_avg'])
+                selected_q_std = np.array(last_training_episode_stats['selected_q_std'])
+                bootstrapped_returns = last_training_episode_stats['bootstrapped_returns']
+                x_axis = np.arange(len(discounted_rewards))
+                ax.plot(x_axis, discounted_rewards, lw=2, label='discounted rewards', color='blue')
+                ax.plot(x_axis, bootstrapped_returns, lw=2, label='bootstrapped reward', color='green')
+                ax.plot(x_axis, selected_q_avg, lw=2, label='Q', color='red')
+                ax.fill_between(x_axis, selected_q_avg + selected_q_std, selected_q_avg - selected_q_std, facecolor='red', alpha=0.5)
+                ax.legend()
+                ax.set_xlabel('step')
+                ax.grid()
+                log_dict[f'debugging/{worker_id}_last_training_episode'] = wandb.Image(get_img_from_fig(fig, dpi=300), caption=f'{worker_id}_last_training_episode')
 
         # process validation results
         for dataset_name, dataset_stats in stats['validation'].items():
@@ -483,17 +490,18 @@ class ApeXDQN:
                 avg_values['gap_auc_without_early_stops'] = np.mean(gap_auc_without_early_stops)
 
                 # add plots
-                col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
-                row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
-                figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
-                for (inst_idx, inst_stats), (G, inst_info) in zip(dataset_stats.items(), dataset['instances']):
-                    for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
-                        add_subplot(figures, inst_idx, seed_idx, seed_stats, inst_info, scip_seed, dataset, avg_values)
-                finish_figures(figures)
+                if self.debug_logs:
+                    col_labels = [f'Seed={seed}' for seed in dataset['scip_seed']]
+                    row_labels = [f'inst {inst_idx}' for inst_idx in range(dataset['num_instances'])]
+                    figures = init_figures(nrows=dataset['num_instances'], ncols=len(dataset['scip_seed']), row_labels=row_labels, col_labels=col_labels)
+                    for (inst_idx, inst_stats), (G, inst_info) in zip(dataset_stats.items(), dataset['instances']):
+                        for seed_idx, (scip_seed, seed_stats) in enumerate(inst_stats.items()):
+                            add_subplot(figures, inst_idx, seed_idx, seed_stats, inst_info, scip_seed, dataset, avg_values)
+                    finish_figures(figures)
+                    log_dict.update({f'{dataset_name}/{figname}': wandb.Image(get_img_from_fig(figures[figname]['fig'], dpi=300), caption=figname) for figname in figures['fignames']})
 
                 # update log_dict
                 log_dict.update({f'{dataset_name}/{k}': v for k, v in avg_values.items()})
-                log_dict.update({f'{dataset_name}/{figname}': wandb.Image(get_img_from_fig(figures[figname]['fig'], dpi=300), caption=figname) for figname in figures['fignames']})
                 print_msg += '\t| {}: {}_imp={}'.format(dataset_name, self.cfg["dqn_objective"], avg_values[self.cfg["dqn_objective"]+"_improvement"])
 
             # if all validation results are ready, then
