@@ -91,12 +91,12 @@ def submit_job(config):
 if args.test:
     for run_id in args.run_ids:
         submit_job({'run_id': run_id})
-
+    exit(0)
 
 search_space_mdp = {
     'problem': ['MAXCUT'],  #, 'MVC'],
     'scip_env': ['tuning_mdp'], #'tuning_ccmab'],
-    'reward_func': ['db_slopeXdiff', 'db_auc'],  # 'db_aucXslope',
+    'reward_func': ['db_aucXslope'],  #, 'db_auc'],  # 'db_slopeXdiff',
     'encoder_lp_conv_layers': [2],
     'conditional_q_heads': [True, False],
     'fix_training_scip_seed': [223],
@@ -113,7 +113,7 @@ search_space_ccmab = {
     'fix_training_scip_seed': [223],
     'seed': [11, 21, 31, 41, 51]
 }
-for search_space in [search_space_mdp, search_space_ccmab]:
+for search_space in [search_space_mdp]: #, search_space_ccmab]:
     cfgs = list(product(*search_space.values()))
     for cfg in cfgs:
         config = {k : str(v) for k, v in zip(search_space.keys(), cfg)}
