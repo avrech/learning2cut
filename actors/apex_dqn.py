@@ -479,7 +479,7 @@ class ApeXDQN:
             if 'episodes_done' in k:
                 total_episodes_done += v
         log_dict['training/total_env_steps'] = total_env_steps
-        log_dict['training/total_episodes_done'] = total_env_steps
+        log_dict['training/total_episodes_done'] = total_episodes_done
 
         # todo add here plot of training R, boostrappedR, and Qvals+-std
         if self.debug_logs:
