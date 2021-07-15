@@ -119,89 +119,101 @@ print('############### run all baselines on local machine to compare solving tim
 SEEDS = [52, 176, 223]  # [46, 72, 101]
 problems = ['mvc', 'maxcut']
 baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'overfit_avg', 'tuned_avg', 'tuned', 'adaptive']
-if not os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
-    results = {p: {b: {} for b in baselines} for p in problems}
-    for problem, graphs in data.items():
-        for baseline in tqdm(baselines, desc='run simple baselines'):
-            graphs = data[problem]
-            for (graph_size, (g, info)), lp_iterations_limit in zip(graphs.items(), [5000, 7000, 10000]):
-                results[problem][baseline][graph_size] = {}
-                for seed in SEEDS:
-                    if problem == 'mvc':
-                        model, _ = mvc_model(g)
-                        lp_iterations_limit = 1500
-                    elif problem == 'maxcut':
-                        model, _, _ = maxcut_mccormic_model(g)
-                        # lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
-                    else:
-                        raise ValueError
-                    set_aggresive_separation(model)
-                    sepa_params = {'lp_iterations_limit': lp_iterations_limit,
-                                   'policy': baseline,
-                                   'reset_maxcuts': 100,
-                                   'reset_maxcutsroot': 100,
-                                   'cut_stats': True}
-                    if baseline == 'tuned':
-                        # set tuned params
-                        tuned_params = scip_tuned_best_config[problem][graph_size][seed]
-                        sepa_params.update(tuned_params)
-
-                    if baseline == 'tuned_avg':
-                        # set tuned_avg params
-                        tuned_avg_params = scip_tuned_avg_best_config[problem][graph_size]
-                        sepa_params.update(tuned_avg_params)
-                        sepa_params['policy'] = 'tuned'
-
-                    if baseline == 'overfit_avg':
-                        # set tuned_avg params
-                        overfit_avg_params = scip_overfit_avg_best_config[problem][graph_size]
-                        sepa_params.update(overfit_avg_params)
-                        sepa_params['policy'] = 'tuned'
-
-                    if baseline == 'adaptive':
-                        # set adaptive param lists
-                        adapted_param_list = scip_adaptive_params[problem][graph_size][seed]
-                        # adapted_params = {
-                        #     'objparalfac': {},
-                        #     'dircutoffdistfac': {},
-                        #     'efficacyfac': {},
-                        #     'intsupportfac': {},
-                        #     'maxcutsroot': {},
-                        #     'minorthoroot': {}
-                        # }
-                        adapted_params = {k: {} for k in action_space.keys()}
-                        for round_idx, kvlist in enumerate(adapted_param_list):
-                            param_dict = {k: v for k, v in kvlist}
-                            for k in adapted_params.keys():
-                                adapted_params[k][round_idx] = param_dict[k]
-                        sepa_params.update(adapted_params)
-                        sepa_params['default_separating_params'] = scip_tuned_best_config[problem][graph_size][seed]
-
-                    sepa = CSBaselineSepa(hparams=sepa_params)
-                    model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)
-                    reset_sepa = CSResetSepa(hparams=sepa_params)
-                    model.includeSepa(reset_sepa, '#CS_reset', f'reset maxcuts params', priority=99999999, freq=1)
-                    model.setBoolParam("misc/allowdualreds", 0)
-                    model.setLongintParam('limits/nodes', 1)  # solve only at the root node
-                    model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
-                    model.setIntParam('branching/random/priority', 10000000)
-                    model.setBoolParam('randomization/permutevars', True)
-                    model.setIntParam('randomization/permutationseed', seed)
-                    model.setIntParam('randomization/randomseedshift', seed)
-                    model.setBoolParam('randomization/permutevars', True)
-                    model.setIntParam('randomization/permutationseed', seed)
-                    model.setIntParam('randomization/randomseedshift', seed)
-                    model.hideOutput(True)
-                    model.optimize()
-                    sepa.update_stats()
-                    stats = sepa.stats
-                    stats['db_auc'] = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'], t_support=lp_iterations_limit, reference=info['optimal_value']))
-                    results[problem][baseline][graph_size][seed] = stats
-    with open(f'{ROOTDIR}/all_baselines_results.pkl', 'wb') as f:
-        pickle.dump(results, f)
-else:
+if os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
     with open(f'{ROOTDIR}/all_baselines_results.pkl', 'rb') as f:
         results = pickle.load(f)
+# else:
+#     results = {p: {b: {} for b in baselines} for p in problems}
+for p in problems:
+    if p not in results.keys():
+        results[p] = {}
+    for b in baselines:
+        if b not in results[p].keys():
+            results[p][b] = {}
+
+for problem, graphs in data.items():
+    for baseline in tqdm(baselines, desc='run simple baselines'):
+        graphs = data[problem]
+        for (graph_size, (g, info)), lp_iterations_limit in zip(graphs.items(), [5000, 7000, 10000]):
+            if graph_size not in results[problem][baseline].keys():
+                results[problem][baseline][graph_size] = {}
+            for seed in SEEDS:
+                if seed in results[problem][baseline][graph_size].keys():
+                    continue
+                if problem == 'mvc':
+                    model, _ = mvc_model(g)
+                    lp_iterations_limit = 1500
+                elif problem == 'maxcut':
+                    model, _, _ = maxcut_mccormic_model(g)
+                    # lp_iterations_limit = {40: 5000, 70: 7000, 100: 10000}.get(graph_size)
+                else:
+                    raise ValueError
+                set_aggresive_separation(model)
+                sepa_params = {'lp_iterations_limit': lp_iterations_limit,
+                               'policy': baseline,
+                               'reset_maxcuts': 100,
+                               'reset_maxcutsroot': 100,
+                               'cut_stats': True}
+                if baseline == 'tuned':
+                    # set tuned params
+                    tuned_params = scip_tuned_best_config[problem][graph_size][seed]
+                    sepa_params.update(tuned_params)
+
+                if baseline == 'tuned_avg':
+                    # set tuned_avg params
+                    tuned_avg_params = scip_tuned_avg_best_config[problem][graph_size]
+                    sepa_params.update(tuned_avg_params)
+                    sepa_params['policy'] = 'tuned'
+
+                if baseline == 'overfit_avg':
+                    # set tuned_avg params
+                    overfit_avg_params = scip_overfit_avg_best_config[problem][graph_size]
+                    sepa_params.update(overfit_avg_params)
+                    sepa_params['policy'] = 'tuned'
+
+                if baseline == 'adaptive':
+                    # set adaptive param lists
+                    adapted_param_list = scip_adaptive_params[problem][graph_size][seed]
+                    # adapted_params = {
+                    #     'objparalfac': {},
+                    #     'dircutoffdistfac': {},
+                    #     'efficacyfac': {},
+                    #     'intsupportfac': {},
+                    #     'maxcutsroot': {},
+                    #     'minorthoroot': {}
+                    # }
+                    adapted_params = {k: {} for k in action_space.keys()}
+                    for round_idx, kvlist in enumerate(adapted_param_list):
+                        param_dict = {k: v for k, v in kvlist}
+                        for k in adapted_params.keys():
+                            adapted_params[k][round_idx] = param_dict[k]
+                    sepa_params.update(adapted_params)
+                    sepa_params['default_separating_params'] = scip_tuned_best_config[problem][graph_size][seed]
+
+                sepa = CSBaselineSepa(hparams=sepa_params)
+                model.includeSepa(sepa, '#CS_baseline', baseline, priority=-100000000, freq=1)
+                reset_sepa = CSResetSepa(hparams=sepa_params)
+                model.includeSepa(reset_sepa, '#CS_reset', f'reset maxcuts params', priority=99999999, freq=1)
+                model.setBoolParam("misc/allowdualreds", 0)
+                model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+                model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+                model.setIntParam('branching/random/priority', 10000000)
+                model.setBoolParam('randomization/permutevars', True)
+                model.setIntParam('randomization/permutationseed', seed)
+                model.setIntParam('randomization/randomseedshift', seed)
+                model.setBoolParam('randomization/permutevars', True)
+                model.setIntParam('randomization/permutationseed', seed)
+                model.setIntParam('randomization/randomseedshift', seed)
+                model.hideOutput(True)
+                model.optimize()
+                sepa.update_stats()
+                stats = sepa.stats
+                stats['db_auc'] = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'], t_support=lp_iterations_limit, reference=info['optimal_value']))
+                results[problem][baseline][graph_size][seed] = stats
+with open(f'{ROOTDIR}/all_baselines_results.pkl', 'wb') as f:
+    pickle.dump(results, f)
+# with open(f'{ROOTDIR}/all_baselines_results.pkl', 'rb') as f:
+#     results = pickle.load(f)
 
 
 print('############### analyzing results ###############')
