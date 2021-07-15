@@ -62,6 +62,7 @@ if __name__ == '__main__':
     parser.add_argument('--ray_init_sleep', type=int, default=1, help='sleep after ray init. avoids weird errors. set to 40 on Compute Canada. see https://github.com/ray-project/ray/issues/8326')
     parser.add_argument('--local_debug', action='store_true',
                         help='debug all components in a single process')
+    parser.add_argument('--test', action='store_true', help='test run dir')
     args = parser.parse_args()
     config = get_hparams(args)
     assert (not args.restart) or (args.resume and args.run_id is not None), 'provide wandb run_id for resuming'

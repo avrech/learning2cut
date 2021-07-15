@@ -105,6 +105,9 @@ class SCIPTuningDQNWorker(Sepa):
         self.dataset_name = 'trainset'  # or <easy/medium/hard>_<validset/testset>
         self.lp_iterations_limit = -1
         self.terminal_state = False
+        self.setting = 'root_only'
+        self.run_times = []
+
         # debugging stats
         self.training_n_random_actions = 0
         self.training_n_actions = 0
@@ -323,7 +326,7 @@ class SCIPTuningDQNWorker(Sepa):
         return replay_data_packet
 
     # done
-    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, instance_info=None, dataset_name='trainset25', scip_seed=None):
+    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, instance_info=None, dataset_name='trainset25', scip_seed=None, setting='root_only'):
         self.G = G
         self.x = x
         # self.y = y
@@ -348,9 +351,12 @@ class SCIPTuningDQNWorker(Sepa):
         self.dataset_name = dataset_name
         self.lp_iterations_limit = lp_iterations_limit
         self.terminal_state = False
+        self.setting = 'root_only'
+        self.run_times = []
 
     # done
     def sepaexeclp(self):
+        t0 = time()
         if self.hparams.get('debug_events', False):
             self.print('DEBUG MSG: cut_selection_dqn separator called')
 
@@ -385,6 +391,7 @@ class SCIPTuningDQNWorker(Sepa):
         #  currently: if selected cuts              -> SEPARATED
         #                discarded all or no cuts   -> DIDNOTFIND
         #                otherwise                  -> DIDNOTRUN
+        self.run_times.append(time() - t0)
         return result
 
     # done
@@ -427,17 +434,20 @@ class SCIPTuningDQNWorker(Sepa):
             available_cuts['selected_by_agent'] = np.array([cut_name in cut_names_selected_by_agent for cut_name in available_cuts['cuts'].keys()])
             result = {"result": SCIP_RESULT.DIDNOTRUN}
 
-
             # SCIP will execute the action,
             # and return here in the next LP round -
             # unless the instance is solved and the episode is done.
+            self.stats_updated = False  # mark false to record relevant stats after this action will make effect
+
+            if self.setting == 'branch_and_cut':
+                # return here and do not save episode history for saving memory
+                return result
 
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
             self.episode_history.append(info)
             self.prev_action = available_cuts
             self.prev_state = cur_state
-            self.stats_updated = False  # mark false to record relevant stats after this action will make effect
 
         # If there are no available cuts we simply ignore this round.
         # The stats related to the previous action are already collected, and we are updated.
@@ -1135,20 +1145,26 @@ class SCIPTuningDQNWorker(Sepa):
             #     self.memory.num_sgd_steps_done = self.num_sgd_steps_done
 
     # done
-    def execute_episode(self, G, instance_info, lp_iterations_limit, dataset_name, scip_seed=None, demonstration_episode=False):
+    def execute_episode(self, G, instance_info, lp_iterations_limit, dataset_name, scip_seed=None, setting='root_only'):
         # create a SCIP model for G
         hparams = self.hparams
         if hparams['problem'] == 'MAXCUT':
-            model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams, use_heuristics=hparams['use_heuristics'])  #, use_propagation=False)
+            model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams,
+                                                            use_heuristics=(hparams['use_heuristics'] or setting == 'branch_and_cut'),
+                                                            use_random_branching=(setting != 'branch_and_cut'),
+                                                            allow_restarts=(setting == 'branch_and_cut'))  #, use_propagation=False)
         elif hparams['problem'] == 'MVC':
-            model, x = mvc_model(G, use_heuristics=hparams['use_heuristics'])  #, use_heuristics=False, use_propagation=False)
+            model, x = mvc_model(G,
+                                 use_heuristics=(hparams['use_heuristics'] or setting == 'branch_and_cut'),
+                                 use_random_branching=(setting != 'branch_and_cut'),
+                                 allow_restarts=(setting == 'branch_and_cut'))  #, use_propagation=False)
             cut_generator = None
         if hparams['aggressive_separation']:
             set_aggresive_separation(model)
 
         # reset new episode
         self.init_episode(G, x, lp_iterations_limit, cut_generator=cut_generator, instance_info=instance_info,
-                          dataset_name=dataset_name, scip_seed=scip_seed)
+                          dataset_name=dataset_name, scip_seed=scip_seed, setting=setting)
 
         # include self, setting lower priority than the cycle inequalities separator
         model.includeSepa(self, '#CS_TuningDQN', 'Tuning agent', priority=-100000000, freq=1)
@@ -1159,8 +1175,9 @@ class SCIPTuningDQNWorker(Sepa):
         # termination condition is either optimality or lp_iterations_limit.
         # since there is no way to limit lp_iterations explicitly,
         # it is enforced implicitly by the separators, which won't add any more cuts.
-        model.setLongintParam('limits/nodes', 1)  # solve only at the root node
-        model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
+        if setting == 'root_only':
+            model.setLongintParam('limits/nodes', 1)  # solve only at the root node
+            model.setIntParam('separating/maxstallroundsroot', -1)  # add cuts forever
 
         # set environment random seed
         if scip_seed is not None:
@@ -1179,6 +1196,11 @@ class SCIPTuningDQNWorker(Sepa):
         model.optimize()
 
         # compute stats and finish episode
+        if setting == 'branch_and_cut':
+            # retutn episode stats only.
+            self._update_episode_stats()
+            return None, self.episode_stats
+
         trajectory, stats = self.finish_episode()
         return trajectory, stats
 
@@ -1218,17 +1240,58 @@ class SCIPTuningDQNWorker(Sepa):
         self.print(f'Eval no. {global_step}\t| Total time: {time()-start_time}\t| Time/Instance: {avg_times}')
         return global_step, test_summary
 
-    def test(self):
-        """ playground for testing """
+    def run_test(self):
         self.load_datasets()
-        self.load_checkpoint(filepath='/experiments/cut_selection_dqn/results/exp5/24jo87jy/best_validset_90_100_checkpoint.pt')
-        # focus test on
-        dataset = self.datasets['validset_90_100']
-        dataset['instances'] = [dataset['instances'][idx] for idx in [3, 6]]
-        dataset['scip_seed'] = [176]
+        # evaluate 3 models x 6 datasets x 5 insts X 3 seeds x 2 settings (root only and B&C) : 3x6x5x3x2 = 360 evaluations
+        # distributed over 72 workers it is 5 evaluations per worker
+        datasets = self.datasets
+        model_params_files = [f'best_{dataset_name}_params.pkl' for dataset_name in datasets.keys() if 'valid' in dataset_name]
+        settings = ['root_only', 'branch_and_cut']
+        flat_instances = []
+        for model_params_file in model_params_files:
+            for setting in settings:
+                for dataset_name, dataset in datasets.items():
+                    if 'train' in dataset_name:
+                        continue
+                    for inst_idx in range(dataset['ngraphs']):
+                        for scip_seed in dataset['scip_seed']:
+                            flat_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed))
+        idx = self.worker_id - 1
+        eval_instances = []
+        while idx < len(flat_instances):
+            eval_instances.append(flat_instances[idx])
+            idx += self.hparams['num_workers']
+        test_results = []
+        current_model = 'none'
+        self.set_eval_mode()
+        for model_params_file, setting, dataset_name, inst_idx, scip_seed in eval_instances:
+            # set model params to evaluate
+            if model_params_file != current_model:
+                with open(os.path.join(self.hparams['run_dir'], model_params_file), 'rb') as f:
+                    new_params = pickle.load(f)
+                for param, new_param in zip(self.policy_net.parameters(), new_params):
+                    new_param = torch.FloatTensor(new_param).to(self.device)
+                    param.data.copy_(new_param)
+                current_model = model_params_file
 
-        datasets = {'validset_90_100': dataset}
-        stat = self.evaluate(datasets=datasets, ignore_eval_interval=True, log_directly=False)
+            dataset = datasets[dataset_name]
+            lp_iterations_limit = dataset['lp_iterations_limit'] if setting == 'root_only' else 100000
+            G, instance_info = dataset['instances'][inst_idx]
+            self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
+            _, stats = self.execute_episode(G, instance_info,
+                                            lp_iterations_limit=lp_iterations_limit,
+                                            dataset_name=dataset_name,
+                                            scip_seed=scip_seed,
+                                            setting=setting)
+            stats['model'] = model_params_file[:-4]
+            stats['setting'] = setting
+            stats['dataset_name'] = dataset_name
+            stats['inst_idx'] = inst_idx
+            stats['scip_seed'] = scip_seed
+            stats['run_times'] = self.run_times
+            test_results.append([(k, v) for k, v in stats.items()])
+        # send all results back to apex controller and terminate
+        self.send_2_apex_socket.send(pa.serialize(('test_results', self.worker_id, test_results).to_buffer()))
 
     def print(self, expr):
         print(self.print_prefix, expr)

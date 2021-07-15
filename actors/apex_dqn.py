@@ -89,7 +89,11 @@ class ApeXDQN:
         self.actors['learner'] = None
         self.actors['replay_server'] = None
         # set run dir
-        run_id = self.cfg['run_id'] if self.cfg['resume'] else wandb.util.generate_id()
+        if self.cfg['test']:
+            assert self.cfg['run_id'] is not None, "please set --rootdir and --run_id for testing"
+            run_id = self.cfg['run_id']
+        else:
+            run_id = self.cfg['run_id'] if self.cfg['resume'] else wandb.util.generate_id()
         self.cfg['run_id'] = run_id
         self.cfg['run_dir'] = run_dir = os.path.join(self.cfg['rootdir'], run_id)
         if not os.path.exists(run_dir):
@@ -246,6 +250,8 @@ class ApeXDQN:
         # pickle com config to experiment dir
         with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
             pickle.dump(self.cfg['com'], f)
+        with open(os.path.join(self.cfg['run_dir'], 'config.pkl'), 'wb') as f:
+            pickle.dump(self.cfg, f)
         self.print(f'saving communication config to {os.path.join(self.cfg["run_dir"], "com_cfg.pkl")}')
 
         # initialize wandb logger
@@ -286,6 +292,50 @@ class ApeXDQN:
         while True:
             self.send_param_request()
             self.recv_and_log_wandb()
+
+    def test(self):
+        self.print("Testing run_id: ")
+        for name, actor in self.actors.items():
+            if 'worker' in name:
+                actor.run_test.remote()
+        finished = {k: False for k in self.actors.keys() if 'worker' in k}
+        test_results = {}
+        datasets = self.datasets
+        model_params_files = [f'best_{dataset_name}_params.pkl' for dataset_name in datasets.keys() if
+                              'valid' in dataset_name]
+        settings = ['root_only', 'branch_and_cut']
+        for model_params_file in model_params_files:
+            model = model_params_file[:-4]
+            test_results[model] = {}
+            for setting in settings:
+                test_results[model][setting] = {}
+                for dataset_name, dataset in datasets.items():
+                    if 'train' in dataset_name:
+                        continue
+                    test_results[model][setting][dataset_name] = {}
+                    for inst_idx in range(dataset['ngraphs']):
+                        test_results[model][setting][dataset_name][inst_idx] = {}
+                        for scip_seed in dataset['scip_seed']:
+                            test_results[model][setting][dataset_name][inst_idx][scip_seed] = None
+        while True:
+            # receive test results.
+            # save everything to wandb
+            # plot things if needed.
+            packet = self.apex_socket.recv()
+            topic, sender, test_results = pa.deserialize(packet)
+            assert topic == 'test results'
+            self.print(f'received test results from worker_{sender}')
+            for res in test_results:
+                test_results[res['model']][res['setting']][res['dataset_name']][res['inst_idx']][res['scip_seed']] = res
+            finished[f'worker_{sender}'] = True
+            # store results
+            if all(finished.values()):
+                break
+        # save all results to run_dir
+        with open(os.path.join(self.cfg["run_dir"], 'test_results.pkl'), 'wb') as f:
+            pickle.dump(test_results, f)
+        self.print(f'saved test results to {self.cfg["run_dir"]}/test_results.pkl')
+        self.print('Congrats!')
 
     def recv_and_log_wandb(self):
         # todo refactor - receive eval results from all workers, organize and log to wandb
@@ -691,7 +741,10 @@ class ApeXDQN:
 
     def run(self):
         self.setup()
-        self.train()
+        if self.cfg['test']:
+            self.test()
+        else:
+            self.train()
 
     def local_debug(self):
         # setup
