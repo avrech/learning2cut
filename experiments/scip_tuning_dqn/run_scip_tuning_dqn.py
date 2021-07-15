@@ -3,6 +3,7 @@ import os
 import cProfile
 import pstats
 import io
+import pickle
 
 
 if __name__ == '__main__':
@@ -73,6 +74,13 @@ if __name__ == '__main__':
     if not os.path.exists(args.rootdir):
         os.makedirs(args.rootdir)
 
+    # if test, read test config from run_dir
+    if args.test:
+        test_config = os.path.join(config['rootdir'], config['run_id'], 'config.pkl')
+        with open(test_config, 'rb') as f:
+            test_config = pickle.load(f)
+        config.update(test_config)
+    config['test'] = args.test
     # run_id = args.run_id if args.resume else wandb.util.generate_id()
     # config['run_id'] = run_id
     # config['run_dir'] = run_dir = os.path.join(args.rootdir, run_id)

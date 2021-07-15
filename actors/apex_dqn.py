@@ -205,7 +205,7 @@ class ApeXDQN:
         In the setup process actors incrementally bind to random free ports,
         to allow multiple instances running on the same node.
         """
-        assert 'com' not in self.cfg.keys()
+        # assert 'com' not in self.cfg.keys()
         # open main logger socket for receiving logs from all actors
         context = zmq.Context()
         self.apex_socket = context.socket(zmq.PULL)
