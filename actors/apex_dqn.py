@@ -249,17 +249,17 @@ class ApeXDQN:
         for n in range(1, self.num_workers + 1):
             self.actors[f'worker_{n}'] = ray_worker.options(name=f"worker_{n}").remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
 
-        # pickle com config to experiment dir
-        with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
-            pickle.dump(self.cfg['com'], f)
-        with open(os.path.join(self.cfg['run_dir'], 'config.pkl'), 'wb') as f:
-            pickle.dump(self.cfg, f)
-        self.print(f'saving communication config to {os.path.join(self.cfg["run_dir"], "com_cfg.pkl")}')
-
-
         # initialize wandb logger
         # todo activate wandb in test mode for logging test results directly
         if not self.cfg.get('test', False):
+            # pickle configs to experiment dir
+            with open(os.path.join(self.cfg['run_dir'], 'com_cfg.pkl'), 'wb') as f:
+                pickle.dump(self.cfg['com'], f)
+            with open(os.path.join(self.cfg['run_dir'], 'config.pkl'), 'wb') as f:
+                pickle.dump(self.cfg, f)
+            self.print(f'saving communication config to {os.path.join(self.cfg["run_dir"], "com_cfg.pkl")}')
+            self.print(f'saving experiment config to {os.path.join(self.cfg["run_dir"], "config.pkl")}')
+
             self.print('initializing wandb')
             if self.cfg['wandb_offline']:
                 os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'

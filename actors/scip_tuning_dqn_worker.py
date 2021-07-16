@@ -1266,7 +1266,7 @@ class SCIPTuningDQNWorker(Sepa):
         test_results = []
         current_model = 'none'
         self.set_eval_mode()
-        for model_params_file, setting, dataset_name, inst_idx, scip_seed in tqdm(eval_instances, desc='Testing'):
+        for model_params_file, setting, dataset_name, inst_idx, scip_seed in tqdm(eval_instances, desc=f'{self.print_prefix}Testing'):
             # set model params to evaluate
             if model_params_file != current_model:
                 with open(os.path.join(self.hparams['run_dir'], model_params_file), 'rb') as f:
