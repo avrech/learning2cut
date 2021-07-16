@@ -303,8 +303,7 @@ class SCIPTuningDQNWorker(Sepa):
             self.cur_graph = f'trainset graph {graph_idx} seed {scip_seed}'
             # execute episodes, collect experience and append to local_buffer
             trajectory, _ = self.execute_episode(G, instance_info, lp_iter_limit,
-                                                 dataset_name=trainset['dataset_name'],
-                                                 demonstration_episode=self.generate_demonstration_data)
+                                                 dataset_name=trainset['dataset_name'])
 
             local_buffer += trajectory
             if self.i_episode + 1 % len(self.graph_indices) == 0:
