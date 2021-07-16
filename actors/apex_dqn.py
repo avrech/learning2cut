@@ -211,38 +211,40 @@ class ApeXDQN:
         self.apex_socket = context.socket(zmq.PULL)
         apex_port = self.apex_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
         self.print(f"binding to {apex_port} for receiving logs")
-        self.apex_2_learner_socket = context.socket(zmq.PUSH)
-        apex_2_learner_port = self.apex_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
-        self.print(f"binding to {apex_2_learner_port} for requesting params")
-        self.cfg['com'] = {'apex_port': apex_port,
-                           'apex_2_learner_port': apex_2_learner_port}
+        self.cfg['com'] = {'apex_port': apex_port}
 
-        # spawn learner
-        self.print('spawning learner process')
-        ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(self.learner_cls)  # , num_cpus=2
-        # instantiate learner and run its io process in a background thread
-        self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True, run_setup=True)
-        # wait for learner's com config
-        learner_msg = self.apex_socket.recv()
-        topic, body = pa.deserialize(learner_msg)
-        assert topic == 'learner_com_cfg'
-        for k, v in body:
-            self.cfg['com'][k] = v
+        if not self.cfg.get('test', False):
+            self.apex_2_learner_socket = context.socket(zmq.PUSH)
+            apex_2_learner_port = self.apex_2_learner_socket.bind_to_random_port('tcp://127.0.0.1', min_port=10000, max_port=60000)
+            self.print(f"binding to {apex_2_learner_port} for requesting params")
+            self.cfg['com']['apex_2_learner_port'] = apex_2_learner_port
 
-        # spawn replay server
-        self.print('spawning replay server process')
-        ray_replay_server = ray.remote(PrioritizedReplayServer)
-        self.actors['replay_server'] = ray_replay_server.options(name='replay_server').remote(config=self.cfg, run_setup=True)
-        # todo go to replay_server, connect to apex port. bind to others, send com config, and start run
-        # wait for replay_server's com config
-        replay_server_msg = self.apex_socket.recv()
-        topic, body = pa.deserialize(replay_server_msg)
-        assert topic == 'replay_server_com_cfg'
-        for k, v in body:
-            self.cfg['com'][k] = v
+            # spawn learner
+            self.print('spawning learner process')
+            ray_learner = ray.remote(num_gpus=int(self.learner_gpu))(self.learner_cls)  # , num_cpus=2
+            # instantiate learner and run its io process in a background thread
+            self.actors['learner'] = ray_learner.options(name='learner').remote(hparams=self.cfg, use_gpu=self.learner_gpu, run_io=True, run_setup=True)
+            # wait for learner's com config
+            learner_msg = self.apex_socket.recv()
+            topic, body = pa.deserialize(learner_msg)
+            assert topic == 'learner_com_cfg'
+            for k, v in body:
+                self.cfg['com'][k] = v
 
-        # spawn workers and tester
-        self.print('spawning workers and tester processes')
+            # spawn replay server
+            self.print('spawning replay server process')
+            ray_replay_server = ray.remote(PrioritizedReplayServer)
+            self.actors['replay_server'] = ray_replay_server.options(name='replay_server').remote(config=self.cfg, run_setup=True)
+            # todo go to replay_server, connect to apex port. bind to others, send com config, and start run
+            # wait for replay_server's com config
+            replay_server_msg = self.apex_socket.recv()
+            topic, body = pa.deserialize(replay_server_msg)
+            assert topic == 'replay_server_com_cfg'
+            for k, v in body:
+                self.cfg['com'][k] = v
+
+        # spawn workers
+        self.print('spawning worker processes')
         ray_worker = ray.remote(num_gpus=int(self.worker_gpu), num_cpus=1)(self.worker_cls)
         for n in range(1, self.num_workers + 1):
             self.actors[f'worker_{n}'] = ray_worker.options(name=f"worker_{n}").remote(n, hparams=self.cfg, use_gpu=self.worker_gpu)
@@ -254,27 +256,28 @@ class ApeXDQN:
             pickle.dump(self.cfg, f)
         self.print(f'saving communication config to {os.path.join(self.cfg["run_dir"], "com_cfg.pkl")}')
 
+
         # initialize wandb logger
-        # todo wandb
-        self.print('initializing wandb')
+        # todo activate wandb in test mode for logging test results directly
+        if not self.cfg.get('test', False):
+            self.print('initializing wandb')
+            if self.cfg['wandb_offline']:
+                os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
+                os.environ['WANDB_MODE'] = 'dryrun'
+            if not os.path.exists(f"{self.cfg['rootdir']}/wandb"):
+                os.makedirs(f"{self.cfg['rootdir']}/wandb")
+            os.environ['WANDB_DIR'] = f"{self.cfg['rootdir']}/wandb"
+            # todo debug niagara - setting wandb dir fails for some reason, try to change working dir
+            if 'nia' in socket.gethostname():
+                os.chdir(f"{self.cfg['rootdir']}")
 
-        if self.cfg['wandb_offline']:
-            os.environ['WANDB_API_KEY'] = 'd1e669477d060991ed92264313cade12a7995b3d'
-            os.environ['WANDB_MODE'] = 'dryrun'
-        if not os.path.exists(f"{self.cfg['rootdir']}/wandb"):
-            os.makedirs(f"{self.cfg['rootdir']}/wandb")
-        os.environ['WANDB_DIR'] = f"{self.cfg['rootdir']}/wandb"
-        # todo debug niagara - setting wandb dir fails for some reason, try to change working dir
-        if 'nia' in socket.gethostname():
-            os.chdir(f"{self.cfg['rootdir']}")
-
-        wandb.init(resume='allow',
-                   id=self.cfg['run_id'],
-                   project=self.cfg['project'],
-                   config=self.cfg,
-                   # dir=self.cfg['rootdir'],
-                   config_exclude_keys=['datasets', 'com', 'ray_info'],
-                   tags=self.cfg['tags'])
+            wandb.init(resume='allow',
+                       id=self.cfg['run_id'],
+                       project=self.cfg['project'],
+                       config=self.cfg,
+                       # dir=self.cfg['rootdir'],
+                       config_exclude_keys=['datasets', 'com', 'ray_info'],
+                       tags=self.cfg['tags'])
 
         # save pid to run_dir
         pid = os.getpid()
@@ -294,7 +297,7 @@ class ApeXDQN:
             self.recv_and_log_wandb()
 
     def test(self):
-        self.print("Testing run_id: ")
+        self.print(f"Testing run_id {self.cfg['run_id']}. Running workers... ")
         for name, actor in self.actors.items():
             if 'worker' in name:
                 actor.run_test.remote()

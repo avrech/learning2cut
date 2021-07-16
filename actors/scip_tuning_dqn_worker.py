@@ -27,6 +27,7 @@ from copy import deepcopy
 mpl.rc('figure', max_open_warning=0)
 import matplotlib.pyplot as plt
 import wandb
+from tqdm import tqdm
 
 
 StateActionContext = namedtuple('StateActionQValuesContext', ('scip_state', 'action', 'q_values', 'transformer_context'))
@@ -156,28 +157,29 @@ class SCIPTuningDQNWorker(Sepa):
         # for receiving params from learner and requests from replay server
         context = zmq.Context()
         self.send_2_apex_socket = context.socket(zmq.PUSH)  # for sending logs
-        self.sub_socket = context.socket(zmq.SUB)
-        self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
-        self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
-
         # connect to the main apex process
         self.send_2_apex_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["apex_port"]}')
         self.print(f'connecting to apex_port: {hparams["com"]["apex_port"]}')
 
-        # connect to learner pub socket
-        self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
-        self.print(f'connecting to learner_2_workers_pubsub_port: {hparams["com"]["learner_2_workers_pubsub_port"]}')
+        if not hparams.get('test', False):
+            self.sub_socket = context.socket(zmq.SUB)
+            self.sub_socket.setsockopt_string(zmq.SUBSCRIBE, "")  # subscribe to all topics
+            self.sub_socket.setsockopt(zmq.CONFLATE, 1)  # keep only last message received
 
-        # connect to replay_server pub socket
-        self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_workers_pubsub_port"]}')
-        self.print(f'connecting to replay_server_2_workers_pubsub_port: {hparams["com"]["replay_server_2_workers_pubsub_port"]}')
+            # connect to learner pub socket
+            self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["learner_2_workers_pubsub_port"]}')
+            self.print(f'connecting to learner_2_workers_pubsub_port: {hparams["com"]["learner_2_workers_pubsub_port"]}')
+
+            # connect to replay_server pub socket
+            self.sub_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["replay_server_2_workers_pubsub_port"]}')
+            self.print(f'connecting to replay_server_2_workers_pubsub_port: {hparams["com"]["replay_server_2_workers_pubsub_port"]}')
 
 
-        # for sending replay data to buffer
-        context = zmq.Context()
-        self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
-        self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
-        self.print(f'connecting to workers_2_replay_server_port: {hparams["com"]["workers_2_replay_server_port"]}')
+            # for sending replay data to buffer
+            context = zmq.Context()
+            self.worker_2_replay_server_socket = context.socket(zmq.PUSH)
+            self.worker_2_replay_server_socket.connect(f'tcp://127.0.0.1:{hparams["com"]["workers_2_replay_server_port"]}')
+            self.print(f'connecting to workers_2_replay_server_port: {hparams["com"]["workers_2_replay_server_port"]}')
 
         # save pid to run_dir
         pid = os.getpid()
@@ -1240,6 +1242,7 @@ class SCIPTuningDQNWorker(Sepa):
         return global_step, test_summary
 
     def run_test(self):
+        self.print('starts testing')
         self.load_datasets()
         # evaluate 3 models x 6 datasets x 5 insts X 3 seeds x 2 settings (root only and B&C) : 3x6x5x3x2 = 360 evaluations
         # distributed over 72 workers it is 5 evaluations per worker
@@ -1263,7 +1266,7 @@ class SCIPTuningDQNWorker(Sepa):
         test_results = []
         current_model = 'none'
         self.set_eval_mode()
-        for model_params_file, setting, dataset_name, inst_idx, scip_seed in eval_instances:
+        for model_params_file, setting, dataset_name, inst_idx, scip_seed in tqdm(eval_instances, desc='Testing'):
             # set model params to evaluate
             if model_params_file != current_model:
                 with open(os.path.join(self.hparams['run_dir'], model_params_file), 'rb') as f:
