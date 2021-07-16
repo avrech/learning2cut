@@ -80,7 +80,7 @@ def submit_job(config):
         # fh.writelines(f"  --encoder_lp_conv_layers {encoder_lp_conv_layers} ")
         # fh.writelines(f"  --seed {seed} ")
         if args.test:
-            fh.writelines(f"  --test \n")
+            fh.writelines(f"  --test ")
 
     print(f'submitting {sbatch_file}')
     os.system(f'sbatch {sbatch_file}')
