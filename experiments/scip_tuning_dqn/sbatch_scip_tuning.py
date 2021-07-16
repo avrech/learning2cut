@@ -64,9 +64,9 @@ def submit_job(config):
                 fh.writelines(f"  --overfit validset_100_110 validset_150_160 ")
 
         if args.cluster == 'niagara':
-            fh.writelines(f"  --num_workers 56 ")
+            fh.writelines(f"  --num_workers {75 if args.test else 56} ")
         else:
-            fh.writelines(f"  --num_workers 28 ")
+            fh.writelines(f"  --num_workers {31 if args.test else 28} ")
         fh.writelines(f"  --wandb_offline True ")
         fh.writelines(f"  --eps_decay {250 if 'ccmab' in config.get('scip_env', 'tuning_ccmab') else 8000} ")
         fh.writelines(f"  --eps_end 0.1 ")

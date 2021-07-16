@@ -244,7 +244,9 @@ for problem, baselines in results.items():
             else:
                 db_aucs = np.array([stats['db_auc'] for stats in seeds.values()])
                 db_auc_imps = db_aucs / np.array([baselines['default'][graph_size][seed]['db_auc'] for seed in seeds.keys()])
-            summary[baseline].append('{:.4f}{}{:.4f}({:.3f})'.format(db_aucs.mean(), u"\u00B1", db_aucs.std(), db_auc_imps.mean()))
+            # convert improvement ratio to percents
+            db_auc_imps = (db_auc_imps - 1)*100
+            summary[baseline].append('{:.1f}{}{:.1f}% ({:.3f})'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
     df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
     print(f'{"#"*40} {problem} {"#"*40}')
     print(df)
