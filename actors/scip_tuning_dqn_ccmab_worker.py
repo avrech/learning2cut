@@ -32,8 +32,8 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
         self.first_round_action_info = None
         self.first_round = True
 
-    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, instance_info=None, dataset_name='trainset25', scip_seed=None):
-        super().init_episode(G, x, lp_iterations_limit, cut_generator, instance_info, dataset_name, scip_seed)
+    def init_episode(self, G, x, lp_iterations_limit, cut_generator=None, instance_info=None, dataset_name='trainset25', scip_seed=None, setting='root_only'):
+        super().init_episode(G, x, lp_iterations_limit, cut_generator=cut_generator, instance_info=instance_info, dataset_name=dataset_name, scip_seed=scip_seed, setting='root_only')
         self.first_round_action_info = None
         self.first_round = True
 
@@ -85,13 +85,17 @@ class SCIPTuningDQNCCMABWorker(SCIPTuningDQNWorker):
             # SCIP will execute the action,
             # and return here in the next LP round -
             # unless the instance is solved and the episode is done.
+            self.stats_updated = False  # mark false to record relevant stats after this action will make effect
+
+            if self.setting == 'branch_and_cut':
+                # return here and do not save episode history for saving memory
+                return result
 
             # store the current state and action for
             # computing later the n-step rewards and the (s,a,r',s') transitions
             self.episode_history.append(info)
             self.prev_action = available_cuts
             self.prev_state = cur_state
-            self.stats_updated = False  # mark false to record relevant stats after this action will make effect
 
         # If there are no available cuts we simply ignore this round.
         # The stats related to the previous action are already collected, and we are updated.
