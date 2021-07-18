@@ -1293,7 +1293,7 @@ class SCIPTuningDQNWorker(Sepa):
             stats['run_times'] = self.run_times
             test_results.append([(k, v) for k, v in stats.items()])
         # send all results back to apex controller and terminate
-        self.send_2_apex_socket.send(pa.serialize(('test_results', self.worker_id, test_results).to_buffer()))
+        self.send_2_apex_socket.send(pa.serialize(('test_results', self.worker_id, test_results)).to_buffer())
 
     def print(self, expr):
         print(self.print_prefix, expr)
