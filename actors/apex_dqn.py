@@ -326,7 +326,7 @@ class ApeXDQN:
             # plot things if needed.
             packet = self.apex_socket.recv()
             topic, sender, test_results = pa.deserialize(packet)
-            assert topic == 'test results'
+            assert topic == 'test_results'
             self.print(f'received test results from worker_{sender}')
             for res in test_results:
                 test_results[res['model']][res['setting']][res['dataset_name']][res['inst_idx']][res['scip_seed']] = res
