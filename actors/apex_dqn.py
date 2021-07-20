@@ -329,6 +329,7 @@ class ApeXDQN:
             assert topic == 'test_results'
             self.print(f'received test results from worker_{sender}')
             for res in test_results:
+                res = dict(res)
                 test_results[res['model']][res['setting']][res['dataset_name']][res['inst_idx']][res['scip_seed']] = res
             finished[f'worker_{sender}'] = True
             # store results
