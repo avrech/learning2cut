@@ -325,10 +325,10 @@ class ApeXDQN:
             # save everything to wandb
             # plot things if needed.
             packet = self.apex_socket.recv()
-            topic, sender, test_results = pa.deserialize(packet)
+            topic, sender, worker_results = pa.deserialize(packet)
             assert topic == 'test_results'
             self.print(f'received test results from worker_{sender}')
-            for res in test_results:
+            for res in worker_results:
                 res = dict(res)
                 test_results[res['model']][res['setting']][res['dataset_name']][res['inst_idx']][res['scip_seed']] = res
             finished[f'worker_{sender}'] = True
