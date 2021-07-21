@@ -432,7 +432,7 @@ class SCIPTuningDQNWorker(Sepa):
             available_cuts['selected_by_scip'] = np.array([cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
 
             # apply the action
-            if self.hparams['test_baselines']:
+            if self.hparams.get('test_baselines', False):
                 selected_params = self.baseline_separating_params
             else:
                 selected_params = {k: self.hparams['action_set'][k][idx] for k, idx in action_info['selected'].items()}
@@ -1249,7 +1249,7 @@ class SCIPTuningDQNWorker(Sepa):
 
     def run_test(self):
         self.print('starts testing')
-        test_baselines = self.hparams['test_baselines']
+        test_baselines = self.hparams.get('test_baselines', False)
         self.load_datasets()
         # evaluate 3 models x 6 datasets x 5 insts X 3 seeds x 2 settings (root only and B&C) : 3x6x5x3x2 = 360 evaluations
         # distributed over 72 workers it is 5 evaluations per worker
