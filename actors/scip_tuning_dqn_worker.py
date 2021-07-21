@@ -109,6 +109,9 @@ class SCIPTuningDQNWorker(Sepa):
         self.setting = 'root_only'
         self.run_times = []
 
+        # apex dqn test stuff
+        self.baseline_separating_params = None
+
         # debugging stats
         self.training_n_random_actions = 0
         self.training_n_actions = 0
@@ -429,7 +432,10 @@ class SCIPTuningDQNWorker(Sepa):
             available_cuts['selected_by_scip'] = np.array([cut_name in cut_names_selected_by_scip for cut_name in available_cuts['cuts'].keys()])
 
             # apply the action
-            selected_params = {k: self.hparams['action_set'][k][idx] for k, idx in action_info['selected'].items()}
+            if self.hparams['test_baselines']:
+                selected_params = self.baseline_separating_params
+            else:
+                selected_params = {k: self.hparams['action_set'][k][idx] for k, idx in action_info['selected'].items()}
             self.reset_separating_params(selected_params)
             cut_names_selected_by_agent = self.prob_scip_cut_selection()
             available_cuts['selected_by_agent'] = np.array([cut_name in cut_names_selected_by_agent for cut_name in available_cuts['cuts'].keys()])
@@ -1243,11 +1249,14 @@ class SCIPTuningDQNWorker(Sepa):
 
     def run_test(self):
         self.print('starts testing')
+        test_baselines = self.hparams['test_baselines']
         self.load_datasets()
         # evaluate 3 models x 6 datasets x 5 insts X 3 seeds x 2 settings (root only and B&C) : 3x6x5x3x2 = 360 evaluations
         # distributed over 72 workers it is 5 evaluations per worker
         datasets = self.datasets
         model_params_files = [f'best_{dataset_name}_params.pkl' for dataset_name in datasets.keys() if 'valid' in dataset_name]
+        if test_baselines:
+            model_params_files.append('default_params.pkl')
         settings = ['root_only', 'branch_and_cut']
         flat_instances = []
         for model_params_file in model_params_files:
@@ -1271,9 +1280,14 @@ class SCIPTuningDQNWorker(Sepa):
             if model_params_file != current_model:
                 with open(os.path.join(self.hparams['run_dir'], model_params_file), 'rb') as f:
                     new_params = pickle.load(f)
-                for param, new_param in zip(self.policy_net.parameters(), new_params):
-                    new_param = torch.FloatTensor(new_param).to(self.device)
-                    param.data.copy_(new_param)
+                if test_baselines:
+                    # set baseline separating parameters
+                    self.baseline_separating_params = new_params
+                else:
+                    # set GNN params
+                    for param, new_param in zip(self.policy_net.parameters(), new_params):
+                        new_param = torch.FloatTensor(new_param).to(self.device)
+                        param.data.copy_(new_param)
                 current_model = model_params_file
 
             dataset = datasets[dataset_name]

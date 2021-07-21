@@ -306,6 +306,8 @@ class ApeXDQN:
         datasets = self.datasets
         model_params_files = [f'best_{dataset_name}_params.pkl' for dataset_name in datasets.keys() if
                               'valid' in dataset_name]
+        if self.cfg['test_baselines']:
+            model_params_files.append('default_params.pkl')
         settings = ['root_only', 'branch_and_cut']
         for model_params_file in model_params_files:
             model = model_params_file[:-4]
