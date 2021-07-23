@@ -1166,7 +1166,7 @@ class SCIPTuningDQNWorker(Sepa):
                                  use_random_branching=(setting != 'branch_and_cut'),
                                  allow_restarts=(setting == 'branch_and_cut'))  #, use_propagation=False)
             cut_generator = None
-        if hparams['aggressive_separation']:
+        if hparams['aggressive_separation'] and setting == 'root_only':
             set_aggresive_separation(model)
 
         # reset new episode
@@ -1206,6 +1206,11 @@ class SCIPTuningDQNWorker(Sepa):
         if setting == 'branch_and_cut':
             # retutn episode stats only.
             self._update_episode_stats()
+            if self.model.getGap() == 0:
+                self.episode_stats['gap'][-1] = self.model.getGap()
+                self.episode_stats['dualbound'][-1] = self.model.getDualbound()
+                self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()
+
             return None, self.episode_stats
 
         trajectory, stats = self.finish_episode()
@@ -1291,20 +1296,35 @@ class SCIPTuningDQNWorker(Sepa):
                 current_model = model_params_file
 
             dataset = datasets[dataset_name]
-            lp_iterations_limit = dataset['lp_iterations_limit'] if setting == 'root_only' else 100000
+            lp_iterations_limit = dataset['lp_iterations_limit'] if setting == 'root_only' else 1000000000
             G, instance_info = dataset['instances'][inst_idx]
             self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
-            _, stats = self.execute_episode(G, instance_info,
-                                            lp_iterations_limit=lp_iterations_limit,
-                                            dataset_name=dataset_name,
-                                            scip_seed=scip_seed,
-                                            setting=setting)
+            if setting == 'branch_and_cut':
+                stats = {'runs': []}
+                # run 5 times for sufficient statistics
+                for _ in range(5):
+                    _, run_stats = self.execute_episode(G, instance_info,
+                                                    lp_iterations_limit=lp_iterations_limit,
+                                                    dataset_name=dataset_name,
+                                                    scip_seed=scip_seed,
+                                                    setting=setting)
+                    run_stats['run_times'] = self.run_times
+                    stats['runs'].append(run_stats)
+            else:
+                # run root only a single time because we measure db auc only
+                _, stats = self.execute_episode(G, instance_info,
+                                                    lp_iterations_limit=lp_iterations_limit,
+                                                    dataset_name=dataset_name,
+                                                    scip_seed=scip_seed,
+                                                    setting=setting)
+                stats['run_times'] = self.run_times
+
             stats['model'] = model_params_file[:-4]
             stats['setting'] = setting
             stats['dataset_name'] = dataset_name
             stats['inst_idx'] = inst_idx
             stats['scip_seed'] = scip_seed
-            stats['run_times'] = self.run_times
+
             test_results.append([(k, v) for k, v in stats.items()])
         # send all results back to apex controller and terminate
         self.send_2_apex_socket.send(pa.serialize(('test_results', self.worker_id, test_results)).to_buffer())
