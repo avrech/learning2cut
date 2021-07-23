@@ -448,6 +448,7 @@ class SCIPTuningDQNWorker(Sepa):
 
             if self.setting == 'branch_and_cut':
                 # return here and do not save episode history for saving memory
+                self.episode_history.append({'selected': info['selected']})
                 return result
 
             # store the current state and action for
@@ -880,7 +881,7 @@ class SCIPTuningDQNWorker(Sepa):
         discounted_rewards = [np.sum(dualbound_area[idx:] * self.gamma**np.arange(n_rewards-idx)) for idx in range(n_rewards)]
         selected_q_avg = [np.mean(info.get('selected_q_values', torch.zeros((1,))).numpy()) for info in self.episode_history]
         selected_q_std = [np.std(info.get('selected_q_values', torch.zeros((1,))).numpy()) for info in self.episode_history]
-
+        selected_separating_parameters_list = []
         active_applied_ratio = []
         applied_available_ratio = []
         accuracy_list, f1_score_list, jaccard_sim_list = [], [], []
@@ -902,7 +903,7 @@ class SCIPTuningDQNWorker(Sepa):
             f1_score_list.append(f1_score(action_info['selected_by_scip'], action_info['selected_by_agent']))
             intersection = len(set(action_info['selected_by_scip']).intersection(action_info['selected_by_agent']))
             jaccard_sim_list.append(intersection / (len(action_info['selected_by_scip']) + len(action_info['selected_by_agent']) - intersection))
-
+            selected_separating_parameters_list.append({k: self.hparams['action_set'][selected_idx] for k, selected_idx in info['selected'].items()})
             # store for plotting later
             scip_action = info['action_info']['selected_by_scip']
             agent_action = info['action_info']['selected_by_agent']
@@ -957,6 +958,7 @@ class SCIPTuningDQNWorker(Sepa):
                      'discounted_rewards': discounted_rewards,
                      'selected_q_avg': selected_q_avg,
                      'selected_q_std': selected_q_std,
+                     'selected_separating_parameters': selected_separating_parameters_list
                      }
 
         # # todo remove this and store instead test episode_stats, terminal_state, gap_auc, db_auc, and send to logger as is.
@@ -1210,7 +1212,9 @@ class SCIPTuningDQNWorker(Sepa):
                 self.episode_stats['gap'][-1] = self.model.getGap()
                 self.episode_stats['dualbound'][-1] = self.model.getDualbound()
                 self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()
-
+                self.episode_stats['selected_separating_parameters'] = [{k: self.hparams['action_set'][selected_idx]
+                                                                         for k, selected_idx in info['selected'].items()}
+                                                                        for info in self.episode_history]
             return None, self.episode_stats
 
         trajectory, stats = self.finish_episode()
