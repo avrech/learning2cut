@@ -76,7 +76,7 @@ if __name__ == '__main__':
 
     # if test, read test config from run_dir
     if args.test:
-        if 'test_baselines' in config['tags']:
+        if config['run_id'] == 'baseline':
             config['test_baselines'] = True
         else:
             test_config = os.path.join(config['rootdir'], config['run_id'], 'config.pkl')
