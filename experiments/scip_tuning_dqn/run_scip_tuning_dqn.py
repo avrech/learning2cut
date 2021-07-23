@@ -82,6 +82,9 @@ if __name__ == '__main__':
             test_config = os.path.join(config['rootdir'], config['run_id'], 'config.pkl')
             with open(test_config, 'rb') as f:
                 test_config = pickle.load(f)
+            # override paths with the current cluster paths
+            test_config['rootdir'] = config['rootdir']
+            test_config['datadir'] = config['datadir']
             config.update(test_config)
     config['test'] = args.test
     # run_id = args.run_id if args.resume else wandb.util.generate_id()
