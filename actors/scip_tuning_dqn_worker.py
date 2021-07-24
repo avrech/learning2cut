@@ -903,7 +903,7 @@ class SCIPTuningDQNWorker(Sepa):
             f1_score_list.append(f1_score(action_info['selected_by_scip'], action_info['selected_by_agent']))
             intersection = len(set(action_info['selected_by_scip']).intersection(action_info['selected_by_agent']))
             jaccard_sim_list.append(intersection / (len(action_info['selected_by_scip']) + len(action_info['selected_by_agent']) - intersection))
-            selected_separating_parameters_list.append({k: self.hparams['action_set'][selected_idx] for k, selected_idx in info['selected'].items()})
+            selected_separating_parameters_list.append({k: self.hparams['action_set'][selected_idx.item()] for k, selected_idx in info['selected'].items()})
             # store for plotting later
             scip_action = info['action_info']['selected_by_scip']
             agent_action = info['action_info']['selected_by_agent']
@@ -1212,7 +1212,7 @@ class SCIPTuningDQNWorker(Sepa):
                 self.episode_stats['gap'][-1] = self.model.getGap()
                 self.episode_stats['dualbound'][-1] = self.model.getDualbound()
                 self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()
-                self.episode_stats['selected_separating_parameters'] = [{k: self.hparams['action_set'][selected_idx]
+                self.episode_stats['selected_separating_parameters'] = [{k: self.hparams['action_set'][selected_idx.item()]
                                                                          for k, selected_idx in info['selected'].items()}
                                                                         for info in self.episode_history]
             return None, self.episode_stats
