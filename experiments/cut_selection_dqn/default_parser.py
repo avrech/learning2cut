@@ -132,7 +132,7 @@ def get_hparams(args):
             experiment_config = yaml.load(f, Loader=yaml.FullLoader)
     else:
         assert args.configfile.endswith('.pkl')
-        with open(args.configfile, 'wb') as f:
+        with open(args.configfile, 'rb') as f:
             experiment_config = pickle.load(f)
     # general hparam dict for all modules
     hparams = {**experiment_config, **data_config}
