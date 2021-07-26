@@ -105,7 +105,7 @@ if args.test:
     for run_id in args.run_ids:
         all_results = {}
         num_nodes_finished = 0
-        test_dir = f'{os.environ["$SCRATCH"]}/learning2cut/scip_tuning/results/{args.tag}/{run_id}/test{args.test_args}'
+        test_dir = f'{os.environ["SCRATCH"]}/learning2cut/scip_tuning/results/{args.tag}/{run_id}/test{args.test_args}'
         if not os.path.exists(test_dir):
             os.makedirs(test_dir)
         for node_id in range(args.num_test_nodes):
