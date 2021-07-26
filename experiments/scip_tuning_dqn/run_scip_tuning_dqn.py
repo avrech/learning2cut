@@ -67,6 +67,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_test_nodes', type=int, default=1, help='number of compute nodes')
     parser.add_argument('--node_id', type=int, default=0, help='current node id (int)')
     parser.add_argument('--test_dir', type=str, default='tmp_test_results', help='path to save test results')
+
     args = parser.parse_args()
     config = get_hparams(args)
     assert (not args.restart) or (args.resume and args.run_id is not None), 'provide wandb run_id for resuming'

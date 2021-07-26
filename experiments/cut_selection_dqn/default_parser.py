@@ -3,6 +3,7 @@
 
 import argparse
 import yaml
+import pickle
 
 
 def str2bool(v):
@@ -126,9 +127,13 @@ def get_hparams(args):
         data_config = yaml.load(f, Loader=yaml.FullLoader)
 
     # read default experiment config from yaml
-    with open(args.configfile) as f:
-        experiment_config = yaml.load(f, Loader=yaml.FullLoader)
-
+    if args.configfile.endswith('.yaml'):
+        with open(args.configfile) as f:
+            experiment_config = yaml.load(f, Loader=yaml.FullLoader)
+    else:
+        assert args.configfile.endswith('.pkl')
+        with open(args.configfile, 'wb') as f:
+            experiment_config = pickle.load(f)
     # general hparam dict for all modules
     hparams = {**experiment_config, **data_config}
 

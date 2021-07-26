@@ -87,7 +87,11 @@ def submit_job(config):
         # fh.writelines(f"  --seed {seed} ")
         if args.test:
             fh.writelines(f"  --test ")
-            fh.writelines(f"  --configfile $SCRATCH/learning2cut/scip_tuning/results/{args.tag}/{config['run_id']}/config.pkl ")
+            if config['run_id'] == 'baseline':
+                fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
+            else:
+                fh.writelines(f"  --configfile $SCRATCH/learning2cut/scip_tuning/results/{args.tag}/{config['run_id']}/config.pkl ")
+
             test_args = [kv.split('=') for kv in args.test_args.split(',') if kv != ""]
             for k, v in test_args:
                 fh.writelines(f"  --{k} {v} ")
