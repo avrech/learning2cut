@@ -10,6 +10,7 @@ parser.add_argument('--tag', type=str, default='v1', help='experiment tag for wa
 parser.add_argument('--gpu', action='store_true', help='use gpu')
 parser.add_argument('--test', action='store_true', help='test run')
 parser.add_argument('--run_ids', type=str, nargs='+', default=[], help='run_ids to test')
+parser.add_argument('--test_args', type=str, default="", help='string of "key1=val1,key2=val2" k=v pairs separated with commas')
 args = parser.parse_args()
 assert 0 < int(args.hours) < 24
 
@@ -52,7 +53,6 @@ def submit_job(config):
             raise ValueError
         # command
         fh.writelines(f"srun python run_scip_tuning_dqn.py ")
-        fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
         fh.writelines(f"  --rootdir $SCRATCH/learning2cut/scip_tuning/results/{args.tag} ")
         fh.writelines(f"  --datadir $SCRATCH/learning2cut/data ")
         fh.writelines(f"  --data_config ../../data/{config.get('problem', 'MAXCUT').lower()}_data_config.yaml ")
@@ -81,6 +81,12 @@ def submit_job(config):
         # fh.writelines(f"  --seed {seed} ")
         if args.test:
             fh.writelines(f"  --test --use_cycles False --aggressive_separation False")  # todo control cycles and aggressive separation via args
+            fh.writelines(f"  --configfile $SCRATCH/learning2cut/scip_tuning/results/{args.tag}/{config['run_id']}/config.pkl ")
+            test_args = [kv.split('=') for kv in args.test_args.split(',')]
+            for k, v in test_args:
+                fh.writelines(f"  --{k} {v}")
+        else:
+            fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
 
     print(f'submitting {sbatch_file}')
     os.system(f'sbatch {sbatch_file}')
