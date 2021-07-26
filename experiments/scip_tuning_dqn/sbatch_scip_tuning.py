@@ -88,7 +88,7 @@ def submit_job(config):
         if args.test:
             fh.writelines(f"  --test")
             fh.writelines(f"  --configfile $SCRATCH/learning2cut/scip_tuning/results/{args.tag}/{config['run_id']}/config.pkl ")
-            test_args = [kv.split('=') for kv in args.test_args.split(',')]
+            test_args = [kv.split('=') for kv in args.test_args.split(',') if kv != ""]
             for k, v in test_args:
                 fh.writelines(f"  --{k} {v}")
             test_dir = f'{os.environ["$SCRATCH"]}/learning2cut/scip_tuning/results/{args.tag}/{config["run_id"]}/test{args.test_args}'
