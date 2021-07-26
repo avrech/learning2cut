@@ -83,6 +83,8 @@ if __name__ == '__main__':
             with open(test_config, 'rb') as f:
                 test_config = pickle.load(f)
             # override paths with the current cluster paths
+            test_config['aggressive_separation'] = config['aggressive_separation']  # todo control via test args
+            test_config['use_cycles'] = config['use_cycles']
             test_config['rootdir'] = config['rootdir']
             test_config['datadir'] = config['datadir']
             config.update(test_config)

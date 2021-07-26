@@ -73,6 +73,7 @@ reset_maxcuts: 100
 reset_maxcutsroot: 100
 
 # CYCLE INEQUALITIES
+use_cycles: True
 chordless_only: False  #
 simple_cycle_only: True
 enable_chordality_check: False  # set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!

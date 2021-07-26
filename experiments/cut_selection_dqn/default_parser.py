@@ -71,6 +71,7 @@ parser.add_argument("--reset_maxcutsroot", type=int, default=100000, help="defau
 parser.add_argument("--use_general_cuts", type=str2bool, nargs='?', const=True, default=False, help="enable scip default cuts")
 parser.add_argument("--aggressive_separation", type=str2bool, nargs='?', const=True, default=False, help="let scip adding more cuts every round")
 parser.add_argument("--slack_tol", type=float, default=1e-6, help="round slack variables with absolute value less than slack_tol to zero")
+parser.add_argument("--use_cycles", type=str2bool, nargs='?', const=True, default=True, help="use cycle inequalities for MAXCUT models")
 parser.add_argument("--chordless_only", type=str2bool, nargs='?', const=True, default=False, help="add chordless cycles only")
 parser.add_argument("--simple_cycle_only", type=str2bool, nargs='?', const=True, default=False, help="add simple cycles only")
 parser.add_argument("--enable_chordality_check", type=str2bool, nargs='?', const=True, default=False, help="set True to count how many chordless cycles applied, and to filter chordal cycles. WARNING! time consuming!")

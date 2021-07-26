@@ -1161,7 +1161,8 @@ class SCIPTuningDQNWorker(Sepa):
             model, x, cut_generator = maxcut_mccormic_model(G, hparams=hparams,
                                                             use_heuristics=(hparams['use_heuristics'] or setting == 'branch_and_cut'),
                                                             use_random_branching=(setting != 'branch_and_cut'),
-                                                            allow_restarts=(setting == 'branch_and_cut'))  #, use_propagation=False)
+                                                            allow_restarts=(setting == 'branch_and_cut'),
+                                                            use_cycles=hparams.get('use_cycles', True))  #, use_propagation=False)
         elif hparams['problem'] == 'MVC':
             model, x = mvc_model(G,
                                  use_heuristics=(hparams['use_heuristics'] or setting == 'branch_and_cut'),
