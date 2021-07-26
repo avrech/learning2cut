@@ -129,7 +129,7 @@ if args.test:
                         for dsname, instances in dsnames.items():
                             if dsname not in all_results[model][setting].keys():
                                 all_results[model][setting][dsname] = {}
-                            for inst, seeds in dsname.items():
+                            for inst, seeds in instances.items():
                                 if inst not in all_results[model][setting][dsname].keys():
                                     all_results[model][setting][dsname][inst] = {}
                                 for seed, test_runs in seeds.items():
