@@ -91,7 +91,7 @@ def submit_job(config):
             test_args = [kv.split('=') for kv in args.test_args.split(',') if kv != ""]
             for k, v in test_args:
                 fh.writelines(f"  --{k} {v}")
-            test_dir = f'{os.environ["$SCRATCH"]}/learning2cut/scip_tuning/results/{args.tag}/{config["run_id"]}/test{args.test_args}'
+            test_dir = f'{os.environ["SCRATCH"]}/learning2cut/scip_tuning/results/{args.tag}/{config["run_id"]}/test{args.test_args}'
             fh.writelines(f"  --test_dir {test_dir}")
         else:
             fh.writelines(f"  --configfile configs/scip_tuning_dqn.yaml ")
