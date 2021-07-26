@@ -1270,7 +1270,7 @@ class SCIPTuningDQNWorker(Sepa):
         if test_baselines:
             model_params_files.append('default_params.pkl')
         settings = ['root_only', 'branch_and_cut']
-        flat_instances = []
+        all_instances = []
         for model_params_file in model_params_files:
             for setting in settings:
                 for dataset_name, dataset in datasets.items():
@@ -1278,16 +1278,30 @@ class SCIPTuningDQNWorker(Sepa):
                         continue
                     for inst_idx in range(dataset['ngraphs']):
                         for scip_seed in dataset['scip_seed']:
-                            flat_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed))
+                            if setting == 'branch_and_cut':
+                                for test_run_idx in range(5):
+                                    all_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed, test_run_idx))
+                            else:
+                                all_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed, None))
+        # assign instances to current compute node
+        node_id = self.hparams['node_id']
+        num_nodes = self.hparams['num_test_nodes']
+        cur_node_instances = []
+        idx = node_id
+        while idx < len(all_instances):
+            cur_node_instances.append(all_instances[idx])
+            idx += num_nodes
+        # assign instances to current worker
+        num_workers = self.hparams['num_workers']
         idx = self.worker_id - 1
-        eval_instances = []
-        while idx < len(flat_instances):
-            eval_instances.append(flat_instances[idx])
-            idx += self.hparams['num_workers']
+        cur_worker_instances = []
+        while idx < len(cur_node_instances):
+            cur_worker_instances.append(cur_node_instances[idx])
+            idx += num_workers
         test_results = []
         current_model = 'none'
         self.set_eval_mode()
-        for model_params_file, setting, dataset_name, inst_idx, scip_seed in tqdm(eval_instances, desc=f'{self.print_prefix}Testing'):
+        for model_params_file, setting, dataset_name, inst_idx, scip_seed, test_run_idx in tqdm(cur_worker_instances, desc=f'{self.print_prefix}Testing'):
             # set model params to evaluate
             if model_params_file != current_model:
                 with open(os.path.join(self.hparams['run_dir'], model_params_file), 'rb') as f:
@@ -1306,32 +1320,18 @@ class SCIPTuningDQNWorker(Sepa):
             lp_iterations_limit = dataset['lp_iterations_limit'] if setting == 'root_only' else 1000000000
             G, instance_info = dataset['instances'][inst_idx]
             self.cur_graph = f'{dataset_name} graph {inst_idx} seed {scip_seed}'
-            if setting == 'branch_and_cut':
-                stats = {'runs': []}
-                # run 5 times for sufficient statistics
-                for _ in range(5):
-                    _, run_stats = self.execute_episode(G, instance_info,
-                                                    lp_iterations_limit=lp_iterations_limit,
-                                                    dataset_name=dataset_name,
-                                                    scip_seed=scip_seed,
-                                                    setting=setting)
-                    run_stats['run_times'] = self.run_times
-                    stats['runs'].append(run_stats)
-            else:
-                # run root only a single time because we measure db auc only
-                _, stats = self.execute_episode(G, instance_info,
-                                                    lp_iterations_limit=lp_iterations_limit,
-                                                    dataset_name=dataset_name,
-                                                    scip_seed=scip_seed,
-                                                    setting=setting)
-                stats['run_times'] = self.run_times
-
+            _, stats = self.execute_episode(G, instance_info,
+                                            lp_iterations_limit=lp_iterations_limit,
+                                            dataset_name=dataset_name,
+                                            scip_seed=scip_seed,
+                                            setting=setting)
+            stats['run_times'] = self.run_times
             stats['model'] = model_params_file[:-4]
             stats['setting'] = setting
             stats['dataset_name'] = dataset_name
             stats['inst_idx'] = inst_idx
             stats['scip_seed'] = scip_seed
-
+            stats['test_run_idx'] = test_run_idx
             test_results.append([(k, v) for k, v in stats.items()])
         # send all results back to apex controller and terminate
         self.send_2_apex_socket.send(pa.serialize(('test_results', self.worker_id, test_results)).to_buffer())

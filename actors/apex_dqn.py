@@ -321,7 +321,8 @@ class ApeXDQN:
                     for inst_idx in range(dataset['ngraphs']):
                         test_results[model][setting][dataset_name][inst_idx] = {}
                         for scip_seed in dataset['scip_seed']:
-                            test_results[model][setting][dataset_name][inst_idx][scip_seed] = None
+                            test_results[model][setting][dataset_name][inst_idx][scip_seed] = {}
+
         while True:
             # receive test results.
             # save everything to wandb
@@ -332,15 +333,16 @@ class ApeXDQN:
             self.print(f'received test results from worker_{sender}')
             for res in worker_results:
                 res = dict(res)
-                test_results[res['model']][res['setting']][res['dataset_name']][res['inst_idx']][res['scip_seed']] = res
+                test_results[res['model']][res['setting']][res['dataset_name']][res['inst_idx']][res['scip_seed']][res['test_run_idx']] = res
             finished[f'worker_{sender}'] = True
             # store results
             if all(finished.values()):
                 break
         # save all results to run_dir
-        with open(os.path.join(self.cfg["run_dir"], 'test_results.pkl'), 'wb') as f:
+        test_results_file = f'{self.cfg["test_dir"]}/test_results_{self.cfg["node_id"]+1}_of_{self.cfg["num_test_nodes"]}.pkl'
+        with open(test_results_file, 'wb') as f:
             pickle.dump(test_results, f)
-        self.print(f'saved test results to {self.cfg["run_dir"]}/test_results.pkl')
+        self.print(f'saved test results to {test_results_file}')
         self.print('Congrats!')
 
     def recv_and_log_wandb(self):
