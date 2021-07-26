@@ -141,7 +141,7 @@ if args.test:
         if num_nodes_finished == args.num_test_nodes:
             all_results_file = os.path.join(test_dir, f'test_results.pkl')
             with open(all_results_file, 'wb') as f:
-                pickle.dump(all_results, all_results_file)
+                pickle.dump(all_results, f)
 
             print('Saved all results to:', all_results_file)
             print('Congrats!')
