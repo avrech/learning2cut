@@ -1212,9 +1212,9 @@ class SCIPTuningDQNWorker(Sepa):
                 self.episode_stats['gap'][-1] = self.model.getGap()
                 self.episode_stats['dualbound'][-1] = self.model.getDualbound()
                 self.episode_stats['lp_iterations'][-1] = self.model.getNLPIterations()
-                self.episode_stats['selected_separating_parameters'] = [{k: self.hparams['action_set'][k][selected_idx.item()]
-                                                                         for k, selected_idx in info['selected'].items()}
-                                                                        for info in self.episode_history]
+            self.episode_stats['selected_separating_parameters'] = [{k: self.hparams['action_set'][k][selected_idx.item()]
+                                                                     for k, selected_idx in info['selected'].items()}
+                                                                    for info in self.episode_history]
             return None, self.episode_stats
 
         trajectory, stats = self.finish_episode()
