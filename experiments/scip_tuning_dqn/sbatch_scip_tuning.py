@@ -64,7 +64,7 @@ def submit_job(config):
                 fh.writelines(f"  --overfit validset_100_110 validset_150_160 ")
 
         if args.cluster == 'niagara':
-            fh.writelines(f"  --num_workers {60 if args.test else 56} ")
+            fh.writelines(f"  --num_workers {70 if args.test else 56} ")
         else:
             fh.writelines(f"  --num_workers {31 if args.test else 28} ")
         fh.writelines(f"  --wandb_offline True ")

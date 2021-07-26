@@ -484,6 +484,8 @@ class SCIPTuningDQNWorker(Sepa):
         self.model.setRealParam('separating/intsupportfac', params.get('intsupportfac', 0.1))
         self.model.setIntParam('separating/maxcutsroot', params.get('maxcutsroot', 2000))
         self.model.setRealParam('separating/minorthoroot', params.get('minorthoroot', 0.9))
+        self.model.setIntParam('separating/maxcuts', params.get('maxcutsroot', 100))
+        self.model.setRealParam('separating/minortho', params.get('minorthoroot', 0.9))
 
     def prob_scip_cut_selection(self):
         available_cuts = self.model.getCuts()
