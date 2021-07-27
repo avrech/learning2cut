@@ -119,7 +119,7 @@ for smr, title in zip([summary_root_only] + list(summary_bnc.values()), ['rooton
 columns = ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot', 'minorthoroot']
 parameters_found = {}
 for lp_round in range(20):
-    parameters_found[lp_round] = [mdp_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223]['selected_separating_parameters'][lp_round][k] for k in columns]
+    parameters_found[lp_round] = [mdp_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['selected_separating_parameters'][lp_round][k] for k in columns]
 # append parameters found for CCMAB
 q_values = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['q_values']
 q_keys = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['q_keys']
