@@ -100,7 +100,40 @@ The script will test all baselines on the local machine one by one
 without multiprocessing. 
 Results will be saved to a csv and png files. 
 
-## Experiment 2 - Contextual Bandits
+## Experiment 2 - Learning SCIP Separating Parameters
+In this experiment we investigate two RL formulations for tuning SCIP, 
+combinatorial contextual multi-armed bandit (CCMAB) and MDP.  
+Actually, since we do not really have standard bandits setting, i.e
+partial returns for each arm and a joint reward function of those returns,
+we call it CCMAB but in fact optimize 1-step MDPs.
+To run these two experiments on compute canada, enter
+`experiments/scip_tuning_dqn`, and take a look in `sbatch_scip_tuning.py`. 
+This script allows submitting multiple whole node jobs to Graham or Niagara. 
+Inside this script edit the parameters grid search space you want to test. 
+This can be useful for both basic hparam tuning, 
+and for running multiple training jobs with different seeds for robustness 
+evaluation of the RL algorithm.   
+The following command line will submit multiple jobs, saving their output to 
+a path depending on the cluster you use. 
+Niagara example:  
+> python sbatch_scip_tuning.py --cluster niagara --tag reported_runs --hours 12
+
+Synchronize the `wandb` run dirs to wandb cloud once the jobs finished:
+> python ../sync_wandb_runs.py --dir $SCRATCH/learning2cut/scip_tuning/results/reported_runs/outfiles/
+
+Select `run_id`s to test and evaluate them on the test sets by:  
+> python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 && python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 --test_args use_cycles=False,set_aggressive_separation=False
+
+This will execute extensive tests on tons of cpus, saving their results in `test` directories inside each `run_dir`
+Run again after all jobs completed:
+> python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 && python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 --test_args use_cycles=False,set_aggressive_separation=False
+
+and analyize the results with:
+
+> python --savedir $SCRATCH/learning2cut/scip_tuning/results/reported_runs --mdp_run_id 3n3uxetn --ccmab_run_id 130m0n5o
+> python --savedir $SCRATCH/learning2cut/scip_tuning/results/reported_runs --mdp_run_id 3n3uxetn --ccmab_run_id 130m0n5o --test_args use_cycles=False,set_aggressive_separation=False
+
+This will summarize root only episode results and full branch and cut results, and write everything to `.csv` files.
 
 ## Running Experiments
 ### Single run 
