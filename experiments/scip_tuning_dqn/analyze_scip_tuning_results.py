@@ -105,7 +105,7 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
 savedir = f'{ROOTDIR}/{PROBLEM}_test{args.test_args}'
 if not os.path.exists(savedir):
     os.makedirs(savedir)
-    
+
 # summary[baseline].append('{:.1f}{}{:.1f}% ({:.3f})'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
 for smr, title in zip([summary_root_only] + list(summary_bnc.values()), ['rootonly_dbaucimp', 'bnc_nsolved', 'bnc_soltimes', 'bnc_gaps', 'bnc_nnodes']):
     df = pd.DataFrame(smr, columns=columns)
@@ -121,8 +121,8 @@ parameters_found = {}
 for lp_round in range(20):
     parameters_found[lp_round] = [mdp_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223]['selected_separating_parameters'][lp_round][k] for k in columns]
 # append parameters found for CCMAB
-q_values = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223]['q_values']
-q_keys = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223]['q_keys']
+q_values = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['q_values']
+q_keys = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['q_keys']
 ccmab_selection = {k: idx for k, idx in zip (q_keys, np.argmax(q_values, axis=1))}
 action_set = {k: [0.1, 0.5, 1] for k in ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac']}
 action_set['maxcutsroot'] = [5, 15, 2000]
