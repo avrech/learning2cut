@@ -1218,9 +1218,13 @@ class SCIPTuningDQNWorker(Sepa):
             self.episode_stats['selected_separating_parameters'] = [{k: self.hparams['action_set'][k][selected_idx.item()]
                                                                      for k, selected_idx in info['selected'].items()}
                                                                     for info in self.episode_history]
+            self.episode_stats['scip_status'] = self.model.getStatus()
+            self.episode_stats['terminal_state'] = self.terminal_state
+
             return None, self.episode_stats
 
         trajectory, stats = self.finish_episode()
+        stats['scip_status'] = self.model.getStatus()
         return trajectory, stats
 
     # done
@@ -1282,7 +1286,7 @@ class SCIPTuningDQNWorker(Sepa):
                                 for test_run_idx in range(5):
                                     all_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed, test_run_idx))
                             else:
-                                all_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed, None))
+                                all_instances.append((model_params_file, setting, dataset_name, inst_idx, scip_seed, 0))
         # assign instances to current compute node
         node_id = self.hparams['node_id']
         num_nodes = self.hparams['num_test_nodes']
