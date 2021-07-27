@@ -7,6 +7,7 @@ from utils.functions import get_normalized_areas, truncate
 from tqdm import tqdm
 from argparse import ArgumentParser
 import yaml
+import wandb
 
 
 parser = ArgumentParser()
@@ -55,6 +56,7 @@ columns = ['Method', 'Validated On'] + [f"{'Val' if 'valid' in dsname else 'Test
 # Gap vs. Time scatter plots
 for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_results, mdp_results, baseline_results]):
     for model, stats in model_statss.items():
+        
         if 'default' not in model:
             line_root_only = [method, f"Val {'-'.join(model.split('_')[2:-1])}"]
             bnc_lines = {k: [method, f"Val {'-'.join(model.split('_')[2:-1])}"] for k in summary_bnc.keys()}
@@ -65,8 +67,8 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
 
         for dsname in dataset_names:
             root_only_stats = stats['root_only'][dsname]
-            db_aucs = [100 * (res[seed][0]['db_auc_improvement']-1) for res in root_only_stats.values() for seed in SEEDS]
-            db_auc_std = np.mean([np.std([100*(res[seed][0]['db_auc_improvement']-1)  for seed in SEEDS]) for res in root_only_stats.values()])
+            db_aucs = [100 * (list(res[seed].values())[0]['db_auc_improvement']-1) for res in root_only_stats.values() for seed in SEEDS]
+            db_auc_std = np.mean([np.std([100*(list(res[seed].values())[0]['db_auc_improvement']-1)  for seed in SEEDS]) for res in root_only_stats.values()])
             line_root_only.append("{:.1f} {} {:.1f}%".format(np.mean(db_aucs), u"\u00B1", db_auc_std))
 
             bnc_stats = stats['branch_and_cut'][dsname]
@@ -93,7 +95,7 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
             # take mean over all samples
             bnc_lines['solved'].append(f"{sum(solved)}/{len(solved)}")
             bnc_lines['soltime'].append("{:.1f} {} {:.1f}".format(np.mean(soltimes), u"\u00B1", np.mean(soltime_stds)))
-            bnc_lines['gap'].append("{:.1f}% {} {:.1f}%".format(np.mean(gaps), u"\u00B1", np.mean(gap_stds)))
+            bnc_lines['gap'].append("{:.1f} {} {:.1f}%".format(np.mean(gaps), u"\u00B1", np.mean(gap_stds)))
             bnc_lines['nnodes'].append("{} {} {}".format(int(np.mean(nnodes)), u"\u00B1", int(np.mean(nnodes_stds))))
 
             # line.append("{:.1f} {} {:.1f}%".format(np.mean(db_aucs), u"\u00B1", np.std(db_aucs)))
@@ -119,7 +121,7 @@ for smr, title in zip([summary_root_only] + list(summary_bnc.values()), ['rooton
 columns = ['objparalfac', 'dircutoffdistfac', 'efficacyfac', 'intsupportfac', 'maxcutsroot', 'minorthoroot']
 parameters_found = {}
 for lp_round in range(20):
-    parameters_found[lp_round] = [mdp_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['selected_separating_parameters'][lp_round][k] for k in columns]
+    parameters_found[lp_round] = [list(mdp_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223].values())[0]['selected_separating_parameters'][lp_round][k] for k in columns]
 # append parameters found for CCMAB
 q_values = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['q_values']
 q_keys = ccmab_results['best_validset_40_50_params']['root_only']['validset_40_50'][0][223][0]['q_keys']
