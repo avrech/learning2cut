@@ -102,12 +102,12 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
             summary_bnc[k].append(line)
 
 
-
+savedir = f'{ROOTDIR}/{PROBLEM}_test{args.test_args}'
 # summary[baseline].append('{:.1f}{}{:.1f}% ({:.3f})'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
 for smr, title in zip([summary_root_only] + list(summary_bnc.values()), ['rootonly_dbaucimp', 'bnc_nsolved', 'bnc_soltimes', 'bnc_gaps', 'bnc_nnodes']):
     df = pd.DataFrame(smr, columns=columns)
     print(df)
-    csvfile = f'{ROOTDIR}/{PROBLEM}_rl_{title}_results.csv'
+    csvfile = f'{savedir}/{PROBLEM}_rl_{title}_results.csv'
     df.to_csv(csvfile)
     print(f'saved {PROBLEM} RL {title} results to: {csvfile}')
 
@@ -129,7 +129,7 @@ parameters_found['Average Tuning'] = [1, 0.1, 1, 0.1, 2000, 0.5]
 parameters_found['Exhaustive Tuning'] = [1, 1, 0.5, 0.1, 15, 0.5]
 df = pd.DataFrame.from_dict(parameters_found, orient='index', columns=columns)
 print(df)
-csvfile = f'{ROOTDIR}/{PROBLEM}_rl_val40-50_inst0_seed223_trajectory.csv'
+csvfile = f'{savedir}/{PROBLEM}_rl_val40-50_inst0_seed223_trajectory.csv'
 df.to_csv(csvfile)
 print(f'saved {PROBLEM} RL example trajectory to: {csvfile}')
 
