@@ -103,6 +103,9 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
 
 
 savedir = f'{ROOTDIR}/{PROBLEM}_test{args.test_args}'
+if not os.path.exists(savedir):
+    os.makedirs(savedir)
+    
 # summary[baseline].append('{:.1f}{}{:.1f}% ({:.3f})'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
 for smr, title in zip([summary_root_only] + list(summary_bnc.values()), ['rootonly_dbaucimp', 'bnc_nsolved', 'bnc_soltimes', 'bnc_gaps', 'bnc_nnodes']):
     df = pd.DataFrame(smr, columns=columns)
