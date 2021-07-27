@@ -65,8 +65,8 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
 
         for dsname in dataset_names:
             root_only_stats = stats['root_only'][dsname]
-            db_aucs = [100 * (res[seed][None]['db_auc_improvement']-1) for res in root_only_stats.values() for seed in SEEDS]
-            db_auc_std = np.mean([np.std([100*(res[seed][None]['db_auc_improvement']-1)  for seed in SEEDS]) for res in root_only_stats.values()])
+            db_aucs = [100 * (res[seed][0]['db_auc_improvement']-1) for res in root_only_stats.values() for seed in SEEDS]
+            db_auc_std = np.mean([np.std([100*(res[seed][0]['db_auc_improvement']-1)  for seed in SEEDS]) for res in root_only_stats.values()])
             line_root_only.append("{:.1f} {} {:.1f}%".format(np.mean(db_aucs), u"\u00B1", db_auc_std))
 
             bnc_stats = stats['branch_and_cut'][dsname]
