@@ -121,24 +121,24 @@ problems = ['mvc', 'maxcut']
 baselines = ['default', '15_random', '15_most_violated', 'all_cuts', 'overfit_avg', 'tuned_avg', 'tuned', 'adaptive']
 if os.path.exists(f'{ROOTDIR}/all_baselines_results.pkl'):
     with open(f'{ROOTDIR}/all_baselines_results.pkl', 'rb') as f:
-        results = pickle.load(f)
+        room4imp_all_baselines_results = pickle.load(f)
 # else:
 #     results = {p: {b: {} for b in baselines} for p in problems}
 for p in problems:
-    if p not in results.keys():
-        results[p] = {}
+    if p not in room4imp_all_baselines_results.keys():
+        room4imp_all_baselines_results[p] = {}
     for b in baselines:
-        if b not in results[p].keys():
-            results[p][b] = {}
+        if b not in room4imp_all_baselines_results[p].keys():
+            room4imp_all_baselines_results[p][b] = {}
 
 for problem, graphs in data.items():
     for baseline in tqdm(baselines, desc='run simple baselines'):
         graphs = data[problem]
         for (graph_size, (g, info)), lp_iterations_limit in zip(graphs.items(), [5000, 7000, 10000]):
-            if graph_size not in results[problem][baseline].keys():
-                results[problem][baseline][graph_size] = {}
+            if graph_size not in room4imp_all_baselines_results[problem][baseline].keys():
+                room4imp_all_baselines_results[problem][baseline][graph_size] = {}
             for seed in SEEDS:
-                if seed in results[problem][baseline][graph_size].keys():
+                if seed in room4imp_all_baselines_results[problem][baseline][graph_size].keys():
                     continue
                 if problem == 'mvc':
                     model, _ = mvc_model(g)
@@ -209,9 +209,10 @@ for problem, graphs in data.items():
                 sepa.update_stats()
                 stats = sepa.stats
                 stats['db_auc'] = sum(get_normalized_areas(t=stats['lp_iterations'], ft=stats['dualbound'], t_support=lp_iterations_limit, reference=info['optimal_value']))
-                results[problem][baseline][graph_size][seed] = stats
+                room4imp_all_baselines_results[problem][baseline][graph_size][seed] = stats
+
 with open(f'{ROOTDIR}/all_baselines_results.pkl', 'wb') as f:
-    pickle.dump(results, f)
+    pickle.dump(room4imp_all_baselines_results, f)
 # with open(f'{ROOTDIR}/all_baselines_results.pkl', 'rb') as f:
 #     results = pickle.load(f)
 
@@ -223,7 +224,7 @@ pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
 
 adaptive_params_dict = {}
-for problem, baselines in results.items():
+for problem, baselines in room4imp_all_baselines_results.items():
     columns = [gs for gs in data[problem].keys()]
     summary = {baseline: [] for baseline in baselines.keys()}
     for baseline, baseline_results in baselines.items():
@@ -316,7 +317,7 @@ for problem, baselines in results.items():
 
 
 colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'overfit_avg': 'k', 'tuned_avg': 'pink', 'tuned': 'r', 'adaptive': 'g'}
-for problem in results.keys():
+for problem in room4imp_all_baselines_results.keys():
     fig1, axes1 = plt.subplots(3, 3, sharex='col')  # dual bound vs. lp iterations
     fig2, axes2 = plt.subplots(3, 3, sharex='col')  # dual bound vs. solving time
 
@@ -329,12 +330,12 @@ for problem in results.keys():
         fig8, axes8 = plt.subplots(3, 1)  # scip cuts frac vs. round idx
         fig9, axes9 = plt.subplots(3, 1)  # jaccard similarity vs. round idx
         for row, seed in enumerate(SEEDS):
-            for baseline in results[problem].keys():
+            for baseline in room4imp_all_baselines_results[problem].keys():
                 if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated', 'overfit_avg'] and col == 1 or (baseline in ['tuned_avg', 'tuned', 'adaptive'] and col == 2):
                     label = baseline
                 else:
                     label = None
-                stats = results[problem][baseline][graph_size][seed]
+                stats = room4imp_all_baselines_results[problem][baseline][graph_size][seed]
                 axes1[row, col].plot(stats['lp_iterations'], stats['dualbound'], colors[baseline], label=label)
                 axes2[row, col].plot(stats['solving_time'], stats['dualbound'], colors[baseline], label=label)
                 if baseline in ['default', 'tuned', 'adaptive', 'tuned_avg', 'overfit_avg']:
@@ -428,6 +429,8 @@ for problem in results.keys():
         fig8.savefig(f'{ROOTDIR}/{problem}_{graph_size}_scip_cuts_frac.png')
         fig9.tight_layout(rect=[0, 0.03, 1, 0.95])
         fig9.savefig(f'{ROOTDIR}/{problem}_{graph_size}_cuts_jaccard_similarity.png')
+        for fg in [fig3, fig4, fig5, fig6, fig7, fig8, fig9]:
+            plt.close(fg)
 
     for row, gs in enumerate(SEEDS):
         axes1[row, 0].set_ylabel(f'Seed={seed}')
@@ -445,6 +448,7 @@ for problem in results.keys():
     fig2.tight_layout(rect=[0, 0.03, 1, 0.95])
     fig1.savefig(f'{ROOTDIR}/{problem}_db_vs_lpiters.png')
     fig2.savefig(f'{ROOTDIR}/{problem}_db_vs_soltime.png')
+    plt.close(fig1)
+    plt.close(fig2)
 
-
-print('finished')
+print('finished root node analysis')
