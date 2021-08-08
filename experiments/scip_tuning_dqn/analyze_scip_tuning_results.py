@@ -52,11 +52,10 @@ summary_bnc = {'solved': [], 'soltime': [], 'gap': [], 'nnodes': []}
 dataset_names = [dsname for dsname in list(mdp_results.values())[0]['root_only'].keys() if 'validset' in dsname] + \
                 [dsname for dsname in list(mdp_results.values())[0]['root_only'].keys() if 'testset' in dsname]
 columns = ['Method', 'Validated On'] + [f"{'Val' if 'valid' in dsname else 'Test'} {'-'.join(dsname.split('_')[1:])}" for dsname in dataset_names]
-
+wandb_run_ids = {}
 # Gap vs. Time scatter plots
 for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_results, mdp_results, baseline_results]):
     for model, stats in model_statss.items():
-        
         if 'default' not in model:
             line_root_only = [method, f"Val {'-'.join(model.split('_')[2:-1])}"]
             bnc_lines = {k: [method, f"Val {'-'.join(model.split('_')[2:-1])}"] for k in summary_bnc.keys()}
@@ -102,7 +101,38 @@ for method, model_statss in zip(['CCMAB', 'MDP', 'Average Tuning'], [ccmab_resul
         summary_root_only.append(line_root_only)
         for k, line in bnc_lines.items():
             summary_bnc[k].append(line)
+        # upload trajectories to wandb for plotting
 
+        run = wandb.init(project='learning2cut',
+                         config={**{'method': method, 'model': model, 'problem': PROBLEM},
+                                 **dict([kv.split('=') for kv in args.test_args.split(',')])},
+                         tags=['reported_test_results'],
+                         reinit=True
+                         )
+        wandb_run_ids[f'{method}_{model}'] = run.id
+        max_steps = 0
+        for dstats in stats['branch_and_cut'].values():
+            for gstats in dstats.values():
+                for seed_stats in gstats.values():
+                    for run_stats in seed_stats.values():
+                        max_steps = max(max_steps, len(run_stats['solving_time']))
+        for step in range(max_steps):
+            log_dict = {}
+            for dsname, dstats in stats['branch_and_cut'].items():
+                for gidx, gstats in dstats.items():
+                    for seed, seed_stats in gstats.items():
+                        for runidx, run_stats in seed_stats.items():
+                            if step >= len(run_stats['solving_time']):
+                                continue
+                            prefix = f'{dsname}/g{gidx}s{seed}r{runidx}_'
+                            for metric in ['solving_time', 'processed_nodes', 'lp_iterations', 'lp_rounds', 'gap', 'dualbound', 'ncuts', 'ncuts_applied']:
+                                log_dict[prefix+metric] = run_stats[metric][step]
+            wandb.log(log_dict, step=step)
+        run.finish()
+
+
+for k, v in wandb_run_ids.items():
+    print(k, v)
 
 savedir = f'{ROOTDIR}/{PROBLEM}_test{args.test_args}'
 if not os.path.exists(savedir):

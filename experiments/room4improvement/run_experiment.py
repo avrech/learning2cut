@@ -222,11 +222,13 @@ pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
 pd.set_option('display.max_colwidth', None)
-
+labels = {'default': 'Default', '15_random': '15 Random', '15_most_violated': '15 Most Efficacious', 'all_cuts': 'All Cuts', 'overfit_avg': 'Average Tuning',  'tuned_avg': 'Average Tuning2',  'tuned': 'Individual Tuning',  'adaptive': 'Individaul Adaptive Tuning'}
 adaptive_params_dict = {}
+
 for problem, baselines in room4imp_all_baselines_results.items():
     columns = [gs for gs in data[problem].keys()]
-    summary = {baseline: [] for baseline in baselines.keys()}
+    summary = {labels[baseline]: [] for baseline in baselines.keys()}
+    baselines.pop('tuned_avg')
     for baseline, baseline_results in baselines.items():
         for graph_size, seeds in baseline_results.items():
             # for MVC shorten the support to 100 lp iters.
@@ -247,7 +249,8 @@ for problem, baselines in room4imp_all_baselines_results.items():
                 db_auc_imps = db_aucs / np.array([baselines['default'][graph_size][seed]['db_auc'] for seed in seeds.keys()])
             # convert improvement ratio to percents
             db_auc_imps = (db_auc_imps - 1)*100
-            summary[baseline].append('{:.1f}{}{:.1f}% ({:.3f})'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
+            summary[labels[baseline]].append('{:.1f}{}{:.1f}%'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
+            # summary[labels[baseline]].append('{:.1f}{}{:.1f}% ({:.3f})'.format(db_auc_imps.mean(), u"\u00B1", db_auc_imps.std(), db_aucs.mean()))
     df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
     print(f'{"#"*40} {problem} {"#"*40}')
     print(df)
@@ -293,21 +296,21 @@ for problem, baselines in room4imp_all_baselines_results.items():
         for col in columns:
             for seed in seeds.keys():
                 tuned_params_row.append(scip_tuned_best_config[problem][graph_size][seed][col])
-        summary['tuned'] = tuned_params_row
+        summary[labels['tuned']] = tuned_params_row
         # append a row for the overfit avg params
         overfit_avg_params_row = []
         scip_overfit_avg_best_config[problem][graph_size] = overfit_avg_param_dict = {k:v for k, v in scip_overfit_avg_best_config[problem][graph_size]}
         for col in columns:
             for seed in seeds.keys():
                 overfit_avg_params_row.append(overfit_avg_param_dict[col])
-        summary['overfit_avg'] = overfit_avg_params_row
+        summary[labels['overfit_avg']] = overfit_avg_params_row
         # append a row for the tuned avg params
         tuned_avg_params_row = []
         scip_tuned_avg_best_config[problem][graph_size] = tuned_avg_param_dict = {k:v for k, v in scip_tuned_avg_best_config[problem][graph_size]}
         for col in columns:
             for seed in seeds.keys():
                 tuned_avg_params_row.append(tuned_avg_param_dict[col])
-        summary['tuned_avg'] = tuned_avg_params_row
+        summary[labels['tuned_avg']] = tuned_avg_params_row
 
         columns = [col for col in columns for _ in range(3)]
         df = pd.DataFrame.from_dict(summary, orient='index', columns=columns)
@@ -317,6 +320,7 @@ for problem, baselines in room4imp_all_baselines_results.items():
 
 
 colors = {'default': 'b', '15_random': 'gray', '15_most_violated': 'purple', 'all_cuts': 'orange', 'overfit_avg': 'k', 'tuned_avg': 'pink', 'tuned': 'r', 'adaptive': 'g'}
+
 for problem in room4imp_all_baselines_results.keys():
     fig1, axes1 = plt.subplots(3, 3, sharex='col')  # dual bound vs. lp iterations
     fig2, axes2 = plt.subplots(3, 3, sharex='col')  # dual bound vs. solving time
@@ -332,7 +336,7 @@ for problem in room4imp_all_baselines_results.keys():
         for row, seed in enumerate(SEEDS):
             for baseline in room4imp_all_baselines_results[problem].keys():
                 if (baseline in ['default', 'all_cuts'] and col == 0) or baseline in ['15_random', '15_most_violated', 'overfit_avg'] and col == 1 or (baseline in ['tuned_avg', 'tuned', 'adaptive'] and col == 2):
-                    label = baseline
+                    label = labels[baseline]
                 else:
                     label = None
                 stats = room4imp_all_baselines_results[problem][baseline][graph_size][seed]
@@ -358,17 +362,17 @@ for problem in room4imp_all_baselines_results.keys():
                     maxcutsroot_active = np.nonzero(ncuts_applied == maxcutsroot)[0]
                     # plt.plot(xs, ys, '-gS', markevery=markers_on)
                     lpiters = stats['lp_iterations'][1:]
-                    axes3[row].step(lpiters, ncuts_applied, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
-                    axes4[row].step(lpiters, ncuts_applied/ncuts_generated, '-D', markevery=maxcutsroot_active.tolist(), label=baseline)
+                    axes3[row].step(lpiters, ncuts_applied, '-D', markevery=maxcutsroot_active.tolist(), label=labels[baseline])
+                    axes4[row].step(lpiters, ncuts_applied/ncuts_generated, '-D', markevery=maxcutsroot_active.tolist(), label=labels[baseline])
                     # plot avg min orthogonality w.r.t the selected group and avg efficacy
                     sel_minortho_avg = np.array(stats['selected_minortho_avg'], dtype=np.float)
                     sel_minortho_std = np.array(stats['selected_minortho_std'], dtype=np.float)
                     sel_efficacy_avg = np.array(stats['selected_efficacy_avg'], dtype=np.float)
                     sel_efficacy_std = np.array(stats['selected_efficacy_std'], dtype=np.float)
                     x_axis = np.arange(len(sel_minortho_avg))
-                    axes5[row].plot(x_axis, sel_minortho_avg, lw=1, label=baseline, color=colors[baseline])
+                    axes5[row].plot(x_axis, sel_minortho_avg, lw=1, label=labels[baseline], color=colors[baseline])
                     axes5[row].fill_between(x_axis, sel_minortho_avg + sel_minortho_std, sel_minortho_avg - sel_minortho_std, facecolor=colors[baseline], alpha=0.4)
-                    axes6[row].plot(x_axis, sel_efficacy_avg, lw=1, label=baseline, color=colors[baseline])
+                    axes6[row].plot(x_axis, sel_efficacy_avg, lw=1, label=labels[baseline], color=colors[baseline])
                     axes6[row].fill_between(x_axis, sel_efficacy_avg + sel_efficacy_std, sel_efficacy_avg - sel_efficacy_std, facecolor=colors[baseline], alpha=0.4)
 
                     # plot cutting plane selection similarity metrics
@@ -381,9 +385,9 @@ for problem in room4imp_all_baselines_results.keys():
                         jaccard_similarity = intersections / (scip_ncuts_applied + policy_ncuts_applied - intersections)
                         scip_cuts_coverage = intersections / scip_ncuts_applied
                         scip_frac = intersections / policy_ncuts_applied
-                        axes7[row].step(lpiters, scip_cuts_coverage, label=baseline)
-                        axes8[row].step(lpiters, scip_frac, label=baseline)
-                        axes9[row].step(lpiters, jaccard_similarity, label=baseline)
+                        axes7[row].step(lpiters, scip_cuts_coverage, label=labels[baseline])
+                        axes8[row].step(lpiters, scip_frac, label=labels[baseline])
+                        axes9[row].step(lpiters, jaccard_similarity, label=labels[baseline])
                     # dis_minortho_avg = np.array(stats['discarded_minortho_avg'], dtype=np.float)
                     # dis_minortho_std = np.array(stats['discarded_minortho_std'], dtype=np.float)
                     # dis_efficacy_avg = np.array(stats['discarded_efficacy_avg'], dtype=np.float)
@@ -392,9 +396,9 @@ for problem in room4imp_all_baselines_results.keys():
                     # dis_minortho_std[dis_minortho_std == None] = 0
                     # dis_efficacy_avg[dis_efficacy_avg == None] = 0
                     # dis_efficacy_std[dis_efficacy_std == None] = 0
-                    # axes5[row].plot(x_axis, dis_minortho_avg, lw=2, label=baseline, color=colors[baseline])
+                    # axes5[row].plot(x_axis, dis_minortho_avg, lw=2, label=labels[baseline], color=colors[baseline])
                     # axes5[row].fill_between(x_axis, dis_minortho_avg + dis_minortho_std, dis_minortho_avg - dis_minortho_std, facecolor=colors[baseline], alpha=0.5)
-                    # axes6[row].plot(x_axis, dis_efficacy_avg, lw=2, label=baseline, color=colors[baseline])
+                    # axes6[row].plot(x_axis, dis_efficacy_avg, lw=2, label=labels[baseline], color=colors[baseline])
                     # axes6[row].fill_between(x_axis, dis_efficacy_avg + dis_efficacy_std, dis_efficacy_avg - dis_efficacy_std, facecolor=colors[baseline], alpha=0.5)
 
         for row, seed in enumerate(SEEDS):
