@@ -157,7 +157,7 @@ and analyize the results with:
 
 This will summarize and write the _root only_  and _branch-and-cut_ results to `.csv` files.  
 
-## Direct cut Selection
+## Experiment 3 - Direct cut Selection
 ### Single run 
 There are two run files, `run_single_thread_dqn.py` for single thread training, and `run_cut_selection_dqn.py` for distributed training.
 The distributed version is useful also for debugging and development, as each actor can run independently of the others. 
@@ -188,10 +188,8 @@ In order to debug a remote actors, run:
 
 This will restart the debugged actor main loop in the debugger, so one can step into the actor code, while the rest of remote actors keep running.  
 
-
-## Experiments
 ### Cycles Variability
-Inside `learning2cut/experiments/dqn` run:  
+Inside `learning2cut/experiments/cut_selection_dqn` run:  
 > python cycles_variability.py --logdir results/cycles_variability [--simple_cycle_only --chordless_only --enable_chordality_check] --record_cycles  
 
 `cycles_variability.py` will solve each graph in `validset_20_30` and `validset_50_60` 10 times with seeds ranging from 0 to 9. In each separation round it will save the cycles generated along with other related stats.  
