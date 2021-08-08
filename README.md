@@ -1,8 +1,37 @@
-# learning2cut  
-Reinforcement Learning for Cut Selection  
+# Learning to cut with SCIP
+This repository contains reinforcement learning environments
+for playing with cut selection in SCIP, 
+as well as code for extensive preliminary experiments with our baselines. 
+The project is described in detail in my Master's thesis on 
+Combinatorial Optimization with Graph Reinforcement Learning.  
 
-## TODO
-- [ ] Deploy on Graham
+You will find here:
+- RL Environments for 
+  - Adapting SCIP cut selection parameters to individual ILP instances.
+  - Adapting SCIP cut selection parameters to every LP round. 
+  - Direct cut selection, i.e explicitly choosing the cuts which will b applied to the LP in each LP round.
+- Distributed Apex-DQN framework for training with debug capability of remote actors.  
+- For Compute Canada users:  
+  - Scripts and guidelines how to run multiple whole node experiments exploiting the massive compute power provided by the various clusters.
+  - Complementary experiments showing the room for improvement on MAXCUT and MVC.
+  
+
+The project requires a modified version of `scipoptsuite-6.0.2` which
+will be publicly available soon.  
+We are working on integrating this work into Ecole and providing a fancy
+gym-like clean environment, 
+but however, if you are interested in direct control of every line in SCIP, 
+this project will provide you with good starting point and many workarounds.
+
+This implementation is based on `scipoptsuite-6.0.2` and `PySCIPOpt`,
+
+# Acknowledgements
+This work was done during my Master's studies at the Technion
+under the supervision of Prof. Shie Mannor and Prof. Tamir Hazan.
+The project was developed together with @gasse and @akazachk from the Polytechnique university in Montreal.
+I thank @dchetelat for his help in the initial steps of the project, 
+and in particular for improving the mathematical formulation of the MAXCUT problem.
+I also thank @cyoon1729 for providing me with initial Ape-X DQN implementation.
 
 ## Installation  
 0. Clone this repo, create a `virtualenv` and install requirements:  
