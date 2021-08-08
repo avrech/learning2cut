@@ -1,78 +1,72 @@
 # Learning to cut with SCIP
-This repository contains reinforcement learning environments
-for playing with cut selection in SCIP, 
-as well as code for extensive preliminary experiments with our baselines. 
-The project is described in detail in my Master's thesis on 
-Combinatorial Optimization with Graph Reinforcement Learning.  
+This repository implements the Learning to Cut chapter in my Master's thesis on Combinatorial Optimization with Graph Reinforcement Learning.  
 
 You will find here:
-- RL Environments for 
+- RL Environments for playing with cut selection in SCIP: 
   - Adapting SCIP cut selection parameters to individual ILP instances.
   - Adapting SCIP cut selection parameters to every LP round. 
   - Direct cut selection, i.e explicitly choosing the cuts which will b applied to the LP in each LP round.
-- Distributed Apex-DQN framework for training with debug capability of remote actors.  
+- Ape-X DQN framework for:
+  - distributed RL training on your PC or on clusters using `slurm` scheduler (e.g. Compute Canada). 
+  - development with debug capabilities of remote actors.
+  - extensive evaluation of multiple models/instances/seeds etc.
 - For Compute Canada users:  
   - Scripts and guidelines how to run multiple whole node experiments exploiting the massive compute power provided by the various clusters.
   - Complementary experiments showing the room for improvement on MAXCUT and MVC.
   
-
-The project requires a modified version of `scipoptsuite-6.0.2` which
-will be publicly available soon.  
-We are working on integrating this work into Ecole and providing a fancy
-gym-like clean environment, 
-but however, if you are interested in direct control of every line in SCIP, 
+I'm working on integrating the RL part of this project into [Ecole](https://doc.ecole.ai/py/en/stable/), 
+a fancy gym-like SCIP RL environment (currently supports branching rules some more).   
+Nevertheless, if you are interested in direct control of every line in SCIP, 
 this project will provide you with good starting point and many workarounds.
 
-This implementation is based on `scipoptsuite-6.0.2` and `PySCIPOpt`,
+## Installation
 
-# Acknowledgements
-This work was done during my Master's studies at the Technion
-under the supervision of Prof. Shie Mannor and Prof. Tamir Hazan.
-The project was developed together with @gasse and @akazachk from the Polytechnique university in Montreal.
-I thank @dchetelat for his help in the initial steps of the project, 
-and in particular for improving the mathematical formulation of the MAXCUT problem.
-I also thank @cyoon1729 for providing me with initial Ape-X DQN implementation.
+### Installing on your desktop
+The following instructions were tested successfully on Ubuntu 18.04 with `gcc 7.5.0` and `cuda 10.2`.
+1. Add `export SCIPOPTDIR=/path/to/SCIP/installation/dir` to your `~/.bashrc`.
+2. Open terminal and install SCIP:  
+> $ git clone https://github.com/avrech/scipoptsuite-6.0.2-avrech.git  
+> $ cd scipoptsuite-6.0.2-avrech  
+> $ cmake -Bbuild -H. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$SCIPOPTDIR  
+> $ cmake --build build  
+> $ cd build  
+> $ make install  
 
-## Installation  
-0. Clone this repo, create a `virtualenv` and install requirements:  
-> git clone https://github.com/avrech/learning2cut.git  
-> virtualenv --python=python3 venv  
-> source venv/bin/activate
-> pip install -r learning2cut/requirements.txt  
+3. Create virtual environment and install this repo:
+> $ virtualenv --python=python3 venv  
+> $ source venv/bin/activate  
+> $ git clone https://github.com/avrech/learning2cut.git
+> $ pip install -r learning2cut/requirements.txt
+> $ pip install -e learning2cut
 
-1. Append `export SCIPOPTDIR=/home/my-scip` to your `~/.bashrc`.  
-2. Clone and install my `scipoptsuite-6.0.2` version (includes some extra features needed for the RL environment):  
-> git clone https://github.com/avrech/scipoptsuite-6.0.2-avrech.git  
-> cd scipoptsuite-6.0.2-avrech  
-> cmake -Bbuild -H. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=$SCIPOPTDIR  
-> cmake --build build  
-> cd build  
-> make install  
-
-3. Install my branch on PySCIPOpt  
+3. Install PySCIPOpt:  
 > git clone https://github.com/ds4dm/PySCIPOpt.git  
 > cd PySCIPOpt  
 > git checkout ml-cutting-planes  
 > pip install --debug_option='--debug' .  
 
-4. Follow the instructions [here](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html) to install `torch_geometric`.  
+4. Sign up to [Weights & Biases](https://www.wandb.com/), and follow the [instructions](https://docs.wandb.com/quickstart) to connect your device to your `wandb` account. 
 
-5. Install the rest of requirements  
-> cd learning2cut  
-> pip install -r requirements.txt  
+Custom `torch_geometric` installtion instructions according to your `cuda` version can be found [here](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html).  
 
-6. Sign up to [Weights & Biases](https://www.wandb.com/), and follow the [instructions](https://docs.wandb.com/quickstart) to connect your device to your `wandb` account. 
 
-## Running on Compute Canada
-### Graham
-* `pyarrow` cannot be installed directly, and must be loaded using `module load arrow`.  
+### Installing on Compute Canada
+Do not install the virtualenv with the provided `requirements.txt`!
+The installation on compute Canada is tricky, 
+because packages like torch, torch-geometric, pyarrow and more require
+certain gcc and cuda versions and probably changing the software environment to an older one. 
+Here I provide with a recipe that worked on Graham and Niagara as of writing these lines.
+
+
+#### Graham workarounds
+* `pyarrow` cannot be installed directly. Instead, load it by `module load arrow`.  
 * `torch_geometric` is compiled for specific `torch` and `cuda` versions. For available `torch` versions contact CC support. 
 * The following setup was tested successfully on Graham:
 > $ module load StdEnv/2018.3 gcc/7.3.0 python/3.7.4 arrow  
-$ virtualenv env && source env/bin/activate  
-(env) ~ $ pip install torch==1.4.0 torch_geometric torchvision torch-scatter torch-sparse torch-cluster torch-spline-conv -U --force  
-(env) ~ $ python -c "import pyarrow; torch_geometric; import torch_cluster; import torch_cluster.graclus_cpu"  
-(env) ~ $  
+> $ virtualenv env && source env/bin/activate  
+> (env) ~ $ pip install torch==1.4.0 torch_geometric torchvision torch-scatter torch-sparse torch-cluster torch-spline-conv -U --force  
+> (env) ~ $ python -c "import pyarrow; torch_geometric; import torch_cluster; import torch_cluster.graclus_cpu"  
+> (env) ~ $  
 ### Niagara
 * The virtualenv worked with `module load NiaEnv/2018a` inside the sbatch scripts.   
 
@@ -92,7 +86,7 @@ Or on `Niagara` (recommended):
 - Saves stats of the solving process for three baselines `default`, `15_random` and `15_most_violated`.  
 
 
-## Experiment 1 - Room for Improvement
+## Experiment 1 - Show the Room for Improvement
 This experiment requires massive computation power. 
 The code was built to run on Niagara.  
 ### Import data
@@ -102,75 +96,74 @@ Inside `learning2cut/experiments/room4improvement` run:
 The script will save the first instance of each validation set generated by `data/generate_data.py` 
 into a `data.pkl` for the whole experiment.    
 
-### Compute `scip_tuned` baseline
+### Compute _individual_tuning_ baseline
 On Niagara, inside `learning2cut/experiments/room4improvement` run:   
 > python run_scip_tuned.py --rootdir $SCRATCH/room4improvement --nnodes 20 --ncpus_per_node 80  
 
 Jobs for finding `scip_tuned` policy will be submitted. After all jobs have finished, run the same command line again to finalize stuff. 
 In a case something went wrong in the first run, the script should be invoked again until it finishes the work.      
 
-### Compute `scip_adaptive` baseline
+### Compute _individual_adaptive_tuning_ baseline
 On Niagara, inside `learning2cut/experiments/room4improvement` run:  
 > python run_scip_adaptive.py --rootdir $SCRATCH/room4improvement --nnodes 20 --ncpus_per_node 80  
 
 Running this command line `2K` times will generate adaptive policy for `K` lp rounds. 
 
-### Compute `scip_tuned_avg` baseline 
+### Compute _average_tuning_ baseline 
 On Niagara, inside `learning2cut/experiments/room4improvement` run:    
 > python run_scip_tuned_avg.py --rootdir $SCRATCH/room4improvement --datadir $SCRATCH/learning2cut/data --nnodes 20 --ncpus_per_node 60  
 
-After all jobs finish run again to finalize stuff. 
+After all jobs finished, run again to finalize stuff. 
 
 ### Evaluate all baselines ###
 To compare all baselines in terms of solving time, 
 run again `run_experiment` pointing to the rootdir where
-`scip_tuned`, `scip_tuned_avg` and `scip_adaptive` results are stored. 
+_individual_tuning_, _average_tuning_ and _inidividual_adaptive_tuning_ results are stored. 
 The script will test all baselines on the local machine one by one
 without multiprocessing. 
-Results will be saved to a csv and png files. 
+Results will be saved to csv and png files. 
 
 ## Experiment 2 - Learning SCIP Separating Parameters
 In this experiment we investigate two RL formulations for tuning SCIP, 
 combinatorial contextual multi-armed bandit (CCMAB) and MDP.  
-Actually, since we do not really have standard bandits setting, i.e
-partial returns for each arm and a joint reward function of those returns,
-we call it CCMAB but in fact optimize 1-step MDPs.
-To run these two experiments on compute canada, enter
-`experiments/scip_tuning_dqn`, and take a look in `sbatch_scip_tuning.py`. 
-This script allows submitting multiple whole node jobs to Graham or Niagara. 
+The CCMAB problem is actually a 1-step MDP, and is solved using the same 
+DQN algorithm.
+To experiment with these two formulations on compute canada, enter
+`experiments/scip_tuning_dqn`, and run `sbatch_scip_tuning.py`. 
+This script allows submitting multiple whole node jobs on Graham or Niagara. 
 Inside this script edit the parameters grid search space you want to test. 
 This can be useful for both basic hparam tuning, 
-and for running multiple training jobs with different seeds for robustness 
-evaluation of the RL algorithm.   
+and for running multiple training jobs with different seeds so that the robustness 
+of the RL algorithm can be evaluated.   
 The following command line will submit multiple jobs, saving their output to 
 a path depending on the cluster you use. 
 Niagara example:  
-> python sbatch_scip_tuning.py --cluster niagara --tag reported_runs --hours 12
+> $ python sbatch_scip_tuning.py --cluster niagara --tag reported_runs --hours 12
 
 Synchronize the `wandb` run dirs to wandb cloud once the jobs finished:
-> python ../sync_wandb_runs.py --dir $SCRATCH/learning2cut/scip_tuning/results/reported_runs/outfiles/
+> $ python ../sync_wandb_runs.py --dir $SCRATCH/learning2cut/scip_tuning/results/reported_runs/outfiles/
 
-Select `run_id`s to test and evaluate them on the test sets by:  
-> python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 && python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 --test_args use_cycles=False,set_aggressive_separation=False
+Select `run_id`s to test and evaluate them on the test sets:  
+> $ python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 && python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 --test_args use_cycles=False,set_aggressive_separation=False
 
 This will execute extensive tests on tons of cpus, saving their results in `test` directories inside each `run_dir`
 Run again after all jobs completed:
-> python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 && python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 --test_args use_cycles=False,set_aggressive_separation=False
+> $ python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 && python sbatch_scip_tuning.py --cluster niagara --hours 3 --test --run_ids 130m0n5o  3n3uxetn baseline --tag reported_runs --num_test_nodes 10 --test_args use_cycles=False,set_aggressive_separation=False
 
 and analyize the results with:
 
-> python --savedir $SCRATCH/learning2cut/scip_tuning/results/reported_runs --mdp_run_id 3n3uxetn --ccmab_run_id 130m0n5o
-> python --savedir $SCRATCH/learning2cut/scip_tuning/results/reported_runs --mdp_run_id 3n3uxetn --ccmab_run_id 130m0n5o --test_args use_cycles=False,set_aggressive_separation=False
+> $ python analyze_scip_tuning_results.py --savedir $SCRATCH/learning2cut/scip_tuning/results/reported_runs --mdp_run_id 3n3uxetn --ccmab_run_id 130m0n5o
+> $ python analyze_scip_tuning_results.py --savedir $SCRATCH/learning2cut/scip_tuning/results/reported_runs --mdp_run_id 3n3uxetn --ccmab_run_id 130m0n5o --test_args use_cycles=False,set_aggressive_separation=False
 
-This will summarize root only episode results and full branch and cut results, and write everything to `.csv` files.
+This will summarize and write the _root only_  and _branch-and-cut_ results to `.csv` files.  
 
-## Running Experiments
+## Direct cut Selection
 ### Single run 
-There are two run files, `run_single_thread_dqn.py` for single thread training, and `run_apex_dqn.py` for distributed training.
+There are two run files, `run_single_thread_dqn.py` for single thread training, and `run_cut_selection_dqn.py` for distributed training.
 The distributed version is useful also for debugging and development, as each actor can run independently of the others. 
-`run_apex_dqn.py` allows debugging and updating the code of a specific actor while the entire system keep running. 
+`run_cut_selection_dqn.py` allows debugging and updating the code of a specific actor while the entire system keep running. 
 Run
-> python run_apex_dqn.py --rootdir /path/to/save/results --configfile /path/to/config/file --use-gpu  
+> $ python run_cut_selection_dqn.py --rootdir /path/to/save/results --configfile /path/to/config/file --use-gpu    
 
 Example config files can be found at `learning2cut/experiments/dqn/configs`. Those files conveniently pack parameters for training. 
 All parameters are controlled also from command line, where the command line args override the config file setting. 
@@ -191,7 +184,7 @@ Example:
 
 ### Debugging Remote Actors
 In order to debug a remote actors, run:
-> python run_apex_dqn.py --resume --run_id <run_id> --restart [--restart-actors <list of actors>] --debug-actor <actor_name>  
+> python run_cut_selection_dqn.py --resume --run_id <run_id> --restart [--restart-actors <list of actors>] --debug-actor <actor_name>  
 
 This will restart the debugged actor main loop in the debugger, so one can step into the actor code, while the rest of remote actors keep running.  
 
@@ -214,16 +207,6 @@ The `recorded_cycles` are stored in `stats` alongside the `dualbound`, `lp_itera
 - `is_chordless`: True if the cycle has no chords else False  
 - `applied`: True if the cycle was selected to the LP else False  
 
-### Experiment 1
-Inside `learning2cut/experiments/dqn` run:  
-> python run_apex_dqn.py --rootdir results/exp1 --configfile configs/exp1-overfitVal25-demoLossOnly-fixedTrainingScipSeed.yaml --use-gpu  
-
-### Experiment 2
-Inside `learning2cut/experiments/dqn` run:  
-> python run_apex_dqn.py --use-gpu --rootdir results/exp2 --configfile configs/exp2-overfitVal25-demoLossOnly.yaml
-
-
-
 
 |Done |Exp | Train Set | Behaviour | Loss | SCIP Seed  | Goal | Results |
 |---|:---:|:---:|:---:|:---:|:---:|:---|:---:|
@@ -233,3 +216,10 @@ Inside `learning2cut/experiments/dqn` run:
 | &#9744; |4 | Random | Demo | Demo+DQN | Random | See convergence to "interesting" policy | [here](https://app.wandb.ai/avrech/learning2cut/runs/1jmcareo)|
 | &#9744; |5 | Random | Demo+DQN| Demo+DQN | Random | Improving over SCIP | [here](https://wandb.ai/avrech/learning2cut/runs/1jmcareo?workspace=user-avrech)|
 
+# Acknowledgements
+This work was done during my Master's studies at the Technion
+under the supervision of Prof. Shie Mannor and Prof. Tamir Hazan.
+The research was done in collaboration with @gasse and @akazachk from the Polytechnique university in Montreal.  
+I thank @dchetelat for his helpful comments in the initial steps of the project, 
+and in particular for improving the mathematical formulation of the MAXCUT problem.  
+I also thank @cyoon1729 for providing me with initial Ape-X DQN implementation.
