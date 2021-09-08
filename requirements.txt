@@ -70,7 +70,7 @@ optuna==1.4.0
 pandas==1.0.3
 pathtools==0.1.2
 pbr==5.4.5
-Pillow==7.1.2
+Pillow==8.3.2
 pkg-resources==0.0.0
 plotly==4.13.0
 plyfile==0.7.2
