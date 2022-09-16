@@ -53,7 +53,7 @@ Keras-Preprocessing==1.1.2
 kiwisolver==1.2.0
 -e git+https://github.com/avrech/learning2cut.git@a3b98e83259e633c5d90fb74bf3f7a97b6c2e145#egg=learning2cut
 llvmlite==0.32.1
-Mako==1.1.2
+Mako==1.2.2
 Markdown==3.2.2
 MarkupSafe==1.1.1
 matplotlib==3.2.1
